@@ -1,6 +1,6 @@
 import { readDocumentTextProjection } from './application/documentTextProjection';
 import { markdownTaskMarkerPattern } from '../../src/foundation/markdownTaskList';
-import { editorScrollIntoView } from './editor/scrollEffects';
+import { createEditorScrollOwnership, editorManagedScroll, editorScrollIntoView } from './editor/scrollEffects';
 import { latexDelimitersFacet } from './editor/mathSyntaxPreference';
 import { markdownSyntaxPublication } from './editor/markdownSyntaxPublication';
 import { editorViewportBounds } from './editor/editorViewportBounds';
@@ -537,7 +537,6 @@ export function createEditor({
   let onBlockActionPointerLeave: (() => void) | null = null;
   let onSourcePositionPointerDown: ((event: PointerEvent) => void) | null = null;
   let editorHistoryRuntime: EditorHistoryRuntime | null = null;
-  let historyScrollGuard: EditorHistoryViewport | null = null;
   let pendingTableHistoryFocus: { replayId: number; semanticTarget: string; stableChecks: number } | null = null;
   let pendingRenderedHistoryFocus: { replayId: number; run: () => boolean } | null = null;
   let onHistoryKeyDown: ((event: KeyboardEvent) => void) | null = null;
@@ -2002,13 +2001,6 @@ export function createEditor({
     return coords.top >= viewport.top && coords.bottom <= viewport.bottom;
   };
 
-  const suppressHistoryAutoScrollAt = (position: number): boolean => {
-    void position;
-    // History restoration owns the single final reveal. Allowing CodeMirror to
-    // scroll first would expose a nearest-edge frame before contextual placement.
-    return historyScrollGuard !== null;
-  };
-
   const prepareRenderedHistoryPosition = (
     position: number,
     previousViewport: EditorHistoryViewport,
@@ -2719,10 +2711,7 @@ export function createEditor({
       Prec.high(searchMatchField),
       diagnosticDataField,
       diagnosticField,
-      EditorView.scrollHandler.of((editorView, range) => {
-        void editorView;
-        return suppressHistoryAutoScrollAt(range.head);
-      }),
+      createEditorScrollOwnership(),
       EditorView.updateListener.of((update) => {
         if (update.docChanged || update.selectionSet) onStatisticsChange?.();
         if (update.docChanged && outlineCache) {
@@ -3098,8 +3087,6 @@ export function createEditor({
       commitActiveTableInput();
     },
     runNativeHistory(direction) {
-      const guard = viewportController.captureHistorySnapshot();
-      historyScrollGuard = guard;
       // Undo/Redo is a new navigation intent. Cancel any input settlement or
       // bounded scrollToLine observation before the native transaction can
       // replace a rendered target and schedule its own history reveal.
@@ -3108,61 +3095,55 @@ export function createEditor({
       const beforeDocument = view.state.doc;
       let nativeSelectionOwnsTarget = false;
       let semanticTargetPosition: number | null = null;
-      try {
-        const target = {
-          state: view.state,
-          dispatch(transaction: Transaction) {
-            const listTarget = readListHistoryFocus(transaction.state);
-            const tableTarget = tableHistoryFocusAdapter.read(transaction.state);
-            semanticTargetPosition = listTarget?.position ?? (tableTarget && !tableTarget.contentOnly
-              ? tableHistorySourcePosition(transaction.state, tableTarget) : null);
-            const nativeSelection = transaction.newSelection.main;
-            if (!listTarget && !tableTarget) {
-              // Native history already restores the real text selection. Only
-              // prefer it when it belongs to the replayed edit, so an unrelated
-              // old selection cannot replace a rendered control's target.
-              transaction.changes.iterChangedRanges((_from, _to, from, to) => {
-                nativeSelectionOwnsTarget ||= nativeSelection.from <= to && nativeSelection.to >= from;
-              });
-            }
-            // Native history bypasses transaction filters. Accept its original
-            // transaction and the semantic selection in one view update, before
-            // any native caret reveal or intermediate source frame can paint.
-            if (semanticTargetPosition === null || listTarget?.preserveSelection && nativeSelection.head === semanticTargetPosition) view.dispatch(transaction);
-            else view.dispatch([transaction, transaction.state.update({
-              selection: { anchor: semanticTargetPosition },
-              annotations: Transaction.addToHistory.of(false),
-              scrollIntoView: Boolean(listTarget)
-            })]);
+      const target = {
+        state: view.state,
+        dispatch(transaction: Transaction) {
+          const listTarget = readListHistoryFocus(transaction.state);
+          const tableTarget = tableHistoryFocusAdapter.read(transaction.state);
+          semanticTargetPosition = listTarget?.position ?? (tableTarget && !tableTarget.contentOnly
+            ? tableHistorySourcePosition(transaction.state, tableTarget) : null);
+          const nativeSelection = transaction.newSelection.main;
+          if (!listTarget && !tableTarget) {
+            // Native history already restores the real text selection. Only
+            // prefer it when it belongs to the replayed edit, so an unrelated
+            // old selection cannot replace a rendered control's target.
+            transaction.changes.iterChangedRanges((_from, _to, from, to) => {
+              nativeSelectionOwnsTarget ||= nativeSelection.from <= to && nativeSelection.to >= from;
+            });
           }
-        };
-        const applied = direction === 'undo' ? undo(target) : redo(target);
-        if (applied && !view.dom.contains(view.dom.ownerDocument.activeElement)) {
-          // Replaying a change can synchronously remove the focused table or
-          // rendered-block editor. Keep keyboard ownership inside the editor
-          // while the richer boundary restore resolves its replacement target.
-          // Let CodeMirror synchronize its native DOM selection as well. A raw
-          // contentDOM.focus() can adopt the detached input's old DOM range and
-          // publish an unrelated document selection before table restoration.
-          view.focus();
+          // Native history bypasses transaction filters. Accept its original
+          // transaction and the semantic selection in one view update, before
+          // any native caret reveal or intermediate source frame can paint.
+          if (semanticTargetPosition === null || listTarget?.preserveSelection && nativeSelection.head === semanticTargetPosition) view.dispatch(transaction);
+          else view.dispatch([transaction, transaction.state.update({
+            selection: { anchor: semanticTargetPosition },
+            annotations: [Transaction.addToHistory.of(false), editorManagedScroll.of(true)],
+            scrollIntoView: Boolean(listTarget)
+          })]);
         }
-        return {
-          applied,
-          targetPosition: applied ? semanticTargetPosition
-            ?? (nativeSelectionOwnsTarget ? view.state.selection.main.head : null) : null,
-          changedRange: applied ? changedCodeMirrorDocumentRange(beforeDocument, view.state.doc) : null,
-          ...(applied && !tableHistoryFocusAdapter.read(view.state)
-            && (nativeSelectionOwnsTarget || readListHistoryFocus(view.state)?.preserveSelection)
-            && (view.state.selection.ranges.length > 1 || !view.state.selection.main.empty) ? {
-              targetSelection: { ranges: view.state.selection.ranges.map(range => ({ anchor: range.anchor, head: range.head })),
-                mainIndex: view.state.selection.mainIndex }
-            } : {})
-        };
-      } finally {
-        queueMicrotask(() => {
-          if (historyScrollGuard === guard) historyScrollGuard = null;
-        });
+      };
+      const applied = direction === 'undo' ? undo(target) : redo(target);
+      if (applied && !view.dom.contains(view.dom.ownerDocument.activeElement)) {
+        // Replaying a change can synchronously remove the focused table or
+        // rendered-block editor. Keep keyboard ownership inside the editor
+        // while the richer boundary restore resolves its replacement target.
+        // Let CodeMirror synchronize its native DOM selection as well. A raw
+        // contentDOM.focus() can adopt the detached input's old DOM range and
+        // publish an unrelated document selection before table restoration.
+        view.focus();
       }
+      return {
+        applied,
+        targetPosition: applied ? semanticTargetPosition
+          ?? (nativeSelectionOwnsTarget ? view.state.selection.main.head : null) : null,
+        changedRange: applied ? changedCodeMirrorDocumentRange(beforeDocument, view.state.doc) : null,
+        ...(applied && !tableHistoryFocusAdapter.read(view.state)
+          && (nativeSelectionOwnsTarget || readListHistoryFocus(view.state)?.preserveSelection)
+          && (view.state.selection.ranges.length > 1 || !view.state.selection.main.empty) ? {
+            targetSelection: { ranges: view.state.selection.ranges.map(range => ({ anchor: range.anchor, head: range.head })),
+              mainIndex: view.state.selection.mainIndex }
+          } : {})
+      };
     },
     attemptBoundaryRestore(request: EditorHistoryRestoreRequest, isCurrent) {
       if (!isCurrent()) return 'not-rendered';
@@ -3295,7 +3276,6 @@ export function createEditor({
     dispose() {
       pendingTableHistoryFocus = null;
       pendingRenderedHistoryFocus = null;
-      historyScrollGuard = null;
       setEditorHistoryRunner(view, null);
       if (onHistoryKeyDown) view.dom.removeEventListener('keydown', onHistoryKeyDown, true);
       if (onHistoryKeyUp) view.dom.ownerDocument.defaultView?.removeEventListener('keyup', onHistoryKeyUp, true);

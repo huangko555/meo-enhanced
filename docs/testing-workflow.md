@@ -1583,6 +1583,19 @@ disposal immediately retire the old destination. Keep the full-document enduranc
 history sequence and its original focus, visibility and frame bounds when fixing
 this path; increasing a global settling delay does not establish late-layout ownership.
 
+`test-navigation-reveal-production.ts` pairs Live/Source and actual ordinary/optimized
+Worker paths for offscreen Undo/Redo, visible edge targets, ordinary native requests,
+search, line jumps and edge Enter. A fixed plain-text fixture must reach its destination
+without a preliminary nearest-edge placement followed by a context/center placement.
+Continuous DOM observation records scroll positions; compositor PNGs independently
+require surrounding text throughout the move. DOM reads before CodeMirror's measure
+are diagnostic, not proof of a painted blank frame. The paint negative control hides
+text only between frames and must fail, even though final content and positioning
+recover. Native scroll ownership follows the pending request until it is consumed or
+replaced, rather than expiring after a microtask. A final controller write accepts the
+new virtual viewport before paint, without waiting for a later native scroll event.
+The contract belongs to release browser and targeted history/search/viewport gates.
+
 For changes to input, rendering, geometry, scrolling, focus, history, mode changes
 or asynchronous resources, record the affected behavior and its relevant scale
 paths before implementation. Extend the owning regression rather than adding an

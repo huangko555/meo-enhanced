@@ -2523,6 +2523,13 @@ export class ViewportController {
             const nativeOwner = this.nativeInputViewport.hasOwner();
             if (nativeOwner) this.nativeInputViewport.release();
             const changed = this.writeScrollPosition(target);
+            if (changed) {
+              // The final reveal can land outside CodeMirror's mounted DOM.
+              // Accept that virtual viewport in this task, before paint, rather
+              // than exposing only the target line until the next scroll event.
+              this.view.requestMeasure({ read: () => null, write: () => {} });
+              this.view.coordsAtPos(this.pendingNavigationTarget?.position ?? 0);
+            }
             if (nativeOwner) this.nativeInputViewport.capture(this.view.dom.ownerDocument.activeElement);
             if (this.isActiveScrollTargetValid(activeTarget)) {
               activeTarget.changedSinceFrame ||= changed;

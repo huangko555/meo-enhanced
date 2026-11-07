@@ -84,6 +84,7 @@ function targetedCommands(
   switch (area) {
     case 'history':
       return [
+        script('scripts/test-navigation-reveal-production.ts'),
         script('scripts/test-command-history-production.ts'),
         { args: ['scripts/test-live-command-presentation.ts', '--local-units', '--action=checkbox'] },
         { args: ['scripts/test-live-command-presentation.ts', '--table-history-only'] },
@@ -188,6 +189,7 @@ function targetedCommands(
       ];
     case 'search':
       return [
+        script('scripts/test-navigation-reveal-production.ts'),
         script('scripts/test-input-focus-return-production.ts'),
         script('scripts/test-search-replace-production.ts'),
         script('scripts/test-search-overview-ruler.ts'),
@@ -198,6 +200,7 @@ function targetedCommands(
       ];
     case 'viewport':
       return [
+        script('scripts/test-navigation-reveal-production.ts'),
         packageScript('test:toolbar-viewport'),
         script('scripts/test-source-syntax-stability.ts'),
         script('scripts/test-preview-navigation-continuity.ts'),

@@ -1,6 +1,13 @@
 import { Text } from '@codemirror/state';
 import { ViewportController } from '../webview/src/helpers/viewportController';
 
+// Line-block/element-only fixtures still expose the public layout-read method
+// used to accept a newly mounted viewport; unavailable DOM coordinates are null.
+function createTestViewportController(view: ConstructorParameters<typeof ViewportController>[0], options?: ConstructorParameters<typeof ViewportController>[1]) {
+  view.coordsAtPos ??= () => null;
+  return new ViewportController(view, options);
+}
+
 const uniformLineGeometry = (doc: Text, height = 20) => {
   const block = (number: number) => {
     const line = doc.line(Math.min(doc.lines, Math.max(1, number)));
@@ -52,7 +59,7 @@ const runScenario = async ({ laterLayoutShift = 0, initialScrollTop = 1000 } = {
       write(read());
     }
   };
-  const controller = new ViewportController(view as any, { attachInteractions: false });
+  const controller = createTestViewportController(view as any, { attachInteractions: false });
 
   controller.preserveLayoutChange({
     element: {
@@ -142,7 +149,7 @@ const flushConcurrentWork = async (): Promise<void> => {
     await Promise.resolve();
   }
 };
-const concurrentController = new ViewportController(concurrentView as any, { attachInteractions: false });
+const concurrentController = createTestViewportController(concurrentView as any, { attachInteractions: false });
 const concurrentRegion = {
   element: {
     isConnected: true,
@@ -400,7 +407,7 @@ const documentView = {
   lineBlockAt: () => ({ from: 42, top: documentBlockTop }),
   requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
 };
-const documentController = new ViewportController(documentView as any, { attachInteractions: false });
+const documentController = createTestViewportController(documentView as any, { attachInteractions: false });
 const documentAnchor = documentController.captureDocumentAnchor();
 if (documentAnchor.position !== 42 || documentAnchor.lineOffset !== 20) {
   throw new Error(`Document anchor capture returned ${JSON.stringify(documentAnchor)}`);
@@ -480,7 +487,7 @@ const renderedBlock = {
   },
   getBoundingClientRect: () => ({ top: 40, bottom: 360 })
 };
-const renderedController = new ViewportController({
+const renderedController = createTestViewportController({
   dom: {},
   state: { doc: renderedDocument },
   scrollDOM: {
@@ -570,7 +577,7 @@ const dragView = {
     if (measure) measure.write(measure.read());
   }
 };
-const dragController = new ViewportController(dragView as any);
+const dragController = createTestViewportController(dragView as any);
 const dragRegion = {
   element: {
     isConnected: true,
@@ -690,7 +697,7 @@ const runNavigationAnchorStaleBoundary = async (
       if (measure) measures.push(measure);
     }
   };
-  const controller = new ViewportController(view as any);
+  const controller = createTestViewportController(view as any);
   const flushMeasure = async (
     beforeWrite?: () => void
   ): Promise<void> => {
@@ -780,7 +787,7 @@ const wheelView = {
   coordsAtPos: () => null,
   requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
 };
-const wheelController = new ViewportController(wheelView as any, { getMode: () => 'source' });
+const wheelController = createTestViewportController(wheelView as any, { getMode: () => 'source' });
 let defaultPrevented = false;
 const dispatchWheel = (deltaY: number) => wheelScrollDOM.dispatch('wheel', {
   deltaX: 0,
@@ -851,7 +858,7 @@ Object.defineProperty(liveWheelScrollDOM, 'scrollTop', {
     liveWheelWrites.push(value);
   }
 });
-const liveWheelController = new ViewportController({
+const liveWheelController = createTestViewportController({
   dom: new FakeEventTarget(),
   scrollDOM: liveWheelScrollDOM,
   contentDOM: { querySelectorAll: () => [liveWheelLine] },
@@ -928,7 +935,7 @@ const readingView = {
     afterReadingMeasure?.();
   }
 };
-const readingController = new ViewportController(readingView as any);
+const readingController = createTestViewportController(readingView as any);
 const nativeReadingWheel = (deltaY: number) => {
   readingScroller.dispatch('wheel', { deltaX: 0, deltaY, ctrlKey: false });
   readingScroller.scrollTop = Math.max(0, Math.min(
@@ -1292,7 +1299,7 @@ const revealScrollDOM = Object.assign(new FakeEventTarget(), {
   clientWidth: 900,
   getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
 });
-const revealController = new ViewportController({
+const revealController = createTestViewportController({
   dom: new FakeEventTarget(),
   scrollDOM: revealScrollDOM,
   state: { doc: { length: 1999 } },
@@ -1315,7 +1322,7 @@ const navigationAnchorScrollDOM = Object.assign(new FakeEventTarget(), {
   clientWidth: 900,
   getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
 });
-const navigationAnchorController = new ViewportController({
+const navigationAnchorController = createTestViewportController({
   dom: new FakeEventTarget(),
   scrollDOM: navigationAnchorScrollDOM,
   state: { doc: { length: 1999 } },
@@ -1497,7 +1504,7 @@ const runGeometryShiftReveal = async (
     clientWidth: 900,
     getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
   };
-  const controller = new ViewportController({
+  const controller = createTestViewportController({
     dom: new FakeEventTarget(),
     scrollDOM,
     contentDOM: {
@@ -1702,7 +1709,7 @@ for (const interruption of ['none', 'input', 'scroll', 'navigation', 'destroy'] 
     clientHeight: 500, clientWidth: 900,
     getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
   });
-  const controller = new ViewportController({
+  const controller = createTestViewportController({
     dom: new FakeEventTarget(), scrollDOM: scroll, state: { doc: { length: 4999 } },
     coordsAtPos: () => ({ top: targetTop - scroll.scrollTop, bottom: targetTop + 20 - scroll.scrollTop }),
     lineBlockAt: () => ({ top: targetTop, bottom: targetTop + 20, height: 20 }),
@@ -1763,7 +1770,7 @@ const tallScrollDOM = Object.assign(new FakeEventTarget(), {
   clientWidth: 900,
   getBoundingClientRect: () => ({ top: 0, bottom: 500, left: 0, right: 900 })
 });
-const tallController = new ViewportController({
+const tallController = createTestViewportController({
   dom: new FakeEventTarget(),
   scrollDOM: tallScrollDOM,
   state: { doc: { length: 1999 } },
@@ -1925,7 +1932,7 @@ readingWheelScrollDOM.addEventListener('scroll', () => {
   readingWheelScrollDOM.scrollTop += layoutDelta + estimateDelta;
   readingWheelController.reconcileAfterEditorUpdate();
 });
-const readingWheelController = new ViewportController(readingWheelView as any);
+const readingWheelController = createTestViewportController(readingWheelView as any);
 for (const progress of [-21.375, 23.5]) {
   for (const layoutDelta of [-48.25, 0, 78.75]) {
     readingWheelController.markInteraction();
@@ -2088,7 +2095,7 @@ for (const kind of ['table', 'mermaid']) {
     lineBlockAt: () => ({ from: position, top: 800 + estimateDelta }),
     requestMeasure: ({ read, write }: any) => write(read())
   };
-  const controller = new ViewportController(view as any);
+  const controller = createTestViewportController(view as any);
   scroller.dispatch('wheel', { deltaX: 0, deltaY: -120, ctrlKey: false });
   scroller.scrollTop = 900;
   scroller.dispatch('scroll', {});
@@ -2183,7 +2190,7 @@ const anchorView = {
   lineBlockAt: (position: number) => ({ from: position, top: position }),
   requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => write(read())
 };
-const anchorController = new ViewportController(anchorView as any, {
+const anchorController = createTestViewportController(anchorView as any, {
   attachInteractions: false,
   previewSurface: {
     captureTopVisiblePosition: () => previewCapture,
@@ -2220,7 +2227,7 @@ const documentChangeView = {
   state: { doc: oldDocument },
   lineBlockAtHeight: () => ({ from: changedDocument.line(3).from, top: 200 })
 };
-const documentChangeController = new ViewportController(documentChangeView as any, {
+const documentChangeController = createTestViewportController(documentChangeView as any, {
   attachInteractions: false,
   previewSurface: {
     captureTopVisiblePosition: () => ({ line: 7, lineOffset: 18 }),
@@ -2250,7 +2257,7 @@ const delayedDocumentChangeView = {
   dom: {},
   state: { doc: oldDocument }
 };
-const delayedDocumentChangeController = new ViewportController(delayedDocumentChangeView as any, {
+const delayedDocumentChangeController = createTestViewportController(delayedDocumentChangeView as any, {
   attachInteractions: false,
   previewSurface: {
     captureTopVisiblePosition: () => ({ line: 7, lineOffset: 18 }),
@@ -2366,7 +2373,7 @@ const crossControllerView = {
   scrollDOM: crossScrollDOM,
   state: { doc: oldDocument }
 };
-const crossController = new ViewportController(crossControllerView as any, {
+const crossController = createTestViewportController(crossControllerView as any, {
   attachInteractions: false,
   previewSurface: {
     captureTopVisiblePosition: () => ({ line: 2, lineOffset: 3 }),
@@ -2563,7 +2570,7 @@ const unavailableView = {
   scrollDOM: unavailableScrollDOM,
   state: { doc: oldDocument }
 };
-const unavailableController = new ViewportController(unavailableView as any, { attachInteractions: false });
+const unavailableController = createTestViewportController(unavailableView as any, { attachInteractions: false });
 const unavailableHandle = unavailableController.captureAnchorToken('editor');
 let unavailableWasCurrent = true;
 unavailableController.runAnchorTransaction(unavailableHandle, 'preview', (isCurrent) => {
@@ -2595,7 +2602,7 @@ const nestedCurrentView = {
   state: { doc: oldDocument }
 };
 let nestedCurrentPreviewWrites = 0;
-const nestedCurrentController = new ViewportController(nestedCurrentView as any, {
+const nestedCurrentController = createTestViewportController(nestedCurrentView as any, {
   attachInteractions: false,
   previewSurface: {
     captureTopVisiblePosition: () => ({ line: 2, lineOffset: 3 }),
@@ -2634,7 +2641,7 @@ const serialView = {
   state: { doc: oldDocument }
 };
 let serialPreviewWrites = 0;
-const serialController = new ViewportController(serialView as any, {
+const serialController = createTestViewportController(serialView as any, {
   attachInteractions: false,
   previewSurface: {
     captureTopVisiblePosition: () => ({ line: 3, lineOffset: 4 }),
@@ -2678,7 +2685,7 @@ const successorView = {
   state: { doc: oldDocument }
 };
 let successorPreviewWrites = 0;
-const successorController = new ViewportController(successorView as any, {
+const successorController = createTestViewportController(successorView as any, {
   attachInteractions: false,
   previewSurface: {
     captureTopVisiblePosition: () => ({ line: 3, lineOffset: 4 }),
@@ -2715,7 +2722,7 @@ const destroyView = {
   state: { doc: oldDocument }
 };
 let destroyPreviewWrites = 0;
-const destroyController = new ViewportController(destroyView as any, {
+const destroyController = createTestViewportController(destroyView as any, {
   attachInteractions: false,
   previewSurface: {
     captureTopVisiblePosition: () => ({ line: 4, lineOffset: 5 }),
@@ -2773,7 +2780,7 @@ for (const settledShift of [0, 40]) {
     isConnected: true,
     getBoundingClientRect: () => ({ top: layoutTop - scrollTop })
   };
-  const controller = new ViewportController({
+  const controller = createTestViewportController({
     dom: {},
     scrollDOM: scroller,
     requestMeasure: ({ read, write }: { read: () => unknown; write: (value: unknown) => void }) => {
@@ -2827,7 +2834,7 @@ for (const settledShift of [0, 40]) {
   });
   const originalToolbar = makeToolbar();
   let currentToolbar = originalToolbar;
-  const controller = new ViewportController({
+  const controller = createTestViewportController({
     dom: {},
     scrollDOM: {
       get scrollTop() { return scrollTop; },
@@ -2918,7 +2925,7 @@ for (const settledShift of [0, 40]) {
   let previewPosition: { line: number; lineOffset: number; editorLineOffset: number;
     sourceRange?: { startLine: number; endLine: number; progress: number } } = { line: 1, lineOffset: 0, editorLineOffset: 0 };
   const previewWrites: Array<{ line: number; lineOffset: number }> = [];
-  const controller = new ViewportController({
+  const controller = createTestViewportController({
     dom: {},
     scrollDOM,
     contentDOM: { querySelectorAll: () => { throw new Error('Source linked scrolling must not scan rendered DOM'); } },
@@ -3006,7 +3013,7 @@ for (const settledShift of [0, 40]) {
     const top = (number - 1) * 20 + (number > 50 ? prefix : 0) + (number > 61 ? wrap : 0);
     return { from: line.from, to: line.to, top, bottom: top + 20 + (number === 61 ? wrap : 0) };
   };
-  const controller = new ViewportController({ dom: {}, state: { doc, selection }, scrollDOM: scroll,
+  const controller = createTestViewportController({ dom: {}, state: { doc, selection }, scrollDOM: scroll,
     lineBlockAt: (position: number) => { lineReads++; return block(doc.lineAt(position).number); },
     lineBlockAtHeight: (height: number) => {
       lineReads++;
@@ -3042,7 +3049,7 @@ for (const owner of ['editor', 'preview'] as const) {
   const doc = Text.of(Array.from({ length: 80 }, () => 'line'));
   const scroll = { scrollTop: 600, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
   let previewTop = 1200, imageGrowth = 0;
-  const controller = new ViewportController({ dom: {}, state: { doc }, scrollDOM: scroll,
+  const controller = createTestViewportController({ dom: {}, state: { doc }, scrollDOM: scroll,
     ...uniformLineGeometry(doc)
   } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
     captureTopVisiblePosition: () => null, restoreTopVisiblePosition() {},
@@ -3083,7 +3090,7 @@ for (const owner of ['editor', 'preview'] as const) {
   };
   let previewTop = 0;
   let previewOffset = 0;
-  const controller = new ViewportController({
+  const controller = createTestViewportController({
     dom: {}, scrollDOM, state: { doc },
     ...uniformLineGeometry(doc)
   } as any, {
@@ -3129,7 +3136,7 @@ for (const owner of ['editor', 'preview'] as const) {
   const doc = Text.of(Array.from({ length: 80 }, () => 'line'));
   const scrollDOM = { scrollTop: 1050, scrollLeft: 0, scrollHeight: 8000, scrollWidth: 800, clientHeight: 400, clientWidth: 800 };
   let previewTop = 400, progress = 0.5;
-  const controller = new ViewportController({
+  const controller = createTestViewportController({
     dom: {}, scrollDOM, state: { doc }, contentHeight: 8000,
     lineBlockAt: (position: number) => {
       const line = doc.lineAt(position);
@@ -3173,7 +3180,7 @@ for (const mode of ['source', 'live'] as const) {
       getBoundingClientRect: () => ({ top: 0, bottom: 680, height: 680 })
     };
     let coordinatesAvailable = false;
-    const controller = new ViewportController({
+    const controller = createTestViewportController({
       dom: {}, scrollDOM, state: { doc: Text.of(['x'.repeat(6000)]) },
       contentDOM: { querySelectorAll: () => [] },
       coordsAtPos: () => coordinatesAvailable
@@ -3205,7 +3212,7 @@ for (const mode of ['source', 'live'] as const) {
 // being whitespace. Only freshly interpolated gaps use the exact top edge.
 for (const interpolatedWhitespace of [undefined, true]) {
   const projections: Array<{ line: number; viewportOffset?: number }> = [];
-  const controller = new ViewportController(anchorView as any, {
+  const controller = createTestViewportController(anchorView as any, {
     attachInteractions: false,
     previewSurface: {
       readScrollTop: () => 300,
@@ -3248,7 +3255,7 @@ for (const interpolatedWhitespace of [undefined, true]) {
     dispatch: () => { throw new Error('View alignment must not dispatch a selection or document change'); },
     ...uniformLineGeometry(doc)
   };
-  const controller = new ViewportController(view as any, {
+  const controller = createTestViewportController(view as any, {
     attachInteractions: false, getMode: () => 'source',
     previewSurface: {
       captureTopVisiblePosition: () => null,
@@ -3308,7 +3315,7 @@ for (const interpolatedWhitespace of [undefined, true]) {
     captureTopVisiblePosition: () => { captures++; return { line: 3, lineOffset: 0 }; },
     restoreTopVisiblePosition: () => { writes++; }
   };
-  const controller = new ViewportController(anchorView as any, { attachInteractions: false, previewSurface: surface });
+  const controller = createTestViewportController(anchorView as any, { attachInteractions: false, previewSurface: surface });
   try {
     controller.runPreviewPresentationTransaction(() => { top = 337; });
     if (captures || writes || top !== 337) throw new Error(`Resource layout interrupted native Preview dragging: ${JSON.stringify({ captures, writes, top })}`);
@@ -3320,7 +3327,7 @@ for (const interpolatedWhitespace of [undefined, true]) {
 
 {
   let current: (() => boolean) | undefined;
-  const controller = new ViewportController(anchorView as any, { attachInteractions: false, previewSurface: {
+  const controller = createTestViewportController(anchorView as any, { attachInteractions: false, previewSurface: {
     readScrollTop: () => 300, writeScrollTop: () => {},
     captureTopVisiblePosition: () => ({ line: 3, lineOffset: 0 }),
     restoreTopVisiblePosition: (_position, isCurrent) => { current = isCurrent; }
@@ -3348,7 +3355,7 @@ for (const interpolatedWhitespace of [undefined, true]) {
     },
     lineBlockAtHeight: () => ({ from: doc.line(16).from, to: doc.line(16).to, top: 300, bottom: 320 })
   };
-  const controller = new ViewportController(view as any, { attachInteractions: false, previewSurface: {
+  const controller = createTestViewportController(view as any, { attachInteractions: false, previewSurface: {
     readScrollTop: () => 500, writeScrollTop: () => { pixelWrites++; },
     captureTopVisiblePosition: () => null,
     restoreTopVisiblePosition: position => { projected.push(position.line); },
@@ -3375,7 +3382,7 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
   const previousText = 'a\n\nb\n\nc\n', nextText = insert + previousText.slice(removed);
   let restored: any;
   const view = { ...anchorView, state: { doc: Text.of(nextText.split('\n')) } };
-  const controller = new ViewportController(view as any, { attachInteractions: false, previewSurface: {
+  const controller = createTestViewportController(view as any, { attachInteractions: false, previewSurface: {
     readScrollTop: () => 300, writeScrollTop: () => {},
     captureTopVisiblePosition: () => ({ line: 3, lineOffset: 10, viewportOffset: 0,
       sourceRange: { startLine: 3, endLine: 3, progress: 0.5 } }),
@@ -3396,7 +3403,7 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
   const doc = Text.of(Array.from({ length: 80 }, () => 'line'));
   const scroller = { scrollTop: 200, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
   const requests: Array<{ line: number; isCurrent: () => boolean }> = [];
-  const controller = new ViewportController({
+  const controller = createTestViewportController({
     dom: {}, scrollDOM: scroller, state: { doc },
     lineBlockAtHeight: (height: number) => { const line = doc.line(Math.floor(height / 20) + 1);
       return { from: line.from, to: line.to, top: Math.floor(height / 20) * 20, bottom: (Math.floor(height / 20) + 1) * 20 }; }
@@ -3432,7 +3439,7 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
   const scroll = { scrollTop: 200, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
   let previewTop = 0, current = true;
   const reveals: Array<{ line: number; isCurrent: () => boolean }> = [];
-  const controller = new ViewportController({ dom: {}, scrollDOM: scroll, state: { doc },
+  const controller = createTestViewportController({ dom: {}, scrollDOM: scroll, state: { doc },
     ...uniformLineGeometry(doc)
   } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
     isCurrentDocument: () => current,
@@ -3497,7 +3504,7 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
   const scroll = { scrollTop: 200, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
   let previewTop = 400, current = true;
   const block = (line: number) => ({ from: doc.line(line).from, to: doc.line(line).to, top: (line - 1) * 20, bottom: line * 20 });
-  const controller = new ViewportController({ dom: {}, state: { doc }, scrollDOM: scroll, contentHeight: 2000,
+  const controller = createTestViewportController({ dom: {}, state: { doc }, scrollDOM: scroll, contentHeight: 2000,
     lineBlockAt: (pos: number) => block(doc.lineAt(pos).number),
     lineBlockAtHeight: (height: number) => block(Math.min(100, Math.floor(height / 20) + 1))
   } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
@@ -3545,7 +3552,7 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
   const scroll = { scrollTop: 200, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
   const witnesses: Array<number | undefined> = [];
   let previewTop = 300;
-  const controller = new ViewportController({ dom: {}, scrollDOM: scroll,
+  const controller = createTestViewportController({ dom: {}, scrollDOM: scroll,
     state: { doc, selection: { main: { head: doc.line(30).from } } }, ...uniformLineGeometry(doc)
   } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
     captureTopVisiblePosition: () => null, restoreTopVisiblePosition() {},

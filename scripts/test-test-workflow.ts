@@ -88,11 +88,12 @@ const history = createTestWorkflowPlan(
   parseTestWorkflowRequest(['targeted', 'history'])
 );
 for (const command of [
+  ['scripts/test-navigation-reveal-production.ts'],
   ['scripts/test-command-history-production.ts'],
   ['scripts/test-live-command-presentation.ts', '--local-units', '--action=checkbox'],
   ['scripts/test-live-command-presentation.ts', '--table-history-only']
 ]) assert.ok(flattenTestWorkflowCommands(history).some(item => JSON.stringify(item.args) === JSON.stringify(command)),
-  'History selection must include format, task and every production table command, not just a generic history test');
+  'History selection must include navigation, format, task and every production table command, not just a generic history test');
 assert.equal(history.tier, 'targeted');
 assert.equal(history.area, 'history');
 assert.equal(history.longRunning, false);
