@@ -4,6 +4,8 @@ This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
 ## Unreleased
+- Added Chinese word movement, deletion and double-click selection in Source and Live text using the built-in `Intl.Segmenter`, including directed multiple selections.
+- Fixed deletion undo restoring the wrong caret or collapsing multiple selections in Source and Live text.
 - Added an explicit, default-off LaTeX delimiter switch in the Settings popover and More Settings → General, with consistent `\(...\)` and `\[...\]` parsing, completion, source highlighting, Live tables, Preview and exports. GitHub README retains its fixed math syntax.
 
 ## 0.4.0

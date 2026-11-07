@@ -207,6 +207,7 @@ import { markExternalDocumentPresentation } from './editor/externalDocumentPrese
 import { inputAssistanceFacet, typingAssistance } from './editor/typingAssistance';
 import { defaultInputAssistance, type InputAssistance } from '../../src/foundation/editingPreferences';
 import { inlineCodeMarkers } from './application/symbolInput';
+import { chineseWordNavigation } from './editor/chineseWordNavigation';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -2444,6 +2445,7 @@ export function createEditor({
         }
       })),
       EditorState.allowMultipleSelections.of(true),
+      chineseWordNavigation,
       secondarySelections,
       orderedListRenumberTransactionFilter(() => !applyingExternal && !editorDestroyed),
       keymap.of([
@@ -3116,6 +3118,7 @@ export function createEditor({
     },
     attemptBoundaryRestore(request: EditorHistoryRestoreRequest, isCurrent) {
       if (!isCurrent()) return 'not-rendered';
+      if (view.state.selection.ranges.length > 1) return 'not-rendered';
       if (currentMode !== 'live') return 'not-rendered';
       const tableTarget = tableHistoryFocusAdapter.read(view.state);
       if (!isLiveInputDerivedWorkReady(view.state) && !tableTarget?.contentOnly) return 'retry';
