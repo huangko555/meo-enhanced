@@ -2,7 +2,11 @@
 
 这份清单按用户能完成的操作组织验收。测试存在、控件出现和消息发出，都不能单独证明操作成功。每行要求检查相应结果；新功能、命令或设置必须补充对应行及进入发布门禁的测试。
 
-`scripts/test-test-workflow.ts` 检查所有公开命令、设置均在本表登记，引用的测试进入发布门禁，而且快速门禁不能比发布门禁覆盖更多基本合同。它检查登记和调度完整性；实际行为仍由各项测试断言。
+本表是长期能力定义的唯一来源，随新增、修改和删除功能一同更新。每行保留用户可观察的预期、对应测试和原生或人工验收边界；通用历史与文档规模要求沿用下方合同，不另复制一份能力登记。
+
+`bun run test:inventory` 自动检查公开命令和设置的漏登及删除残留、重复能力行、本地引用，以及测试是否进入发布门禁或明确登记的原生门禁。工作区、暂存检查和 CI 使用同一规则；`scripts/test-test-workflow.ts` 继续检查快速与发布门禁的调度关系。登记检查不能证明实际行为成功。
+
+`bun run capabilities:report` 从本表生成 JSON 能力目录；可追加 `--report <report.json>`（可重复）关联既有工作流报告。摘要保留实际命令参数、环境变量和历史结果，不执行测试，也不判定当前版本验收通过。未观察到的测试和原生、人工边界仍待核查；证据适用性按[测试工作流](testing-workflow.md#capability-catalog-maintenance)确认。输出是可重建的派生数据，保存时放在 `.local/`，本表不写随运行变化的通过状态。
 
 修改文档的各项操作都须验证操作、撤销、重做的完整交互：准确文本、选区及方向、原生焦点和单元格选择、语义位置、历史分组、后续可编辑性，以及中间帧的视口与呈现稳定。普通与实际优化路径按[统一历史验收合同](testing-workflow.md#shared-undoredo-acceptance)配对；只核对最终文本或登记了测试不构成通过证据。公开命令由 [历史语义登记](../scripts/history-acceptance-coverage.ts)约束新增覆盖，导航、复制及保存等操作分别验证不增加文档历史。
 
@@ -64,7 +68,7 @@
 
 | 设置 | 结果与证据 |
 | --- | --- |
-| `meoEnhanced.disabledExtraFeatures` | MEO Extras 功能按项启停、跨面板同步、重开保留、失败不伪报成功；关闭不改文档或重载 Webview。未发布安装入口禁用，中英文/明暗/窄屏及普通和大文档检查：`bun scripts/test-document-views.ts`、`bun scripts/test-settings-window-production.ts --extras-only`；配套渲染见 `MEO_EXTRAS_DIR` 浏览器专项。 |
+| `meoEnhanced.disabledExtraFeatures` | MEO Extras 功能按项启停、跨面板同步、重开保留、失败不伪报成功；关闭不改文档或重载 Webview。未发布安装入口禁用，中英文/明暗/窄屏及普通和大文档检查：[视图合同](../scripts/test-document-views.ts)、[正式设置页](../scripts/test-settings-window-production.ts)（`--extras-only`）；配套渲染见 `MEO_EXTRAS_DIR` 浏览器专项。 |
 | `meoEnhanced.editing.preferences` | 输入偏好与快捷键跨面板合并、重载保持、保存失败不伪报成功、旧版本消息不覆盖新值；[偏好合同](../scripts/test-editing-preferences.ts)、[正式窗口](../scripts/test-settings-window-production.ts) |
 | `meoEnhanced.language` | 中英文与自动跟随改变实际标签，[语言切换](../scripts/test-live-ui-language-switch.ts) |
 | `meoEnhanced.appearance.editor`、`meoEnhanced.appearance.preview` | 独立亮暗外观和主题更新有效，[主题过渡](../scripts/test-vscode-theme-transition.ts) |

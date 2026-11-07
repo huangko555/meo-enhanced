@@ -47,6 +47,11 @@ Use the tiered workflow in [docs/testing-workflow.md](docs/testing-workflow.md).
 When adding, moving or changing tests, follow the guide's
 [test registration procedure](docs/testing-workflow.md#adding-or-changing-tests)
 and run `bun run test:inventory`. Agents own this step without a user reminder.
+When adding, changing or removing a user-facing capability, update its expected
+behavior, test links and native/manual boundary in
+[the feature coverage catalog](docs/testing-feature-coverage.md). The inventory
+checks public IDs and references; use `bun run capabilities:report` to derive a
+catalog with optional historical workflow evidence, without executing tests.
 For copy, existing icon replacements and local visual style changes, use the
 guide's Light UI path: `bun run test:ui-light` builds the Webview, then complete
 the scoped bilingual light/dark visual and affected-control functional smoke.

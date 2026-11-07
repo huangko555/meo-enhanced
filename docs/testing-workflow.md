@@ -2552,6 +2552,42 @@ final snapshot reads them again. Never replace installed-content checks with onl
 lockfile or modification-time checks. Architecture fixture checks call the same
 rules with fresh per-fixture state, retaining CLI and staged-index coverage.
 
+### Capability catalog maintenance
+
+[The feature coverage catalog](testing-feature-coverage.md) is the single source
+of user-facing capability expectations and their test/native/manual boundaries.
+Update the affected rows when adding, changing or removing behavior, including
+capabilities without a public command or setting. Shared history and document-scale
+contracts continue to apply; avoid duplicating those matrices in every row.
+
+Inventory validation checks missing and obsolete public IDs, duplicate rows,
+local file references, and test membership in release or an explicitly registered
+native gate. It reads the catalog and linked files from the same working/index
+snapshot as the test registrations. Manual-only rows remain valid: a sample
+document or a registered native command does not establish successful execution.
+
+Generate a derived JSON catalog without running tests:
+
+```powershell
+bun run capabilities:report
+bun run capabilities:report --report .local/test-runs/<run-id>/report.json
+```
+
+`--report` may be repeated to retain observations from several explicitly selected
+workflow reports. The summary preserves each actual command's arguments,
+environment and recorded result, report candidate/status, and log integrity.
+Extra-argument invocations remain visible as that invocation; they never imply
+that the complete script or capability passed. Reused, incomplete, failed and
+invalidated observations remain distinguishable. Keep generated output in `.local/`
+and preserve the original reports and logs unchanged.
+
+This is historical evidence indexing, not a current-candidate acceptance verdict
+or an automatic resume/cache system. Existing non-release reports lack complete
+input fingerprints, and HEAD alone cannot establish unchanged working content or
+native environment. Confirm applicability and all documented native/manual
+boundaries through the existing acceptance process. Catalog updates and summaries
+do not authorize or start long-running workflows.
+
 ### Adding or changing tests
 
 `scripts/test-content-policy-parity.ts` is the focused shared-content regression
@@ -2614,7 +2650,7 @@ CI runs inventory validation and its small contract tests before typechecking
 and building. Every guarded workflow checks registration before launching work,
 including dry runs. Architecture checking also invokes inventory validation;
 `bun run architecture:check:staged` reads the package scripts, workflow policy,
-test files and registrations from the Git index. The existing main-checkout
+test files, capability catalog/references and registrations from the Git index. The existing main-checkout
 pre-commit hook therefore rejects a staged omission even if the working copy
 contains an unstaged fix. Other checkouts must run that staged command as part
 of their commit checks; CI provides the repository-wide fallback.

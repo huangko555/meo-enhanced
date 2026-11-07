@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, posix, resolve } from 'node:path';
 import type { TestWorkflowCommand } from './test-workflow-policy';
+import { featureCoveragePath, inspectFeatureCoverage, parseFeatureCoverage } from './feature-coverage';
 
 type Exception = { kind: 'targeted' | 'native' | 'endurance'; command: string; reason: string };
 type InventoryCommand = TestWorkflowCommand & { runtime?: 'bun' | 'node' };
@@ -20,26 +21,37 @@ const identity = (command: InventoryCommand) => JSON.stringify([
 // must not hide an orphan in the commit being checked.
 export function readInventorySnapshot(root: string, staged: boolean): Snapshot {
   const paths = execFileSync('git', ['ls-files', '--cached', ...(!staged ? ['--others', '--exclude-standard'] : []), '-z'],
-    { cwd: root, encoding: 'utf8' }).split('\0').filter(path => path === 'package.json' || path.startsWith('scripts/'));
+    { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
   const unique = [...new Set(paths)].sort();
-  const relevant = unique.filter(path => /\.(?:json|ts|tsx|js|mjs|cjs|ps1)$/.test(path));
-  if (!staged) return new Map(relevant.map(path => [path, readFileSync(resolve(root, path), 'utf8')]));
-  const bytes = execFileSync('git', ['cat-file', '--batch'], { cwd: root,
-    input: relevant.map(path => `:${path}\n`).join(''), maxBuffer: 128 * 1024 * 1024 });
-  let offset = 0;
-  return new Map(relevant.map(path => {
-    const end = bytes.indexOf(10, offset);
-    const match = /^[0-9a-f]+ blob (\d+)$/.exec(bytes.subarray(offset, end).toString());
-    if (!match) throw new Error(`Cannot read staged test inventory input: ${path}`);
-    const size = Number(match[1]);
-    offset = end + 1 + size + 1;
-    return [path, bytes.subarray(end + 1, end + 1 + size).toString('utf8')];
-  }));
+  const read = (selected: string[]): Map<string, string> => {
+    if (!selected.length) return new Map();
+    if (!staged) return new Map(selected.map(path => [path, readFileSync(resolve(root, path), 'utf8')]));
+    const bytes = execFileSync('git', ['cat-file', '--batch'], { cwd: root,
+      input: selected.map(path => `:${path}\n`).join(''), maxBuffer: 128 * 1024 * 1024 });
+    let offset = 0;
+    return new Map(selected.map(path => {
+      const end = bytes.indexOf(10, offset);
+      const match = /^[0-9a-f]+ blob (\d+)$/.exec(bytes.subarray(offset, end).toString());
+      if (!match) throw new Error(`Cannot read staged test inventory input: ${path}`);
+      const size = Number(match[1]);
+      offset = end + 1 + size + 1;
+      return [path, bytes.subarray(end + 1, end + 1 + size).toString('utf8')];
+    }));
+  };
+  const files = read(unique.filter(path => path === featureCoveragePath || path === 'package.json'
+    || path.startsWith('scripts/') && /\.(?:json|ts|tsx|js|mjs|cjs|ps1)$/.test(path)));
+  const coverage = files.get(featureCoveragePath);
+  if (coverage !== undefined) {
+    const references = new Set(parseFeatureCoverage(coverage).flatMap(entry => entry.links));
+    for (const [path, source] of read(unique.filter(path => references.has(path) && !files.has(path)))) files.set(path, source);
+  }
+  return files;
 }
 
 export function inspectTestInventory(files: Snapshot, commands: TestWorkflowCommand[], inventory: TestInventory): string[] {
   const errors: string[] = [];
-  const scripts = JSON.parse(files.get('package.json') ?? '{}').scripts as Record<string, string>;
+  const manifest = JSON.parse(files.get('package.json') ?? '{}');
+  const scripts = manifest.scripts as Record<string, string>;
   if (!scripts || !inventory.separate || !Array.isArray(inventory.repeats)) throw new Error('Invalid test inventory configuration');
   const executable: InventoryCommand[] = [];
   const expand = (command: InventoryCommand, ancestors: string[] = []): InventoryCommand[] => {
@@ -62,6 +74,7 @@ export function inspectTestInventory(files: Snapshot, commands: TestWorkflowComm
   };
   for (const command of commands) executable.push(...expand(command));
   const reached = new Set(executable.map(command => command.args[0]!));
+  const releaseTests = new Set(reached);
   const runnable = new Set([...reached].filter(candidate));
   for (const [path, exception] of Object.entries(inventory.separate)) {
     if (!candidate(path) || !files.has(path)) errors.push(`Stale separate-test registration: ${path}`);
@@ -71,6 +84,15 @@ export function inspectTestInventory(files: Snapshot, commands: TestWorkflowComm
     reached.add(path);
     runnable.add(path);
   }
+  const configuration = manifest.contributes?.configuration;
+  const publicIds: string[] = [
+    ...(Array.isArray(configuration) ? configuration : [configuration]).flatMap(item => Object.keys(item?.properties ?? {})),
+    ...(manifest.contributes?.commands ?? []).map((item: { command: string }) => item.command)
+  ];
+  const coverage = files.get(featureCoveragePath);
+  if (coverage !== undefined) {
+    errors.push(...inspectFeatureCoverage(parseFeatureCoverage(coverage), publicIds, new Set(files.keys()), releaseTests, inventory.separate));
+  } else if (publicIds.length) errors.push(`Missing capability catalog: ${featureCoveragePath}`);
 
   // Imported helpers and explicitly referenced browser entry fixtures belong to
   // their reachable owner. A naming suffix alone never exempts an orphan.

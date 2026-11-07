@@ -115,6 +115,38 @@ try {
   await checkTestInventory(root, true);
   await assert.rejects(checkTestInventory(root, false), /Unregistered test: scripts\/test-new.ts/,
     'The staged check must also use the staged workflow policy');
+
+  // Capability definitions and referenced fixtures must come from that same
+  // snapshot; an unstaged document/file must not repair a staged omission.
+  save('scripts/test-workflow-policy.ts', `
+    export const parseTestWorkflowRequest = () => ({});
+    export const createTestWorkflowPlan = () => ({});
+    export const flattenTestWorkflowCommands = () => [{ args: ['run', 'test'] }];
+  `);
+  save('package.json', JSON.stringify({
+    scripts: { test: 'bun scripts/test-a.ts && bun scripts/test-new.ts' },
+    contributes: { configuration: { properties: { 'meoEnhanced.fixture': {} } } }
+  }));
+  mkdirSync(join(root, 'docs'));
+  mkdirSync(join(root, 'scripts', 'fixtures'));
+  const catalog = '## Editing\n\n| Capability | Expected | Evidence |\n| --- | --- | --- |\n'
+    + '| `meoEnhanced.fixture` | Preserve input | [test](../scripts/test-a.ts), [sample](../scripts/fixtures/sample.md) |\n';
+  save('docs/testing-feature-coverage.md', catalog);
+  save('scripts/fixtures/sample.md', '# Example\n');
+  git('add', 'package.json', 'docs/testing-feature-coverage.md');
+  await checkTestInventory(root, false);
+  await assert.rejects(checkTestInventory(root, true), /Missing capability reference: scripts\/fixtures\/sample.md/,
+    'Untracked fixture evidence is unavailable to the staged catalog');
+  git('add', 'scripts/fixtures/sample.md');
+  await checkTestInventory(root, true);
+  save('docs/testing-feature-coverage.md', catalog.replace('meoEnhanced.fixture', 'meoEnhanced.removed'));
+  await checkTestInventory(root, true);
+  await assert.rejects(checkTestInventory(root, false), /Obsolete public capability: meoEnhanced.removed/);
+  git('add', 'docs/testing-feature-coverage.md');
+  save('docs/testing-feature-coverage.md', catalog);
+  await checkTestInventory(root, false);
+  await assert.rejects(checkTestInventory(root, true), /Obsolete public capability: meoEnhanced.removed/,
+    'An unstaged catalog repair cannot hide a staged obsolete public ID');
 } finally {
   for (const [key, value] of inheritedGit) process.env[key] = value;
   rmSync(root, { recursive: true, force: true });

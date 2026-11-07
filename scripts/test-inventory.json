@@ -763,6 +763,8 @@
       "scripts/test-table-visible-history-viewport.ts",
       "scripts/test-table-worker-history.ts",
       "scripts/test-test-inventory.ts",
+      "scripts/test-feature-coverage.ts",
+      "scripts/test-feature-coverage-report.ts",
       "scripts/test-test-workflow.ts",
       "scripts/test-theme-inheritance.ts",
       "scripts/test-toolbar-input-viewport.ts",

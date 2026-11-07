@@ -424,17 +424,8 @@ const workflowGuide = readFileSync(
   resolve(repoRoot, 'docs/testing-workflow.md'),
   'utf8'
 );
-const featureCoverageGuide = readFileSync(resolve(repoRoot, 'docs/testing-feature-coverage.md'), 'utf8');
-const manifest = JSON.parse(readFileSync(resolve(repoRoot, 'package.json'), 'utf8'));
-for (const setting of Object.keys(manifest.contributes.configuration.properties)) {
-  assert.ok(featureCoverageGuide.includes(`\`${setting}\``), `Missing setting acceptance: ${setting}`);
-}
-for (const { command } of manifest.contributes.commands) {
-  assert.ok(featureCoverageGuide.includes(`\`${command}\``), `Missing command acceptance: ${command}`);
-}
-for (const link of featureCoverageGuide.matchAll(/\]\(\.\.\/(scripts\/test-[^)]+\.(?:ts|mjs))\)/g)) {
-  assert.ok(releaseDirectScripts.has(link[1]!), `Documented feature contract is absent from the release gate: ${link[1]}`);
-}
+// The capability catalog is checked by inventory from the same working/staged
+// snapshot, including native gates and removed public IDs, before any workflow.
 for (const command of [
   'bun run test:ui-light',
   'bun run test:quick',
