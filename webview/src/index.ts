@@ -4252,7 +4252,10 @@ window.addEventListener('focus', () => {
   scheduleEditorSurfaceRecovery();
 });
 
-window.addEventListener('beforeunload', () => {
+let webviewSessionTerminationHandled = false;
+const terminateWebviewSession = () => {
+  if (webviewSessionTerminationHandled) return;
+  webviewSessionTerminationHandled = true;
   // Accept confirmed native input while the document/recovery owners are
   // still alive. Session disposal performs its final synchronous handoff.
   commitEditorTransientEdits();
@@ -4292,7 +4295,17 @@ window.addEventListener('beforeunload', () => {
   editorModeRuntime.dispose();
   mermaidDiagramPresentationFactory.dispose();
   mermaidDiagramRenderPool.dispose();
+};
+
+window.addEventListener('beforeunload', terminateWebviewSession);
+window.addEventListener('pagehide', (event) => {
+  // A persisted page remains recoverable through bfcache. VS Code tears down
+  // a removed webview iframe with a non-persisted pagehide instead.
+  if (!event.persisted) terminateWebviewSession();
 });
+// iframe removal in Chromium emits pagehide followed by unload, but retain the
+// same idempotent owner as a final fallback for a terminal unload without it.
+window.addEventListener('unload', terminateWebviewSession);
 
 window.addEventListener('resize', () => {
   readingLayout.refresh();

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { Browser, Page } from 'puppeteer-core';
+import type { Browser, Frame, Page } from 'puppeteer-core';
 import { launchTestBrowser } from './browser-test-helpers';
 import type { SourceLineNumberMode } from '../src/protocol/readyInit';
 import { captureHistoryInteraction, assertHistoryRoundTrip, assertHistoryCoverage } from './history-interaction-contract';
@@ -638,28 +638,112 @@ async function reopenedPreviewMode(browser: Browser): Promise<void> {
     await page.close();
   }
 }
+
+type EmbeddedWebview = {
+  readonly host: Page;
+  readonly webview: Frame;
+};
+
+async function openEmbeddedWebview(
+  browser: Browser,
+  text: string,
+  mode: 'live' | 'source' | 'preview' = 'live'
+): Promise<EmbeddedWebview> {
+  const host = await browser.newPage();
+  await host.setViewport({ width: 1000, height: 700, deviceScaleFactor: 1 });
+  await host.setContent('<!doctype html><style>html,body,iframe{height:100%;width:100%;margin:0;border:0}</style><iframe></iframe>');
+  await host.evaluate(() => {
+    (window as any).__webviewHostMessages = [];
+    (window as any).__webviewLifecycleEvents = [];
+    window.addEventListener('message', event => {
+      const data = event.data as { type?: string; message?: unknown; eventType?: string; persisted?: boolean } | null;
+      if (data?.type === '__webviewHostMessage') (window as any).__webviewHostMessages.push(data.message);
+      if (data?.type === '__webviewLifecycleEvent') {
+        (window as any).__webviewLifecycleEvents.push({ type: data.eventType, persisted: data.persisted === true });
+      }
+    });
+  });
+  const webview = host.frames().find(frame => frame !== host.mainFrame());
+  assert.ok(webview, 'Embedded webview iframe was not created');
+  await webview.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"><div class="mode-toolbar meo-preload-toolbar"></div><div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div></div>');
+  await webview.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
+  await webview.evaluate(() => {
+    for (const type of ['beforeunload', 'pagehide', 'unload']) {
+      window.addEventListener(type, event => parent.postMessage({
+        type: '__webviewLifecycleEvent', eventType: type,
+        persisted: event instanceof PageTransitionEvent && event.persisted
+      }, '*'));
+    }
+    (window as any).acquireVsCodeApi = () => ({
+      postMessage(message: unknown) { parent.postMessage({ type: '__webviewHostMessage', message }, '*'); },
+      getState() { return undefined; }, setState() {}
+    });
+  });
+  await webview.addScriptTag({ path: path.join(temp, 'bundle.js') });
+  await host.waitForFunction(() => (window as any).__webviewHostMessages.some((message: any) => message.type === 'ready'));
+  const pageId = await host.evaluate(() => (window as any).__webviewHostMessages
+    .find((message: any) => message.type === 'ready').pageId as string);
+  await webview.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), init(pageId, text, mode));
+  await webview.waitForSelector('.editor-host > .cm-editor');
+  await webview.waitForFunction(() => !document.querySelector<HTMLElement>('.editor-host')!.inert
+    && document.querySelector<HTMLElement>('.editor-loading')?.hidden !== false);
+  return { host, webview };
+}
+
+const embeddedDrafts = (host: Page) => host.evaluate(() => (window as any).__webviewHostMessages
+  .filter((message: any) => message.type === 'draftChanged'));
+
 async function pendingTableUnload(browser: Browser): Promise<void> {
-  for (const large of [false, true]) for (const edited of [false, true]) {
+  for (const terminalEvent of ['beforeunload', 'iframe-removal'] as const)
+    for (const large of [false, true]) for (const edited of [false, true]) {
     const text = '# Unload fixture\n\n| Name | Value |\n| --- | --- |\n| Alpha | base |\n' + (large ? '\nPadding.\n'.repeat(8100) : '');
-    const page = await open(browser, text, 'live');
+    const { host, webview } = await openEmbeddedWebview(browser, text);
     try {
       const selector = 'tbody textarea[data-table-row="1"][data-table-col="1"]';
       if (edited) {
-        await page.click(selector);
-        await page.keyboard.down('Control'); await page.keyboard.press('a'); await page.keyboard.up('Control');
-        await page.keyboard.sendCharacter('pending-cell-value');
-        assert.equal(await page.$eval(selector, input => (input as HTMLTextAreaElement).value), 'pending-cell-value');
+        await webview.click(selector);
+        await host.keyboard.down('Control'); await host.keyboard.press('a'); await host.keyboard.up('Control');
+        await host.keyboard.sendCharacter('pending-cell-value');
+        assert.equal(await webview.$eval(selector, input => (input as HTMLTextAreaElement).value), 'pending-cell-value');
       }
-      assert.deepEqual(await drafts(page), [], 'The fixture must reach unload with unsubmitted native input');
-      await page.evaluate(() => window.dispatchEvent(new Event('beforeunload')));
-      const recovery = await page.evaluate(() => (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged'));
+      assert.deepEqual(await embeddedDrafts(host), [], 'The fixture must reach termination with unsubmitted native input');
+      if (terminalEvent === 'beforeunload') {
+        await webview.evaluate(() => {
+          window.dispatchEvent(new Event('beforeunload'));
+          window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
+          window.dispatchEvent(new Event('unload'));
+        });
+      } else {
+        await host.evaluate(() => document.querySelector('iframe')!.remove());
+      }
+      await host.evaluate(() => new Promise(resolve => setTimeout(resolve, 25)));
+      const recovery = await embeddedDrafts(host);
       assert.deepEqual(recovery.map((message: any) => message.text), edited ? [text.replace('| Alpha | base |', '| Alpha | pending-cell-value |')] : [],
-        'Unload must synchronously preserve pending input and leave an unedited document clean');
-      await page.evaluate(() => window.dispatchEvent(new Event('beforeunload')));
-      assert.equal(await page.evaluate(() => (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').length), recovery.length,
-        'Repeated teardown must not publish another recovery receipt');
-    } finally { await page.close(); }
+        `${terminalEvent} must synchronously preserve pending input and leave an unedited document clean`);
+      const lifecycle = await host.evaluate(() => (window as any).__webviewLifecycleEvents);
+      if (terminalEvent === 'iframe-removal') {
+        assert.deepEqual(lifecycle.map((event: any) => event.type), ['pagehide', 'unload'],
+          `Removing the iframe did not expose the expected terminal events: ${JSON.stringify(lifecycle)}`);
+      }
+      assert.equal((await embeddedDrafts(host)).length, recovery.length,
+        'Repeated terminal events must not publish another recovery receipt');
+    } finally { await host.close(); }
   }
+
+  const text = '# bfcache fixture\n\n| Name | Value |\n| --- | --- |\n| Alpha | base |\n';
+  const { host, webview } = await openEmbeddedWebview(browser, text);
+  try {
+    const selector = 'tbody textarea[data-table-row="1"][data-table-col="1"]';
+    await webview.click(selector);
+    await host.keyboard.down('Control'); await host.keyboard.press('a'); await host.keyboard.up('Control');
+    await host.keyboard.sendCharacter('pending-bfcache-value');
+    await webview.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+    assert.deepEqual(await embeddedDrafts(host), [], 'Persisted pagehide must not terminate a recoverable webview');
+    await webview.evaluate(() => window.dispatchEvent(new Event('beforeunload')));
+    const recovery = await embeddedDrafts(host);
+    assert.deepEqual(recovery.map((message: any) => message.text), [text.replace('| Alpha | base |', '| Alpha | pending-bfcache-value |')],
+      'A later terminal event must still recover input after persisted pagehide');
+  } finally { await host.close(); }
 }
 
 async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { if (process.argv.includes('--unload-only')) { await pendingTableUnload(browser); } else if (process.argv.includes('--history-only')) { await matrix(browser); } else { await pendingTableUnload(browser); await startupModeVisibility(browser); await reopenedPreviewMode(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await resolveMergeConflicts(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await headingWeightPreference(browser); await largeDocumentStartupPreference(browser); } } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }

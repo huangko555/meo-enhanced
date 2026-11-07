@@ -24,7 +24,14 @@ exports.run = async function () {
   });
   const waitFor = async (predicate, label) => {
     for (let attempt = 0; attempt < 160; attempt++) {
-      if (await predicate()) return;
+      try {
+        if (await predicate()) return;
+      } catch (error) {
+        // Webview replacement can detach a frame between enumeration and
+        // evaluate(), including a synchronous Puppeteer decorator throw. Keep
+        // the original bound; assertion and product errors still fail at once.
+        if (!/detached Frame|Execution context was destroyed|Cannot find context/i.test(String(error))) throw error;
+      }
       await delay(50);
     }
     throw new Error(`Timed out: ${label}`);
