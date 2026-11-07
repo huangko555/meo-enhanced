@@ -491,7 +491,8 @@
       "scripts/test-wiki-resources.ts",
       "scripts/test-block-export.ts",
       "scripts/test-workspace-documents.ts",
-      "scripts/test-workspace-documents-host.ts"
+      "scripts/test-workspace-documents-host.ts",
+      "scripts/test-code-mirror-search-history-focus-adapter.ts"
     ],
     "exclusive": [
       "scripts/test-navigation-reveal-production.ts",
@@ -799,7 +800,9 @@
       "scripts/test-webview-viewport.ts",
       "scripts/test-wiki-production.ts",
       "scripts/test-block-export-browser.ts",
-      "scripts/test-task-overview-browser.ts"
+      "scripts/test-task-overview-browser.ts",
+      "scripts/test-search-replace-history-production.ts",
+      "scripts/test-pending-table-mode-history-production.ts"
     ]
   }
 }

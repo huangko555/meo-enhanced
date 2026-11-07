@@ -73,6 +73,7 @@ import { gitDiffDetailsExtensions } from './helpers/gitDiffDetails';
 import { createTableTransactionProvenance } from './application/tableTransactionProvenance';
 import { createCodeMirrorTableTransactionProvenanceAdapter } from './adapters/codeMirrorTableTransactionProvenanceAdapter';
 import { createCodeMirrorTableHistoryFocusAdapter } from './adapters/codeMirrorTableHistoryFocusAdapter';
+import { createCodeMirrorSearchHistoryFocusAdapter, isSearchHistorySelectionValid } from './adapters/codeMirrorSearchHistoryFocusAdapter';
 import { createCodeMirrorDomTableColumnWidthAdapter } from './editor/tableColumnWidthAdapter';
 import { tableColumnWidthPolicy } from './editor/tableColumnWidthPolicy';
 import { beginTableColumnResizeViewport, finishTableColumnResizeViewport, preserveTableColumnResizeLayout } from './helpers/tableColumnResizeViewport';
@@ -303,6 +304,11 @@ type EditorFormatAction = TableFormatAction | 'heading' | 'bulletList' | 'number
 type EditorFormatLevel = number | { cols: number; rows: number };
 
 const setSearchQueryEffect = StateEffect.define<SearchQueryState>();
+type SearchMatchCalculation = { readonly query: SearchQueryState; readonly matches: SearchMatchRange[] };
+// A command that has already calculated post-edit matches can hand that exact
+// result to the decoration field. This prevents Source replacement from
+// materializing and scanning the full post-edit document a second time.
+const setSearchMatchesEffect = StateEffect.define<SearchMatchCalculation>();
 const refreshDecorationsEffect = StateEffect.define();
 const searchMatchStyle = 'color: var(--meo-semantic-searchMatchForeground) !important; -webkit-text-fill-color: var(--meo-semantic-searchMatchForeground) !important;';
 const activeSearchMatchStyle = 'color: var(--meo-semantic-searchMatchActiveForeground) !important; -webkit-text-fill-color: var(--meo-semantic-searchMatchActiveForeground) !important;';
@@ -363,16 +369,17 @@ const searchMatchField = StateField.define<SearchMatchFieldValue>({
   },
   update(value, tr: Transaction) {
     let changedQuery: SearchQueryState | null = null;
+    let calculated: SearchMatchCalculation | null = null;
     for (const effect of tr.effects) {
       if (effect.is(setSearchQueryEffect)) {
         changedQuery = effect.value;
-        break;
       }
+      if (effect.is(setSearchMatchesEffect)) calculated = effect.value;
     }
 
     // A new Find query must read the accepted document even if typing has not
     // flushed its decorations yet. Other input consumers retain their schedule.
-    if (!changedQuery && shouldDeferLiveInputDerivedWork(tr)) {
+    if (!changedQuery && !calculated && shouldDeferLiveInputDerivedWork(tr)) {
       if (!tr.docChanged) return value;
       const matches = value.matches.map((match) => ({
         start: tr.changes.mapPos(match.start, 1),
@@ -386,9 +393,14 @@ const searchMatchField = StateField.define<SearchMatchFieldValue>({
 
     if (tr.docChanged || changedQuery || isLiveInputDerivedWorkRefresh(tr)) {
       const searchQuery = changedQuery ?? tr.state.field(searchQueryField);
-      const matches = searchQuery.text
+      const supplied = calculated
+        && calculated.query.text === searchQuery.text
+        && calculated.query.wholeWord === searchQuery.wholeWord
+        && calculated.query.caseSensitive === searchQuery.caseSensitive
+        ? calculated.matches : null;
+      const matches = supplied ?? (searchQuery.text
         ? findSearchMatchRanges(readDocumentTextProjection(tr.state.doc), searchQuery.text, searchQuery)
-        : [];
+        : []);
       return {
         matches,
         decorations: buildSearchDecorations(tr.state, matches)
@@ -1893,7 +1905,8 @@ export function createEditor({
     to: number,
     isCurrent: () => boolean,
     remainingFrames = 8,
-    mounting = false
+    mounting = false,
+    restoreFocus = false
   ) => {
     if (remainingFrames <= 0) return;
     // CodeMirror measures a rendered table as one widget, so its position cannot
@@ -1907,6 +1920,10 @@ export function createEditor({
       if (searchState?.selectionFrom === from && searchState.selectionTo === to) {
         const match = view.dom.querySelector<HTMLElement>(matchSelector);
         if (match) {
+          const active = view.dom.ownerDocument.activeElement;
+          if (restoreFocus && (active === view.contentDOM || active?.closest('.find-panel button'))) {
+            restoreTableModeSelection({ anchor: from, head: to }, true);
+          }
           viewportController.revealVerticalBounds(() => {
             const currentMatch = view.dom.querySelector<HTMLElement>(matchSelector);
             const rect = currentMatch?.getBoundingClientRect();
@@ -1928,9 +1945,9 @@ export function createEditor({
         // An offscreen widget needs one source-position reveal to mount its DOM.
         // Only after that one-shot mount step can the measured table match own positioning.
         viewportController.revealPosition(from, { y: 'center-if-outside' }, isCurrent);
-        revealLiveTableSearchMatch(from, to, isCurrent, 8, true);
+        revealLiveTableSearchMatch(from, to, isCurrent, 8, true, restoreFocus);
       } else {
-        revealLiveTableSearchMatch(from, to, isCurrent, remainingFrames - 1, mounting);
+        revealLiveTableSearchMatch(from, to, isCurrent, remainingFrames - 1, mounting, restoreFocus);
       }
     });
   };
@@ -1955,18 +1972,19 @@ export function createEditor({
     // Retain a native cell only when it represents the newly selected match.
     lastFocusedEditorTarget = view.contentDOM;
     lastTextareaSelection = null;
-    if (currentMode === 'live') restoreTableModeSelection({ anchor: from, head: to }, false);
+    const restoredTable = currentMode === 'live'
+      && restoreTableModeSelection({ anchor: from, head: to }, focusEditor);
     const isRevealCurrent = viewportController.beginNavigationReveal();
     let tableNode: SyntaxNode | null = currentMode === 'live'
       ? syntaxTree(view.state).resolveInner(from, 1)
       : null;
     while (tableNode && tableNode.name !== 'Table') tableNode = tableNode.parent;
     if (tableNode) {
-      requestAnimationFrame(() => revealLiveTableSearchMatch(from, to, isRevealCurrent));
+      requestAnimationFrame(() => revealLiveTableSearchMatch(from, to, isRevealCurrent, 8, false, focusEditor && !restoredTable));
     } else {
       viewportController.revealPosition(from, { y: 'center-if-outside', schedule: 'next-frame' }, isRevealCurrent);
     }
-    if (focusEditor) {
+    if (focusEditor && !restoredTable && !tableNode) {
       view.focus();
     }
   };
@@ -2296,18 +2314,27 @@ export function createEditor({
     }
 
     const replacementEnd = from + replacement.length;
-    view.dispatch({
-      changes: { from, to, insert: replacement },
-      selection: { anchor: replacementEnd }
-    });
-
-    const remainingMatches = getSearchMatches(query, options);
+    const nextText = view.state.doc.sliceString(0, from) + replacement + view.state.doc.sliceString(to);
+    const remainingMatches = findSearchMatchRanges(nextText, query, options);
+    const searchQuery = createSearchQueryState(query, options);
+    const postEditMatches = setSearchMatchesEffect.of({ query: searchQuery, matches: remainingMatches });
     const afterReplacement = remainingMatches.findIndex((match) => match.start >= replacementEnd);
     const wrappedMatch = afterReplacement >= 0
       ? afterReplacement
       : remainingMatches.findIndex((match) => match.end <= from);
     if (wrappedMatch >= 0) {
       const match = remainingMatches[wrappedMatch];
+      view.dispatch({
+        changes: { from, to, insert: replacement },
+        selection: { anchor: match.start, head: match.end },
+        effects: [searchHistoryFocusAdapter.effect(
+          { ranges: [{ anchor: match.start, head: match.end }], mainIndex: 0 },
+          { ranges: [{ anchor: from, head: to }], mainIndex: 0 }
+        ), postEditMatches],
+        annotations: isolateHistory.of('full')
+      });
+      searchResultCache = { doc: view.state.doc, query, wholeWord: searchQuery.wholeWord,
+        caseSensitive: searchQuery.caseSensitive, matches: remainingMatches };
       selectSearchMatch(match.start, match.end);
       return {
         replaced: true,
@@ -2317,6 +2344,15 @@ export function createEditor({
       };
     }
 
+    view.dispatch({
+      changes: { from, to, insert: replacement },
+      selection: { anchor: replacementEnd },
+      effects: postEditMatches,
+      annotations: isolateHistory.of('full')
+    });
+    searchResultCache = { doc: view.state.doc, query, wholeWord: searchQuery.wholeWord,
+      caseSensitive: searchQuery.caseSensitive, matches: remainingMatches };
+
     return { replaced: true, found: false, current: 0, total: remainingMatches.length };
   };
 
@@ -2324,6 +2360,7 @@ export function createEditor({
     createTableTransactionProvenance()
   );
   const tableHistoryFocusAdapter = createCodeMirrorTableHistoryFocusAdapter();
+  const searchHistoryFocusAdapter = createCodeMirrorSearchHistoryFocusAdapter();
   const tableColumnWidthAdapter = createCodeMirrorDomTableColumnWidthAdapter({
     root: parent,
     policy: tableColumnWidthPolicy,
@@ -2708,6 +2745,7 @@ export function createEditor({
       modeCompartment.of(startMode === 'live' ? [shikiCodeHighlight, ...liveModeExtensions({ largeDocument: boundedEditorWork, language: modeLanguage() })] : sourceMode(boundedEditorWork, lightweightSourceSyntax, modeLanguage())),
       searchQueryField,
       searchAnchorField,
+      searchHistoryFocusAdapter.extension,
       Prec.high(searchMatchField),
       diagnosticDataField,
       diagnosticField,
@@ -3096,16 +3134,23 @@ export function createEditor({
       let changedRange: { from: number; to: number } | null = null;
       let nativeSelectionOwnsTarget = false;
       let semanticTargetPosition: number | null = null;
+      let semanticTargetSelection: ReturnType<typeof searchHistoryFocusAdapter.read> = null;
       const target = {
         state: view.state,
         dispatch(transaction: Transaction) {
           changedRange = changedCodeMirrorDocumentRange(beforeDocument, transaction.newDoc);
           const listTarget = readListHistoryFocus(transaction.state);
           const tableTarget = tableHistoryFocusAdapter.read(transaction.state);
-          semanticTargetPosition = listTarget?.position ?? (tableTarget && !tableTarget.contentOnly
+          const searchTarget = searchHistoryFocusAdapter.read(transaction.state);
+          semanticTargetSelection = isSearchHistorySelectionValid(searchTarget, transaction.newDoc.length) ? searchTarget : null;
+          semanticTargetPosition = semanticTargetSelection?.ranges[semanticTargetSelection.mainIndex]?.head
+            ?? listTarget?.position ?? (tableTarget && !tableTarget.contentOnly
             ? tableHistorySourcePosition(transaction.state, tableTarget) : null);
           const nativeSelection = transaction.newSelection.main;
-          if (!listTarget && !tableTarget) {
+          if (semanticTargetSelection) {
+            // The target belongs to this native history event (via
+            // invertedEffects), unlike a later unrelated selection move.
+          } else if (!listTarget && !tableTarget) {
             // Native history already restores the real text selection. Only
             // prefer it when it belongs to the replayed edit, so an unrelated
             // old selection cannot replace a rendered control's target.
@@ -3122,7 +3167,15 @@ export function createEditor({
           // Native history bypasses transaction filters. Accept its original
           // transaction and the semantic selection in one view update, before
           // any native caret reveal or intermediate source frame can paint.
-          if (semanticTargetPosition === null || (nativeSelectionOwnsTarget || listTarget?.preserveSelection)
+          if (semanticTargetSelection) {
+            const selection = EditorSelection.create(semanticTargetSelection.ranges.map(range =>
+              EditorSelection.range(range.anchor, range.head)), semanticTargetSelection.mainIndex);
+            if (selection.eq(transaction.newSelection)) view.dispatch(transaction);
+            else view.dispatch([transaction, transaction.state.update({
+              selection,
+              annotations: [Transaction.addToHistory.of(false), editorManagedScroll.of(true)]
+            })]);
+          } else if (semanticTargetPosition === null || (nativeSelectionOwnsTarget || listTarget?.preserveSelection)
             && nativeSelection.head === semanticTargetPosition) view.dispatch(transaction);
           else view.dispatch([transaction, transaction.state.update({
             selection: { anchor: semanticTargetPosition },
@@ -3141,24 +3194,58 @@ export function createEditor({
         // publish an unrelated document selection before table restoration.
         view.focus();
       }
+      const targetSelection = semanticTargetSelection ?? (applied && !tableHistoryFocusAdapter.read(view.state)
+        && (nativeSelectionOwnsTarget || readListHistoryFocus(view.state)?.preserveSelection)
+        && (view.state.selection.ranges.length > 1 || !view.state.selection.main.empty) ? {
+          ranges: view.state.selection.ranges.map(range => ({ anchor: range.anchor, head: range.head })),
+          mainIndex: view.state.selection.mainIndex
+        } : null);
       return {
         applied,
         targetPosition: applied ? semanticTargetPosition
           ?? (nativeSelectionOwnsTarget ? view.state.selection.main.head : null) : null,
         changedRange: applied ? changedRange : null,
-        ...(applied && !tableHistoryFocusAdapter.read(view.state)
-          && (nativeSelectionOwnsTarget || readListHistoryFocus(view.state)?.preserveSelection)
-          && (view.state.selection.ranges.length > 1 || !view.state.selection.main.empty) ? {
-            targetSelection: { ranges: view.state.selection.ranges.map(range => ({ anchor: range.anchor, head: range.head })),
-              mainIndex: view.state.selection.mainIndex }
-          } : {})
+        ...(applied && targetSelection ? { targetSelection } : {})
       };
     },
     attemptBoundaryRestore(request: EditorHistoryRestoreRequest, isCurrent) {
       if (!isCurrent()) return 'not-rendered';
       if (currentMode !== 'live') return 'not-rendered';
       const tableTarget = tableHistoryFocusAdapter.read(view.state);
-      if (!isLiveInputDerivedWorkReady(view.state) && !tableTarget?.contentOnly) return 'pending-presentation';
+      const searchCandidate = searchHistoryFocusAdapter.read(view.state);
+      const searchTarget = isSearchHistorySelectionValid(searchCandidate, view.state.doc.length) ? searchCandidate : null;
+      // A search target is attached to this native history event. It owns both
+      // selection and reveal, even when the replaced match happened to be in a
+      // table and the next match did not. Do not let a changed-range heuristic
+      // reactivate that old table cell.
+      if (!isLiveInputDerivedWorkReady(view.state) && (searchTarget || !tableTarget?.contentOnly)) return 'pending-presentation';
+      if (searchTarget) {
+        pendingTableHistoryFocus = null;
+        const range = searchTarget.ranges[searchTarget.mainIndex];
+        if (!range) return 'not-rendered';
+        const targetRange = { from: Math.min(range.anchor, range.head), to: Math.max(range.anchor, range.head) };
+        if (isTableHistoryRange(view.state, targetRange)) {
+          if (restoreTableModeSelection({ anchor: range.anchor, head: range.head }, true)) {
+            const input = lastFocusedEditorTarget as HTMLTextAreaElement;
+            viewportController.revealVerticalBounds(() => {
+              const selection = getTableInputDocumentSelection(input);
+              return selection ? { top: selection.anchorY, bottom: selection.anchorBottomY } : null;
+            }, isCurrent, {
+              y: 'center-if-outside', yMargin: 12,
+              readViewportBounds: () => tableUsableViewportBounds(view, input)
+            });
+            return 'restored';
+          }
+          // The target table is not mounted yet. Reveal its source position
+          // once, then retry the semantic restore rather than selecting the
+          // changed (possibly different) table.
+          viewportController.revealPosition(targetRange.from, { y: 'center-if-outside' }, isCurrent);
+          return 'retry';
+        }
+        restoreHistorySelection(request, isCurrent);
+        viewportController.revealPosition(targetRange.from, { y: 'center-if-outside' }, isCurrent);
+        return 'restored';
+      }
       const changedRangeIsTable = tableTarget?.contentOnly || (request.changedRange
         ? isTableHistoryRange(view.state, request.changedRange)
         : false);
