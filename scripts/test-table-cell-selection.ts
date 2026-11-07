@@ -248,6 +248,31 @@ for (const leftCell of [false, true]) {
   ), 'outside release without a visible multi-cell range still exits');
 }
 
+for (const insideTable of [true, false]) {
+  const selection = new TableCellSelection();
+  begin(selection, 11, cell(0, 0), 0);
+  assert.equal(selection.copy([[value('one')]]), null, 'text candidates keep native copy');
+  selection.accept({ type: 'move', pointerId: 11, cell: cell(1, 1) });
+  assert.deepEqual(selection.accept({ type: 'move', pointerId: 11, cell: cell(0, 0) }), accepted(
+    { kind: 'cells', pointerId: 11, range: range(0, 0, 0, 0), focus: 'table' }
+  ), 'returning to the anchor keeps a single whole-cell selection');
+  assert.deepEqual(selection.accept({
+    type: 'end', pointerId: 11, cell: insideTable ? cell(0, 0) : null, insideTable
+  }), accepted(
+    { kind: 'release-pointer', pointerId: 11 },
+    { kind: 'cells', pointerId: 11, range: range(0, 0, 0, 0), focus: 'table' }
+  ), 'inside and outside release both persist the visible single-cell range');
+  assert.deepEqual(selection.copy([[value('one')]]), {
+    plain: 'one',
+    html: '<table><tr><td>one</td></tr></table>',
+    meo: serializeMeoTableClipboard([['one']])
+  }, 'a whole single cell copies with the same formats as a rectangle');
+  selection.accept({ type: 'activate', pointerId: 12, cell: cell(0, 0), origin: 'textarea' });
+  assert.equal(selection.copy([[value('one')]]), null, 'native activation retires whole-cell copy');
+  selection.accept({ type: 'clear', reason: 'escape' });
+  assert.equal(selection.copy([[value('one')]]), null, 'clearing retires whole-cell copy');
+}
+
 for (const reason of ['outside', 'escape', 'cross-table', 'external', 'replacement'] as const) {
   const selection = new TableCellSelection();
   begin(selection, 21, cell(0, 0), 0);

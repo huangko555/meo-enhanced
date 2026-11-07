@@ -15,6 +15,7 @@ import {
 import { createTableCommandTargetRegistry } from '../webview/src/editor/tableCommandTargetRegistry';
 import { installCausalFrameSettlement } from './causal-frame-settlement';
 import { applyUiTheme } from '../webview/src/helpers/uiTheme';
+import { applyBuiltInVisualBaseline } from '../webview/src/helpers/theme';
 import { createWidgetRemountProbe } from './widget-remount-test-helpers';
 import { usesLargeDocumentDerivedWorkBudget } from '../webview/src/editor/liveInputDerivedWork';
 
@@ -32,6 +33,7 @@ const getTableProvenanceSnapshot = () => {
   TableStabilityHarness?: {
     usesLargeDocumentDerivedWorkBudget: typeof usesLargeDocumentDerivedWorkBudget;
     applyUiTheme: typeof applyUiTheme;
+    applyBuiltInVisualBaseline: typeof applyBuiltInVisualBaseline;
     createEditor: typeof createEditor;
     createWidgetRemountProbe: typeof createWidgetRemountProbe;
     handleImagePaste: typeof handleImagePaste;
@@ -49,6 +51,7 @@ const getTableProvenanceSnapshot = () => {
 }).TableStabilityHarness = {
   usesLargeDocumentDerivedWorkBudget,
   applyUiTheme,
+  applyBuiltInVisualBaseline,
   createEditor,
   createWidgetRemountProbe,
   handleImagePaste,

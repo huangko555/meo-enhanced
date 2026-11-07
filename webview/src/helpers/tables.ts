@@ -2504,13 +2504,13 @@ export function endTableCellEditing(view: EditorView): void {
 /** Retain a table gesture or its accepted cell range across native focus restoration. */
 export function restoreTablePointerSelection(view: EditorView, includeCompletedRange = false): void {
   for (const widget of mountedTableWidgets.get(view) ?? []) {
-    const { phase, range } = widget.cellSelection.snapshot();
+    const { phase } = widget.cellSelection.snapshot();
     if (phase === 'text-candidate') {
       widget.projectPointerTextSelection(widget.selectionDomHead);
       return;
     }
-    if ((phase === 'dragging' || includeCompletedRange && phase === 'persisted' && range &&
-      (range.fromRow !== range.toRow || range.fromCol !== range.toCol)) && widget.domRefs) {
+    if ((phase === 'dragging' || includeCompletedRange && phase === 'persisted' &&
+      widget.cellSelection.selectedCellRange()) && widget.domRefs) {
       widget.setTableInteractionActive(widget.domRefs.wrap, true);
       widget.domRefs.table.focus({ preventScroll: true });
       return;
@@ -3434,9 +3434,7 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
 
   applySelection(range: TableSelectionRange | null) {
     if (!this.domRefs) return;
-    const showSelectionStyle = Boolean(
-      range && (range.fromRow !== range.toRow || range.fromCol !== range.toCol)
-    );
+    const showSelectionStyle = this.cellSelection.selectedCellRange() !== null;
     const { cellGrid } = this.domRefs;
     for (let row = 0; row < cellGrid.length; row++) {
       const cells = cellGrid[row];
@@ -3779,14 +3777,10 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
   }
 
   clearSelectedCellContents(): boolean {
-    const selection = this.cellSelection.snapshot();
-    const range = selection.range;
+    const range = this.cellSelection.selectedCellRange();
     const view = this.view;
     const dom = this.domRefs?.wrap;
     if (!range || !view || !dom) return false;
-    const cellCount = (range.toRow - range.fromRow + 1) * (range.toCol - range.fromCol + 1);
-    if (cellCount <= 1) return false;
-
     // The history event owns the same semantic target as the immediate focus
     // restore. This survives host-driven undo where no textarea is focused.
     const revealTarget = { row: range.fromRow, col: range.fromCol };
@@ -4053,8 +4047,8 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
 
     const onCopy = (event: ClipboardEvent) => {
       if (!this.domRefs) return;
-      const { range } = this.cellSelection.snapshot();
-      if (!range || range.fromRow === range.toRow && range.fromCol === range.toCol) return;
+      const range = this.cellSelection.selectedCellRange();
+      if (!range) return;
       const values = this.copyCellMatrix(range);
       const serialized = this.cellSelection.copy(values);
       if (!serialized) return;
@@ -6216,18 +6210,14 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
     if (contextTrigger.hidden) return;
     const visibleTop = Math.max(effectiveViewportTop, wrapRect.top);
     const visibleBottom = Math.min(viewportRect.bottom, wrapRect.bottom);
-    const selectionRange = this.cellSelection.snapshot().range;
-    const hasMultiCellSelection = Boolean(selectionRange && (
-      selectionRange.fromRow !== selectionRange.toRow
-      || selectionRange.fromCol !== selectionRange.toCol
-    ));
+    const hasCellSelection = this.cellSelection.selectedCellRange() !== null;
     const focusedInput = document.activeElement;
     const targetInput = focusedInput instanceof HTMLTextAreaElement && row.contains(focusedInput)
       ? focusedInput
       : this.domRefs.allRowInputs[rowIndex]?.[this.activeTarget.col] ?? null;
     // Passive reading has no native caret to follow. Creating its mirror here
     // forces layout and also wakes floating chrome's body mutation observer.
-    const caretBounds = !hasMultiCellSelection && targetInput
+    const caretBounds = !hasCellSelection && targetInput
       && (targetInput === focusedInput || !contextMenu.hidden)
       ? tableCellCaretViewportBounds(targetInput)
       : null;
