@@ -18,6 +18,7 @@ let pendingSave: {
 } | null = null;
 
 const documentSession = createDocumentSessionWebviewAdapter({
+  pageId: 'native-save-table-page',
   postMessage: handleWebviewMessage,
   presentText: (text) => {
     editor?.setText(text);
@@ -78,6 +79,7 @@ const harness = {
     diskText = text;
     documentSession.start({
       type: 'init',
+      pageId: 'native-save-table-page',
       documentId: 'file:///native-save-table.md',
       text,
       version: 1,
