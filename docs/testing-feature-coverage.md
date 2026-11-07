@@ -51,6 +51,7 @@
 | 自定义 Preview 预设 | 文件夹导入复制、重复 ID 更新确认、移除确认；管理页固定内置项、显示状态持久化、跨文档隐藏回退、双语指南与共享提示；CSS 实际换行；旧 JSON 迁移；切换失败回滚与启动恢复；单主题禁用切换并说明；双主题切换；仅继承样式；注释与代码着色独立可切换或固定；固定开关隐藏；内置和自定义预设统一说明字段与分隔线；导入、加载、渲染错误状态及恢复；切回后恢复用户设置；CSS 与编辑界面隔离；导出冻结样式版本 | [配置与存储](../scripts/test-custom-preview-presets.ts)、[VS Code 存储适配器](../scripts/test-vscode-preview-presets.ts)、[生产预览与实际 PDF](../scripts/test-custom-preview-presets-browser.ts)、[管理页操作与布局](../scripts/test-preview-preset-management-browser.ts)；实际原生菜单及跨窗口重载另按 [配置指南](../preview-presets/README.zh-CN.md) 检查 |
 | HTML / PDF / Word 导出与目录 | HTML/PDF 沿用当前预览预设和实际明暗主题，Word 使用固定样式；内容、资源、高亮、公式、分页与目录正确；Word 隐藏节点不外露、可见子节点保留，行内 HTML 文字、图注及显式换行不丢失；失败可重试 | [导出外观](../scripts/test-export-appearance.ts)、[含目录导出](../scripts/test-export-table-of-contents.ts)、[PDF 布局](../scripts/test-pdf-mermaid-layout.ts)、[Word 生成](../scripts/test-docx-export-runtime.ts)、[实际 PDF / Word 文件生成](../scripts/test-docx-export-browser.ts)；PDF 文件检查验证格式完整性，逐页视觉检查和原生保存对话框另验 |
 | 长文档 | 固定文档、明确采样类别与未覆盖目标；编辑和历史不跳；完整阅读确实到达两端 | 发布范围选用受保护的 endurance / large-document 入口，不能把采样编辑称为每个位置都已测试 |
+| 关于与版本信息复制 | 按需读取版本与运行环境；复制等待期间没有“正在复制…”提示，图标、悬停外观和焦点保持稳定；重复请求互斥，成功显示勾选，失败可重试，迟到结果不更新重开的页面 | [复制反馈与焦点](../scripts/test-about-settings-copy.ts)覆盖中英文、深浅色与异步结果；[完整设置窗口](../scripts/test-settings-window-production.ts)覆盖服务消息、关闭重开及环境读取；系统剪贴板另验 |
 
 ## 设置、输入辅助与快捷键
 

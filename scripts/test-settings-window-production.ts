@@ -530,7 +530,8 @@ try {
   assert.equal(await page.evaluate(() => (window as any).__clipboard), `MEO Enhanced: ${productVersion}\nVisual Studio Code: 1.140.0\nOS: Windows 11 (10.0.26200) (x64)`);
   await page.evaluate(() => { (window as any).__holdNextClipboardWrite = true; });
   await page.click('.settings-about-copy');
-  assert.equal(await page.$eval('.settings-about-copy', element => (element as HTMLButtonElement).disabled), true);
+  assert.equal(await page.$eval('.settings-about-copy', element => (element as HTMLButtonElement).disabled), false, 'Pending copy retains its focus and visual state');
+  assert.equal(await page.$eval('.settings-about-copy', element => element.getAttribute('aria-busy')), 'true');
   await closeSettings('escape');
   await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-sponsor-button');
   await page.evaluate(() => { (window as any).__flushClipboardWrite(); });

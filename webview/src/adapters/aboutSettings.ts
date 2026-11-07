@@ -54,6 +54,8 @@ export function createAboutSettings(options: {
       const header = node('div', 'settings-about-runtime-header');
       header.append(node('h4', 'settings-about-section-title', t('版本信息', 'Version information')));
       const copy = node('button', 'settings-button settings-about-copy'); copy.type = 'button';
+      copy.dataset.tooltipPlacement = 'left'; copy.dataset.tooltipLiveUpdate = 'true';
+      let iconCopied: boolean | undefined;
       header.append(copy);
       const values = node('dl', 'settings-about-versions');
       const row = (label: string, value: string) => { const term = node('dt', '', label), detail = node('dd', '', value); values.append(term, detail); return detail; };
@@ -70,19 +72,24 @@ export function createAboutSettings(options: {
         system.textContent = environment ? `${environment.system} · ${environment.architecture}` : readFailed ? unavailable : waiting;
         remoteLabel.hidden = remote.hidden = !environment?.remoteName;
         remote.textContent = environment?.remoteName ?? '';
-        copy.disabled = !environment || copying;
-        const copyLabel = copying ? t('正在复制…', 'Copying…') : copied ? t('已复制', 'Copied') : t('复制版本信息', 'Copy version info');
-        copy.setAttribute('aria-label', copyLabel); copy.dataset.tooltip = copyLabel;
-        copy.dataset.tooltipPlacement = 'left'; copy.dataset.tooltipLiveUpdate = 'true';
-        copy.replaceChildren(createElement(copied ? Check : Copy, { width: 16, height: 16, 'aria-hidden': 'true' }));
-        status.textContent = copyFailed ? t('复制失败，请重试。', 'Unable to copy. Please retry.') : readFailed ? t('版本信息读取失败，请重试。', 'Unable to load version information. Please retry.') : copied ? t('版本信息已复制，可粘贴到问题反馈中。', 'Version information copied. Paste it into your feedback.') : environment?.remoteName ? t('系统信息来自远程扩展运行环境。', 'System information is from the remote extension environment.') : '';
+        copy.disabled = !environment;
+        if (copying) copy.setAttribute('aria-busy', 'true'); else copy.removeAttribute('aria-busy');
+        const copyLabel = copied ? t('已复制', 'Copied') : t('复制版本信息', 'Copy version info');
+        if (copy.getAttribute('aria-label') !== copyLabel) copy.setAttribute('aria-label', copyLabel);
+        if (copy.dataset.tooltip !== copyLabel) copy.dataset.tooltip = copyLabel;
+        if (iconCopied !== copied) {
+          copy.replaceChildren(createElement(copied ? Check : Copy, { width: 16, height: 16, 'aria-hidden': 'true' }));
+          iconCopied = copied;
+        }
+        const statusText = copyFailed ? t('复制失败，请重试。', 'Unable to copy. Please retry.') : readFailed ? t('版本信息读取失败，请重试。', 'Unable to load version information. Please retry.') : copied ? t('版本信息已复制，可粘贴到问题反馈中。', 'Version information copied. Paste it into your feedback.') : environment?.remoteName ? t('系统信息来自远程扩展运行环境。', 'System information is from the remote extension environment.') : '';
+        if (status.textContent !== statusText) status.textContent = statusText;
         status.hidden = !status.textContent; status.classList.toggle('is-error', copyFailed || readFailed); status.classList.toggle('is-copy-success', copied); retry.hidden = !readFailed;
       };
       copy.addEventListener('click', async () => {
         if (!environment || copying || disposed) return;
         const current = generation;
         const text = [`MEO Enhanced: ${options.productVersion}`, `${environment.appName}: ${environment.appVersion}`, `OS: ${environment.system} (${environment.architecture})`, ...(environment.remoteName ? [`Remote: ${environment.remoteName}`] : [])].join('\n');
-        copying = true; copied = copyFailed = false; updateValues();
+        copying = true; updateValues();
         let success = false;
         try { success = await options.copyText(text); } catch { /* The same inline retry state handles clipboard failure. */ }
         if (disposed || current !== generation) return;

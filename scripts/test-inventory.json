@@ -713,6 +713,7 @@
       "scripts/test-search-overview-ruler.ts",
       "scripts/test-search-replace-production.ts",
       "scripts/test-settings-window-production.ts",
+      "scripts/test-about-settings-copy.ts",
       "scripts/test-shiki-worker.ts",
       "scripts/test-slash-commands-production.ts",
       "scripts/test-source-active-line.ts",

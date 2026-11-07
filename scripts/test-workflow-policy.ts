@@ -179,6 +179,7 @@ function targetedCommands(
         script('scripts/test-preview-comment-toggle-browser.ts'),
         script('scripts/test-inline-code-layout-production.ts'),
         script('scripts/test-settings-window-production.ts'),
+        script('scripts/test-about-settings-copy.ts'),
         script('scripts/test-editor-font-wheel.ts'),
         script('scripts/test-preview-preset-management-browser.ts'),
         script('scripts/test-toolbar-menus-browser.ts'),
