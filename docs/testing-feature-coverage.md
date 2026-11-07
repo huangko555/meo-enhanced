@@ -57,7 +57,7 @@
 
 | 功能 | 必须检查的结果 | 门禁证据与边界 |
 | --- | --- | --- |
-| 小菜单与完整设置 | 小菜单保持 288px 和原有主题/语言/字号控件；三个 Tab、连续章节、搜索、焦点返回、恢复默认范围正确；中英文和亮暗/窄屏可用 | [正式窗口](../scripts/test-settings-window-production.ts)、[工具栏菜单](../scripts/test-toolbar-menus-browser.ts) |
+| 小菜单与完整设置 | 小菜单保持 288px 和原有主题/语言/字号控件；反馈项悬停 180ms 展开版本信息，移出反馈项与浮窗 180ms 后关闭，跨越间隙与复制保持展开；整行仍直接去反馈；插件、编辑器、系统/架构及可选远程环境与关于页共用数据和完整复制格式，失败可重试，迟到结果不恢复旧状态；键盘、边缘定位与销毁正确；三个 Tab、连续章节、搜索、焦点返回、恢复默认范围正确；中英文和亮暗/窄屏可用 | [正式窗口](../scripts/test-settings-window-production.ts)、[版本信息与复制交互](../scripts/test-about-settings-copy.ts)、[工具栏菜单](../scripts/test-toolbar-menus-browser.ts)；浏览器覆盖宿主剪贴板协议结果，原生系统剪贴板与外部浏览器跳转另验 |
 | 包裹、补对、跳过、退格与列表续写 | 原生 Markdown 全部 11 组及中文符号、连续标记/单双反引号、正反/多行/代码内/多选区；空白、引号、转义前缀例外；包裹与空光标补齐独立，智能/始终/关闭；自动符号来源随撤销恢复、外部文档更新清除；正文与单元格一致；预编辑不改写、IME 自带整对不重复 | [输入辅助](../scripts/test-input-assistance-production.ts)、[编辑场景](../scripts/test-editing-features-production.ts)；CDP 输入法事件覆盖浏览器流程，原生中文输入法另验 |
 | HTML 注释输入与切换 | 行/精确选区切换，无内侧填充；现有注释取消且保留空白；混合选区不嵌套；`/comment`、手动补全/完整闭合标记跳过/空注释退格；Tab、Esc、Enter、IME、Live/Source、表格焦点、撤销及快捷键配置正确 | [注释生产输入](../scripts/test-html-comment-input-production.ts)；原生输入法及 VS Code 快捷键截获另验 |
 | HTML 共用候选菜单 | Live/Source 标签、属性及预设属性值补全；自动/手动唤起、Enter/Tab/点击确认与单步撤销；关闭开关即时生效且保留标签自动闭合；Esc 保留光标、IME 不接受候选；共用上下方偏好、可见顺序及中英文深浅色/窄屏外观 | [HTML 候选交互](../scripts/test-html-completion-production.ts)、[偏好合同](../scripts/test-editing-preferences.ts)、[正式窗口](../scripts/test-settings-window-production.ts)；原生输入法及宿主快捷键另验 |

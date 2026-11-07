@@ -1,4 +1,6 @@
 import { createExtensionFeatureSettings } from './adapters/extensionFeatureSettings';
+import { createVersionInformation, createVersionInformationSource } from './adapters/versionInformation';
+import { createFeedbackVersionPopover } from './adapters/feedbackVersionPopover';
 import { createWorkspaceDocumentsTransport, createDocumentOperationResponder } from './adapters/workspaceDocuments';
 import { mountDocumentViews } from './documentViews';
 import { createBlockExportAdapter } from './adapters/blockExportAdapter';
@@ -99,6 +101,7 @@ import { createEditorFocusController } from './adapters/editorFocusController';
 import { createReadingLayoutController } from './adapters/readingLayout';
 
 let settingsWindow: ReturnType<typeof createSettingsWindow> | null = null;
+let feedbackVersionPopover: ReturnType<typeof createFeedbackVersionPopover> | null = null;
 let uiColors: UiColors = { light: {}, dark: {} };
 let uiColorsPreview: UiColors | null = null;
 let editingPreferences: EditingPreferences = { input: { ...defaultInputAssistance }, shortcuts: {} };
@@ -1329,6 +1332,7 @@ const applyUiLanguage = (language: UiLanguage): void => {
   supportHeading.textContent = strings.supportHeading;
   feedbackPrompt.textContent = strings.feedbackPrompt;
   reportIssueLabel.textContent = strings.reportIssue;
+  feedbackVersionPopover?.setLanguage(language);
   sponsorProjectLabel.textContent = strings.sponsorProject;
   sponsorActionLabel.textContent = strings.sponsorAction;
   toolbarOverflowIndicator.dataset.tooltip = strings.toolbarOverflow;
@@ -1435,6 +1439,7 @@ rightToolsSeparator.setAttribute('role', 'separator');
 rightToolsSeparator.hidden = true;
 
 const setMoreToolsVisible = (visible: boolean) => {
+  if (!visible) feedbackVersionPopover?.hide();
   moreToolsPanel.hidden = !visible;
   moreToolsPanel.style.transform = '';
   if (visible) {
@@ -1449,6 +1454,7 @@ const setMoreToolsVisible = (visible: boolean) => {
   }
   moreToolsButton.classList.toggle('is-active', visible);
   moreToolsButton.setAttribute('aria-expanded', visible ? 'true' : 'false');
+  feedbackVersionPopover?.reposition();
 };
 
 moreToolsButton.addEventListener('click', () => {
@@ -1465,7 +1471,7 @@ reportIssueButton.addEventListener('click', () => {
 sponsorProjectButton.addEventListener('click', () => { setMoreToolsVisible(false); settingsWindow?.open('about'); });
 
 document.addEventListener('pointerdown', (event) => {
-  if (!moreToolsWrapper.contains(event.target as Node)) {
+  if (!moreToolsWrapper.contains(event.target as Node) && !feedbackVersionPopover?.contains(event.target as Node)) {
     setMoreToolsVisible(false);
   }
 }, true);
@@ -3712,6 +3718,17 @@ const acceptEditingPreferences = (preferences: EditingPreferences, revision: num
 };
 const editingPreferencesTransport = createEditingPreferencesTransport({ post: request => vscode.postMessage(request), onSnapshot: acceptEditingPreferences });
 const editorServicesTransport = createEditorServicesTransport(request => vscode.postMessage(request));
+const versionInformationSource = createVersionInformationSource({
+  productVersion,
+  readEnvironment: async () => { const result = await editorServicesTransport.request({ action: 'environment' }); return result && 'environment' in result ? result.environment : null; },
+  copyText: async text => { const result = await editorServicesTransport.request({ action: 'writeClipboard', text }); return !!result && 'text' in result; }
+});
+feedbackVersionPopover = createFeedbackVersionPopover({
+  anchor: reportIssueButton, menu: moreToolsPanel,
+  information: createVersionInformation({ ...versionInformationSource, compact: true }),
+  focusNext: () => sponsorProjectButton.focus()
+});
+feedbackVersionPopover.setLanguage(activeUiLanguage);
 const reportClipboardFailure = () => failureNotice.setFailureNotice(() => ({ title: activeUiLanguage === 'zh-CN' ? '剪贴板操作失败' : 'Clipboard operation failed', message: activeUiLanguage === 'zh-CN' ? '请重试。' : 'Please retry.' }), 'warning');
 const pastePlainFromHost = async () => {
   const activeEditor = editor;
@@ -3754,11 +3771,9 @@ const previewPresetSettings = createPreviewPresetSettings({
 const extensionFeatureSettings = createExtensionFeatureSettings(request => vscode.postMessage(request), () => settingsWindow?.present());
 settingsWindow = createSettingsWindow({
   extensionFeatures: extensionFeatureSettings,
-  productVersion,
+  ...versionInformationSource,
   openLink: href => vscode.postMessage({ type: 'openLink', href }),
   logoUrl: document.querySelector<HTMLMetaElement>('meta[name="meo-logo"]')?.content ?? '',
-  readEnvironment: async () => { const result = await editorServicesTransport.request({ action: 'environment' }); return result && 'environment' in result ? result.environment : null; },
-  copyText: async text => { const result = await editorServicesTransport.request({ action: 'writeClipboard', text }); return !!result && 'text' in result; },
   appearance: {
     getColors: () => uiColors, getMode: () => themeAdapter.getPreference(), getScheme: () => themeAdapter.getAppearance(),
     getFontSize: () => editorFontSizePreference,
@@ -4269,6 +4284,7 @@ const terminateWebviewSession = () => {
   fontWheelAbort.abort();
   editorFontWheel.dispose();
   settingsWindow?.dispose();
+  feedbackVersionPopover?.dispose();
   largeDocumentTooltip?.dispose();
   tooltipBinding.dispose();
   imageLocationSettings.dispose();

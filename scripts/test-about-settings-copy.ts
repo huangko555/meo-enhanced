@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Page } from 'puppeteer-core';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
+import { testFeedbackVersionPopover } from './feedback-version-test-helper';
 
 const entry = path.resolve('scripts/test-about-settings-copy-entry.ts');
 const build = await Bun.build({ entrypoints: [entry], target: 'browser', format: 'iife' });
@@ -265,7 +266,8 @@ try {
     results.push({ combination, pendingFrames, success });
     console.log(`${combination.language}/${combination.appearance}: passed`);
   }
-  assert.deepEqual(errors, [], 'The production About copy interaction has no browser errors');
+  await testFeedbackVersionPopover(page, script, diagnosisDirectory);
+  assert.deepEqual(errors, [], 'The production About and feedback copy interactions have no browser errors');
 } catch (error) {
   failure = error;
   await fs.writeFile(path.join(diagnosisDirectory, 'failure.json'), JSON.stringify({ error: String(error), results }, null, 2));

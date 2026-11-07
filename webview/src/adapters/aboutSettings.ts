@@ -1,8 +1,9 @@
-import { Check, Copy, ExternalLink, Heart, createElement } from 'lucide';
+import { ExternalLink, Heart, createElement } from 'lucide';
 import type { EditorEnvironment } from '../../../src/protocol/editorServices';
 import type { UiLanguage } from '../../../src/foundation/uiLanguage';
 import { aboutCatalog, settingsText } from '../application/settingsCatalog';
 import { createPaymentIcon } from './paymentIcons';
+import { createVersionInformation } from './versionInformation';
 
 type AboutItem = typeof aboutCatalog[number];
 const node = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string) => {
@@ -16,10 +17,8 @@ export function createAboutSettings(options: {
   readonly readEnvironment: () => Promise<EditorEnvironment | null>;
   readonly copyText: (text: string) => Promise<boolean>;
 }) {
-  let language: UiLanguage = 'en', environment: EditorEnvironment | null = null;
-  let reading = false, readFailed = false, copying = false, copied = false, copyFailed = false;
-  let disposed = false, visible = false, generation = 0;
-  let updateValues = () => {};
+  let language: UiLanguage = 'en';
+  const versionInformation = createVersionInformation(options);
   const t = (zh: string, en: string) => settingsText(language, zh, en);
   const external = (item: { readonly title: readonly [string, string]; readonly href: string }, className = 'settings-about-link') => {
     const link = node('a', className, t(item.title[0], item.title[1]));
@@ -27,13 +26,6 @@ export function createAboutSettings(options: {
     link.append(createElement(ExternalLink, { width: 13, height: 13, 'aria-hidden': 'true' }));
     link.addEventListener('click', event => { event.preventDefault(); options.openLink(item.href); }); return link;
   };
-  async function readEnvironment() {
-    if (reading || environment || disposed) return;
-    reading = true; readFailed = false; updateValues();
-    try { environment = await options.readEnvironment(); } catch { environment = null; }
-    reading = false; readFailed = !environment;
-    if (!disposed && visible) updateValues();
-  }
   function render(nextLanguage: UiLanguage, items: readonly AboutItem[]) {
     language = nextLanguage;
     const page = node('div', 'settings-about-page');
@@ -48,54 +40,9 @@ export function createAboutSettings(options: {
       if (feedback) links.append(external(feedback));
       identity.append(links); brand.append(identity); page.append(brand);
     }
-    updateValues = () => {};
+    versionInformation.setLanguage(language);
     if (project) {
-      const runtime = node('section', 'settings-about-runtime'); runtime.setAttribute('aria-label', t('版本信息', 'Version information'));
-      const header = node('div', 'settings-about-runtime-header');
-      header.append(node('h4', 'settings-about-section-title', t('版本信息', 'Version information')));
-      const copy = node('button', 'settings-button settings-about-copy'); copy.type = 'button';
-      copy.dataset.tooltipPlacement = 'left'; copy.dataset.tooltipLiveUpdate = 'true';
-      let iconCopied: boolean | undefined;
-      header.append(copy);
-      const values = node('dl', 'settings-about-versions');
-      const row = (label: string, value: string) => { const term = node('dt', '', label), detail = node('dd', '', value); values.append(term, detail); return detail; };
-      row('MEO Enhanced', options.productVersion);
-      const appVersion = row('VS Code', ''), system = row(t('系统', 'System'), '');
-      const remoteLabel = node('dt', '', t('远程环境', 'Remote')), remote = node('dd', ''); values.append(remoteLabel, remote);
-      const status = node('p', 'settings-about-status'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
-      const retry = node('button', 'settings-button settings-about-retry', t('重新读取', 'Retry')); retry.type = 'button'; retry.addEventListener('click', () => void readEnvironment());
-      runtime.append(header, values, status, retry); page.append(runtime);
-      updateValues = () => {
-        const waiting = t('读取中…', 'Loading…'), unavailable = t('暂时无法读取', 'Unavailable');
-        appVersion.textContent = environment ? environment.appVersion : readFailed ? unavailable : waiting;
-        appVersion.previousElementSibling!.textContent = environment?.appName.replace(/^Visual Studio Code$/, 'VS Code') ?? 'VS Code';
-        system.textContent = environment ? `${environment.system} · ${environment.architecture}` : readFailed ? unavailable : waiting;
-        remoteLabel.hidden = remote.hidden = !environment?.remoteName;
-        remote.textContent = environment?.remoteName ?? '';
-        copy.disabled = !environment;
-        if (copying) copy.setAttribute('aria-busy', 'true'); else copy.removeAttribute('aria-busy');
-        const copyLabel = copied ? t('已复制', 'Copied') : t('复制版本信息', 'Copy version info');
-        if (copy.getAttribute('aria-label') !== copyLabel) copy.setAttribute('aria-label', copyLabel);
-        if (copy.dataset.tooltip !== copyLabel) copy.dataset.tooltip = copyLabel;
-        if (iconCopied !== copied) {
-          copy.replaceChildren(createElement(copied ? Check : Copy, { width: 16, height: 16, 'aria-hidden': 'true' }));
-          iconCopied = copied;
-        }
-        const statusText = copyFailed ? t('复制失败，请重试。', 'Unable to copy. Please retry.') : readFailed ? t('版本信息读取失败，请重试。', 'Unable to load version information. Please retry.') : copied ? t('版本信息已复制，可粘贴到问题反馈中。', 'Version information copied. Paste it into your feedback.') : environment?.remoteName ? t('系统信息来自远程扩展运行环境。', 'System information is from the remote extension environment.') : '';
-        if (status.textContent !== statusText) status.textContent = statusText;
-        status.hidden = !status.textContent; status.classList.toggle('is-error', copyFailed || readFailed); status.classList.toggle('is-copy-success', copied); retry.hidden = !readFailed;
-      };
-      copy.addEventListener('click', async () => {
-        if (!environment || copying || disposed) return;
-        const current = generation;
-        const text = [`MEO Enhanced: ${options.productVersion}`, `${environment.appName}: ${environment.appVersion}`, `OS: ${environment.system} (${environment.architecture})`, ...(environment.remoteName ? [`Remote: ${environment.remoteName}`] : [])].join('\n');
-        copying = true; updateValues();
-        let success = false;
-        try { success = await options.copyText(text); } catch { /* The same inline retry state handles clipboard failure. */ }
-        if (disposed || current !== generation) return;
-        copying = false; copied = success; copyFailed = !success; updateValues();
-      });
-      updateValues();
+      page.append(versionInformation.element);
     }
     const platforms = items.filter(item => item.id === 'afdian' || item.id === 'kofi');
     if (platforms.length) {
@@ -119,6 +66,5 @@ export function createAboutSettings(options: {
     }
     return page;
   }
-  function close() { visible = false; generation++; copying = copied = copyFailed = false; }
-  return { render, open() { visible = true; updateValues(); void readEnvironment(); }, close, dispose() { close(); disposed = true; updateValues = () => {}; } };
+  return { render, open: versionInformation.open, close: versionInformation.close, dispose: versionInformation.dispose };
 }
