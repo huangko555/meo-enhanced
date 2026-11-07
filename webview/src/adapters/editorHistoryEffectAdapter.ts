@@ -9,6 +9,7 @@ import type {
 export type EditorHistoryNativeResult = {
   readonly applied: boolean;
   readonly changedRange: { readonly from: number; readonly to: number } | null;
+  readonly targetPosition?: number | null;
 };
 
 export type EditorHistoryRestoreRequest = Extract<
@@ -140,7 +141,8 @@ export function createEditorHistoryEffectAdapter(
                 type: 'nativeHistoryCompleted',
                 replayId: effect.replayId,
                 applied: result.applied,
-                changedRange: result.changedRange
+                changedRange: result.changedRange,
+                targetPosition: result.targetPosition
               }))
               .catch((error): EditorHistoryInput => {
                 capabilities.reportError('native-history', error);

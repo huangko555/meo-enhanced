@@ -36,6 +36,7 @@ export type EditorHistoryInput =
       readonly replayId: number;
       readonly applied: boolean;
       readonly changedRange: { readonly from: number; readonly to: number } | null;
+      readonly targetPosition?: number | null;
     }
   | { readonly type: 'interactionRestored'; readonly replayId: number }
   | { readonly type: 'cancelRestore' }
@@ -153,9 +154,9 @@ export function createEditorHistoryApplication(): EditorHistoryApplication {
           type: 'restoreHistoryInteraction',
           replayId: pending.id,
           direction: pending.direction,
-          targetPosition: input.changedRange
+          targetPosition: input.targetPosition ?? (input.changedRange
             ? pending.direction === 'undo' ? input.changedRange.from : input.changedRange.to
-            : null,
+            : null),
           changedRange: input.changedRange,
           previousViewport: pending.context.viewport
         }];

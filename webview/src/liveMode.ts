@@ -59,7 +59,7 @@ import { detailsBlockLiveExtensions, getDetailsBlocks, toggleDetailsBlock } from
 import {
   addListMarkerDecoration,
   isListMarkerDecoration,
-  renumberedListMarkerDecoration,
+  projectChangedListMarkerDecoration,
   CheckboxWidget,
   listMarkerData,
   detectListIndentStylesByLine,
@@ -3395,8 +3395,8 @@ function blockquoteLineDecorationsAtInputPosition(
   return [...decorations.values()];
 }
 
-/** Keep already rendered marker prefixes present while their numeric source
- * changes. The deferred builder still owns all structural interpretation. */
+/** Keep accepted prefixes through adjacent indentation edits and renumbering.
+ * The deferred builder still owns all structural interpretation. */
 function projectInputRenumberedListMarkers(
   decorations: DecorationSet,
   mapped: DecorationSet,
@@ -3405,12 +3405,14 @@ function projectInputRenumberedListMarkers(
   const additions: Range<Decoration>[] = [];
   const visited = new Set<number>();
   const changedLines = new Set<number>();
+  const replacedMarkers = new Set<string>();
   transaction.changes.iterChangedRanges((from, to) => {
     decorations.between(from, to, (start, end, decoration) => {
       if (start === end || visited.has(start)) return;
-      const replacement = renumberedListMarkerDecoration(decoration, transaction, start, end);
+      const replacement = projectChangedListMarkerDecoration(decoration, transaction, start, end);
       if (replacement) {
         visited.add(start); additions.push(replacement);
+        replacedMarkers.add(`${replacement.from}:${replacement.to}`);
         changedLines.add(transaction.startState.doc.lineAt(start).from);
       }
     });
@@ -3441,9 +3443,10 @@ function projectInputRenumberedListMarkers(
     linePositions.add(nextLine.from);
   }
   return additions.length ? updateLivePresentationRanges(mapped, {
-    filter: (from, to, value) => !(from === to && linePositions.has(from) && value.spec.listLineLayout),
-    filterFrom: linePositions.size ? Math.min(...linePositions) : undefined,
-    filterTo: linePositions.size ? Math.max(...linePositions) : undefined,
+    filter: (from, to, value) => !(from === to && linePositions.has(from) && value.spec.listLineLayout)
+      && !(replacedMarkers.has(`${from}:${to}`) && isListMarkerDecoration(value)),
+    filterFrom: Math.min(...additions.map(range => range.from)),
+    filterTo: Math.max(...additions.map(range => range.to)),
     add: additions, sort: true
   }) : mapped;
 }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import type { Page } from 'puppeteer-core';
 import { browser, server, open, frames, assertStablePaint, observedPaints } from './input-presentation-test-helpers';
 import { closeTestBrowser } from './browser-test-helpers';
+import { assessLargeDocument } from '../src/foundation/largeDocument';
 
 // Use the shipped Worker/partial-parse path; core-editor fixtures miss the bug.
 const fixture = [
@@ -19,6 +20,230 @@ const commands = [
   'align-left', 'align-center', 'align-right', 'sort-ascending', 'sort-descending', 'delete-table'
 ];
 let cases = 0;
+
+// Exercise the shipped editor/Worker with a reading viewport independent of
+// its old selection. Final source alone cannot detect a one-frame scroll chase.
+async function taskInteractionCase(large: boolean, nested: boolean) {
+  const page = await browser.newPage();
+  const prefix = '# Task interaction\n\n' + Array.from({ length: 85 }, (_, i) => `Before ${i}.\n\n`).join('');
+  const children = nested ? Array.from({ length: 180 }, (_, i) => `  - [ ] Child ${i}.\n`).join('') : '';
+  const text = prefix + '- [ ]  Task **body** with `code`.\n' + children
+    + '\n## Unchanged heading\n\nA footnote[^task].\n\n[^task]: Unchanged definition.\n\n'
+    + (large ? 'Padding.\n'.repeat(8100) : 'After.\n\n'.repeat(45));
+  assert.equal(assessLargeDocument(text).boundedEditorWork, large, 'task fixture must select the production work budget');
+  const host = await open(page, text, false, 'live');
+  const label = `task interaction large ${large} nested ${nested}`;
+  try {
+    await page.evaluate(() => {
+      const scope = window as any;
+      scope.__taskView = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+      scope.__taskView.dispatch({ selection: { anchor: 0 } });
+      scope.__taskView.focus();
+    });
+    const area = await page.$eval('.editor-host .cm-scroller', element => {
+      const rect = element.getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    });
+    await page.mouse.move(area.x, area.y);
+    let point: { x: number; y: number } | null = null;
+    for (let step = 0; step < 14 && !point; step++) {
+      point = await page.evaluate(() => {
+        const box = document.querySelector('.editor-host .meo-task-checkbox');
+        if (!box) return null;
+        const rect = box.getBoundingClientRect(), bounds = document.querySelector('.editor-host .cm-scroller')!.getBoundingClientRect();
+        return rect.top > bounds.top + 50 && rect.bottom < bounds.bottom - 50
+          ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } : null;
+      });
+      if (!point) { await page.mouse.wheel({ deltaY: 500 }); await frames(page, 5); }
+    }
+    assert.ok(point, label + ': reach the task with trusted wheel input');
+    const body = text.indexOf('Task **body**');
+    const observe = async (action: () => Promise<void>, expectedHead: number, expectedText: string, checkbox: boolean) => {
+      await page.evaluate(() => {
+        const scope = window as any, view = scope.__taskView;
+        scope.__taskFrames = [];
+        const sample = () => {
+          const line = [...view.contentDOM.querySelectorAll('.cm-line')].find((line: any) => line.textContent.includes('Task **body**'));
+          scope.__taskFrames.push({ scroll: view.scrollDOM.scrollTop, box: !!line?.querySelector('.meo-task-checkbox'),
+            childBox: [...view.contentDOM.querySelectorAll('.cm-line')].some((line: any) => line.textContent.includes('Child 0.') && line.querySelectorAll('.meo-task-checkbox').length === 1) });
+          scope.__taskFrame = requestAnimationFrame(sample);
+        };
+        sample();
+      });
+      await action(); await frames(page, 45);
+      const result = await page.evaluate(() => {
+        const scope = window as any, view = scope.__taskView;
+        cancelAnimationFrame(scope.__taskFrame);
+        return { frames: scope.__taskFrames as Array<{ scroll: number; box: boolean; childBox: boolean }>,
+          head: view.state.selection.main.head, text: view.state.doc.toString() };
+      });
+      assert.equal(result.text, expectedText, label + ': exact source');
+      assert.equal(result.head, expectedHead, label + ': semantic caret');
+      assert.ok(result.frames.every(frame => Math.abs(frame.scroll - result.frames[0].scroll) <= 1), label + ': retain viewport in every frame');
+      if (checkbox) assert.ok(result.frames.every(frame => frame.box), label + ': retain checkbox through deferred history presentation');
+      if (nested) assert.ok(result.frames.every(frame => frame.childBox), label + ': retain child task presentation through hoisting and history');
+    };
+    const key = async (key: string) => {
+      if (key.startsWith('Control+')) {
+        await page.keyboard.down('Control'); await page.keyboard.press(key.slice(8)); await page.keyboard.up('Control');
+      } else await page.keyboard.press(key);
+    };
+    const checked = text.replace('- [ ]  Task', '- [x]  Task');
+    if (!nested) {
+      await observe(() => page.mouse.click(point!.x, point!.y), body, checked, true);
+      await observe(() => key('Control+z'), body, text, true);
+      await observe(() => key('Control+y'), body, checked, true);
+      // Toggling from the same task body preserves the user's editing offset.
+      await page.evaluate(body => (window as any).__taskView.dispatch({ selection: { anchor: body + 2 } }), body);
+      await frames(page, 4);
+      await observe(() => page.mouse.click(point!.x, point!.y), body + 2, text, true);
+      // The keyboard checkbox remains the focused control; Space must not
+      // navigate to an unrelated text selection or change its editing offset.
+      await page.evaluate(() => {
+        const view = (window as any).__taskView;
+        view.dispatch({ selection: { anchor: 0 } });
+        view.contentDOM.querySelector('.meo-task-checkbox').focus({ preventScroll: true });
+      });
+      await observe(() => key('Space'), 0, checked, true);
+      assert.ok(await page.evaluate(() => document.activeElement?.classList.contains('meo-task-checkbox')), label + ': retain keyboard checkbox focus');
+      // Native Edit-menu/touch history enters through beforeinput rather than
+      // the keyboard shortcut and must use the same semantic replay owner.
+      await observe(async () => {
+        await page.evaluate(() => (window as any).__taskView.contentDOM.dispatchEvent(new InputEvent('beforeinput', {
+          inputType: 'historyUndo', bubbles: true, cancelable: true
+        })));
+      }, body, text, true);
+      await page.evaluate(() => {
+        const view = (window as any).__taskView; view.dispatch({ selection: { anchor: 0 } });
+        view.contentDOM.querySelector('.meo-task-checkbox').focus({ preventScroll: true });
+      });
+      await observe(() => page.mouse.click(point!.x, point!.y), body, checked, true);
+      assert.ok(await page.evaluate(() => (window as any).__taskView.hasFocus), label + ': pointer activation returns typing to the task body');
+      const padded = checked.slice(0, body) + '  ' + checked.slice(body);
+      await observe(async () => {
+        await page.evaluate(body => {
+          const view = (window as any).__taskView;
+          // One event turn pins a real pending-presentation race: a separator
+          // edit followed by control activation before the Worker can publish.
+          view.dispatch({ changes: { from: body, insert: '  ' }, selection: { anchor: body + 2 }, userEvent: 'input.type' });
+          view.dispatch({ selection: { anchor: 0 } });
+          view.contentDOM.querySelector('.meo-task-checkbox').click();
+        }, body);
+      }, body + 2, padded.replace('- [x]', '- [ ]'), true);
+    } else {
+      await page.evaluate(body => (window as any).__taskView.dispatch({ selection: { anchor: body } }), body);
+      await frames(page, 4);
+      const deleted = text.slice(0, prefix.length) + text.slice(body).replace(/^  - /gm, '- ');
+      await observe(() => key('Backspace'), prefix.length, deleted, false);
+      await observe(() => key('Control+z'), body, text, false);
+      await observe(() => key('Control+y'), prefix.length, deleted, false);
+    }
+    assert.deepEqual(host.errors, [], label + ': no runtime errors');
+    cases++;
+  } finally { host.dispose(); await page.close(); }
+}
+
+async function richTaskBackspaceCase(large: boolean, action: 'Backspace' | 'Enter' | 'StartEnter' | 'Tab' | 'Outdent' = 'Backspace') {
+  const enter = action === 'Enter' || action === 'StartEnter';
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1200, height: 900 });
+  const prefix = '# Rich task deletion\n\n' + Array.from({ length: large ? 4100 : 25 }, (_, i) =>
+    `Paragraph ${i} with **emphasis** and \`code\`.\n\n`).join('');
+  const text = prefix + (action === 'Outdent' ? '  ' : '') + '- [ ]  Task **body** with `code`.\n- [x] Next task.\n\n'
+    + 'Footnote[^task].\n\n[^task]: Definition.\n\n> ```js\n> const stable = true;\n> ```\n\n'
+    + '## Unchanged heading\n\n' + 'After.\n\n'.repeat(60);
+  assert.equal(assessLargeDocument(text).boundedEditorWork, large, 'rich task fixture must select the production work budget');
+  const body = text.indexOf('Task **body**'), host = await open(page, text, false, 'live');
+  const label = `rich task ${action} large ${large}`;
+  try {
+    await page.evaluate(body => {
+      const scope = window as any;
+      scope.__taskView = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+      scope.__taskView.dispatch({ selection: { anchor: body }, scrollIntoView: true }); scope.__taskView.focus();
+    }, body);
+    await frames(page, 12);
+    await page.waitForFunction(() => [...document.querySelectorAll('.editor-host .cm-line')].some(line =>
+      line.textContent?.includes('Task **body**') && line.querySelector('.meo-md-strong')));
+    const area = await page.$eval('.editor-host .cm-scroller', element => {
+      const rect = element.getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    });
+    await page.mouse.move(area.x, area.y); await page.mouse.wheel({ deltaY: 300 }); await frames(page, 6);
+    const point = await page.evaluate(body => {
+      const rect = (window as any).__taskView.coordsAtPos(body, 1); return { x: rect.left + 0.2, y: (rect.top + rect.bottom) / 2 };
+    }, body);
+    await page.mouse.click(point.x, point.y);
+    const head = await page.evaluate(() => (window as any).__taskView.state.selection.main.head);
+    if (head === body + 1) await page.keyboard.press('ArrowLeft');
+    else assert.equal(head, body, label + ': actual body-start hit');
+    if (action === 'Enter') await page.keyboard.press('End');
+    await frames(page, 4);
+    const clip = await page.evaluate(() => {
+      const scope = window as any, view = scope.__taskView;
+      const heading = [...view.contentDOM.querySelectorAll('.cm-line')].find((line: any) => line.textContent.includes('Unchanged heading'));
+      if (!heading?.classList.contains('meo-md-h2')) throw new Error('Missing rich heading witness');
+      // Keep the pixel witness on one compositing layer. Editing can switch
+      // LCD/grayscale glyph rasterization despite identical geometry and color.
+      // Identity/classes/geometry below still detect a replaced or raw heading.
+      heading.style.willChange = 'transform';
+      const rect = heading.getBoundingClientRect(), bounds = view.scrollDOM.getBoundingClientRect();
+      if (rect.top < bounds.top || rect.bottom > bounds.bottom) throw new Error('Rich heading witness must be visible');
+      scope.__taskFrames = [];
+      scope.__richPresentationFrames = scope.__taskFrames;
+      const sample = () => {
+        const rect = heading.getBoundingClientRect(), style = getComputedStyle(heading);
+        scope.__taskFrames.push({ scroll: view.scrollDOM.scrollTop, sameHeading: heading.isConnected && heading.classList.contains('meo-md-h2'),
+          top: rect.top, left: rect.left, color: style.color, font: style.font, transform: style.transform });
+        scope.__taskFrame = requestAnimationFrame(sample);
+      }; sample();
+      return { left: Math.ceil(rect.left), top: Math.ceil(rect.top), width: Math.floor(rect.width), height: Math.floor(rect.height) };
+    });
+    const act = async () => {
+      if (action === 'Outdent') {
+        await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift');
+      } else await page.keyboard.press(enter ? 'Enter' : action);
+      await frames(page, 65);
+      await page.evaluate(() => { const witness = document.getElementById('presentation-paint-witness'); if (witness) witness.style.background = 'rgb(19,211,41)'; });
+      await frames(page, 2);
+    };
+    if (enter) await act(); // A new task row intentionally moves the heading.
+    else await assertStablePaint(page, clip, act, label);
+    const result = await page.evaluate(() => {
+      const scope = window as any, view = scope.__taskView; cancelAnimationFrame(scope.__taskFrame);
+      return { frames: scope.__taskFrames as Array<{ scroll: number; sameHeading: boolean; top: number; left: number; color: string; font: string }>,
+        head: view.state.selection.main.head, text: view.state.doc.toString() };
+    });
+    const end = text.indexOf('\n', body);
+    const expected = action === 'Enter' ? text.slice(0, end) + '\n- [ ] ' + text.slice(end)
+      : action === 'StartEnter' ? prefix + '- [ ] \n' + text.slice(prefix.length)
+      : action === 'Tab' ? prefix + '  ' + text.slice(prefix.length)
+      : action === 'Outdent' ? prefix + text.slice(prefix.length + 2)
+      : text.slice(0, prefix.length) + text.slice(body);
+    const expectedHead = action === 'Enter' ? end + 7 : action === 'StartEnter' ? prefix.length + 6
+      : action === 'Tab' ? body + 2 : action === 'Outdent' ? body - 2 : prefix.length;
+    assert.equal(result.text, expected, label + ': exact task edit');
+    assert.equal(result.head, expectedHead, label + ': retain edit point');
+    assert.ok(result.frames.every(frame => frame.sameHeading), label + ': retain accepted rich presentation');
+    assert.ok(result.frames.every(frame => frame.color === result.frames[0].color && frame.font === result.frames[0].font), label + ': retain heading typography');
+    if (!enter) assert.ok(result.frames.every(frame => Math.abs(frame.top - result.frames[0].top) <= 1 && Math.abs(frame.left - result.frames[0].left) <= 1), label + ': retain heading geometry');
+    assert.ok(result.frames.every(frame => Math.abs(frame.scroll - result.frames[0].scroll) <= 1), label + ': no transient or delayed scroll');
+    for (const key of ['z', 'y']) {
+      await page.keyboard.down('Control'); await page.keyboard.press(key); await page.keyboard.up('Control'); await frames(page, 35);
+      const replay = await page.evaluate(() => { const view = (window as any).__taskView; return { text: view.state.doc.toString(), head: view.state.selection.main.head }; });
+      assert.equal(replay.text, key === 'z' ? text : expected, label + ': history exact source');
+      assert.equal(replay.head, key === 'z' ? action === 'Enter' ? end : body : expectedHead, label + ': history semantic caret');
+    }
+    if (action === 'StartEnter') {
+      await page.keyboard.press('Enter'); await frames(page, 35);
+      const exited = prefix + '\n' + text.slice(prefix.length);
+      for (const key of [null, 'z', 'y']) {
+        if (key) { await page.keyboard.down('Control'); await page.keyboard.press(key); await page.keyboard.up('Control'); await frames(page, 35); }
+        const replay = await page.evaluate(() => { const view = (window as any).__taskView; return { text: view.state.doc.toString(), head: view.state.selection.main.head }; });
+        assert.equal(replay.text, key === 'z' ? expected : exited, label + ': empty-task exit/history source');
+        assert.equal(replay.head, key === 'z' ? expectedHead : prefix.length, label + ': empty-task exit/history caret');
+      }
+    }
+    assert.deepEqual(host.errors, []); cases++;
+  } finally { host.dispose(); await page.close(); }
+}
 
 async function localUnitCase(large: boolean, action: string, rich = false) {
   const page = await browser.newPage();
@@ -95,8 +320,7 @@ async function localUnitCase(large: boolean, action: string, rich = false) {
     assert.ok(samples.length > 5, label + ': observe input and deferred settlement');
     assert.ok(samples.every(value => value.same && value.classes === samples[0].classes && value.height === samples[0].height), label + ': preserve unmodified heading');
     assert.ok(samples.every(value => Math.abs(value.top - samples[0].top) <= 1 && Math.abs(value.scroll - samples[0].scroll) <= 1), label + ': preserve body viewport');
-    // History deliberately reveals its changed source range, including markers.
-    if (task && large) assert.ok(samples.filter(value => !value.history).every(value => value.sameCheckbox), label + ': keep the operated control mounted');
+    if (task) assert.ok(samples.every(value => value.sameCheckbox), label + ': keep the operated control mounted through history');
     const prefix = task ? '- [x] ' : ({ bulletList: '- ', numberedList: '1. ', task: '- [ ] ', quote: '> ', heading: '# ' } as Record<string, string>)[action];
     assert.ok(host.readHost().includes(prefix + 'Editable body'), label + ': commit command and history');
     assert.deepEqual(host.errors, [], label + ': no runtime errors');
@@ -407,6 +631,8 @@ try {
   const onlyCellPreview = process.argv.includes('--cell-preview');
   const onlyAction = process.argv.find(arg => arg.startsWith('--action='))?.slice(9);
   if (!onlyColor && !onlyCellPreview) {
+    if (!onlyAction || onlyAction === 'checkbox') for (const large of [false, true]) for (const nested of [false, true]) await taskInteractionCase(large, nested);
+    if (!onlyAction || onlyAction === 'checkbox' || onlyAction === 'task-backspace') for (const large of [false, true]) for (const action of ['Backspace', 'Enter', 'StartEnter', 'Tab', 'Outdent'] as const) await richTaskBackspaceCase(large, action);
     for (const large of [false, true]) for (const action of ['checkbox', 'bulletList', 'numberedList', 'task', 'quote', 'heading'].filter(action => !onlyAction || onlyAction === action)) await localUnitCase(large, action);
     if (!onlyAction || onlyAction === 'bulletList') for (const large of [false, true]) await localUnitCase(large, 'bulletList', true);
     if (!onlyAction) for (const large of [false, true]) await columnFrameCase(large);

@@ -2,6 +2,8 @@ import { documentLines } from './documentLines';
 import { markdownTaskMarkerPattern } from '../../../src/foundation/markdownTaskList';
 import type { ChangeDesc } from '@codemirror/state';
 import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
+import { isolateHistory } from '@codemirror/commands';
+import { listHistoryFocusEffect } from '../adapters/codeMirrorListHistoryFocus';
 import {
   StateField,
   RangeSetBuilder,
@@ -261,6 +263,7 @@ export function indentListByTwoSpaces(view: EditorView): boolean {
 
   view.dispatch({
     changes,
+    userEvent: 'input.list',
     annotations: orderedListNormalizationIntent.of({ resetNestedStartsAtLines })
   });
   return true;
@@ -292,7 +295,7 @@ export function outdentListByTwoSpaces(view: EditorView): boolean {
     return false;
   }
 
-  view.dispatch({ changes });
+  view.dispatch({ changes, userEvent: 'input.list' });
   return true;
 }
 
@@ -560,12 +563,35 @@ export class CheckboxWidget extends UiLanguageSensitiveWidget {
     checkbox.setAttribute('aria-label', isDone ? strings.markTaskIncomplete : strings.markTaskComplete);
 
     // Rebind the current immutable widget, including rebased source positions.
+    let pointerActivation = false;
+    checkbox.onclick = event => { pointerActivation = event.detail > 0; };
     checkbox.onchange = () => {
+      const keyboardActivation = !pointerActivation && checkbox === checkbox.ownerDocument.activeElement;
+      pointerActivation = false;
       const newChar = checkbox.checked ? 'x' : ' ';
+      const line = view.state.doc.lineAt(this.bracketStart);
+      // Read only the current separator, not a cached decoration boundary or
+      // a copy of the whole task body. Pending input can extend that separator.
+      let body = this.bracketStart + 3;
+      const suffix = view.state.doc.iterRange(body, line.to);
+      while (!suffix.next().done) {
+        const spaces = /^[ \t]*/.exec(suffix.value)![0].length;
+        body += spaces;
+        if (spaces !== suffix.value.length) break;
+      }
+      const selection = view.state.selection.main;
+      const inBody = selection.from >= body && selection.to <= line.to;
+      const target = inBody ? selection.head : body;
       view.dispatch({
         changes: { from: this.bracketStart + 1, to: this.bracketStart + 2, insert: newChar },
+        // Pointer activation adopts this task; keyboard activation keeps the
+        // native checkbox focused and leaves its text selection untouched.
+        selection: keyboardActivation || inBody ? undefined : { anchor: body },
+        effects: listHistoryFocusEffect(line.from, target, target),
+        annotations: isolateHistory.of('full'),
         userEvent: 'input.task'
       });
+      if (!keyboardActivation) view.focus();
     };
     return true;
   }
@@ -653,16 +679,24 @@ export function isListMarkerDecoration(decoration: Decoration): boolean {
   return decoration.spec.widget instanceof ListMarkerWidget || decoration.spec.widget instanceof CheckboxWidget;
 }
 
-/** Rebuild only a known ordered marker whose digits changed. Its unchanged
- * suffix and separator keep this a provisional prefix projection, not a new
- * container parse. The regular renderer still owns the later full refresh. */
-export function renumberedListMarkerDecoration(
+/** Retain an untouched marker beside an indentation edit, or rebuild an ordered
+ * marker whose digits changed. This projects accepted prefixes only; the regular
+ * renderer still owns container interpretation and its authoritative refresh. */
+export function projectChangedListMarkerDecoration(
   decoration: Decoration,
   transaction: Transaction,
   from: number,
   to: number
 ): Range<Decoration> | undefined {
   if (!isListMarkerDecoration(decoration)) return;
+  const oldPrefix = transaction.startState.doc.sliceString(from, to);
+  const mappedFrom = transaction.changes.mapPos(from, 1), mappedTo = transaction.changes.mapPos(to, -1);
+  if (mappedTo > mappedFrom && oldPrefix === transaction.newDoc.sliceString(mappedFrom, mappedTo)) {
+    const widget = decoration.spec.widget;
+    return Decoration.replace({ ...decoration.spec,
+      widget: widget?.[mapLiveWidgetPositions]?.(transaction.changes) ?? widget
+    }).range(mappedFrom, mappedTo);
+  }
   const previous = /^(\d+)([.)][ \t]+(?:\[[ xX]\][ \t]+)?)$/.exec(transaction.startState.doc.sliceString(from, to));
   if (!previous) return;
   const nextFrom = transaction.changes.mapPos(from, -1), nextTo = transaction.changes.mapPos(to, 1);
@@ -734,7 +768,8 @@ export function handleEnterContinueList(view: EditorView): boolean {
   const insert = `\n${marker}`;
   view.dispatch({
     changes: { from: position, insert },
-    selection: { anchor: position + insert.length }
+    selection: { anchor: position + insert.length },
+    userEvent: 'input.list'
   });
   return true;
 }
@@ -765,7 +800,8 @@ export function handleEnterOnEmptyListItem(view: EditorView): boolean {
 
   view.dispatch({
     changes: { from: line.from + quotePrefixOffset(lineText), to: contentStart, insert: '' },
-    selection: { anchor: line.from + quotePrefixOffset(lineText) }
+    selection: { anchor: line.from + quotePrefixOffset(lineText) },
+    userEvent: 'input.list'
   });
   return true;
 }
@@ -828,7 +864,10 @@ export function handleBackspaceAtListContentStart(view: EditorView): boolean {
 
   view.dispatch({
     changes,
-    selection: { anchor: selectionAnchor }
+    selection: { anchor: selectionAnchor },
+    effects: listHistoryFocusEffect(line.from, selection.head, selectionAnchor),
+    annotations: isolateHistory.of('full'),
+    userEvent: 'delete.backward'
   });
   return true;
 }
@@ -916,7 +955,8 @@ export function handleEnterAtListContentStart(view: EditorView): boolean {
   const insert = `${sameMarker}\n`;
   view.dispatch({
     changes: { from: line.from, insert },
-    selection: { anchor: line.from + sameMarker.length }
+    selection: { anchor: line.from + sameMarker.length },
+    userEvent: 'input.list'
   });
   return true;
 }
@@ -950,7 +990,8 @@ export function handleEnterBeforeNestedList(view: EditorView): boolean {
   const insert = `\n${marker}`;
   view.dispatch({
     changes: { from: position, insert },
-    selection: { anchor: position + insert.length }
+    selection: { anchor: position + insert.length },
+    userEvent: 'input.list'
   });
   return true;
 }

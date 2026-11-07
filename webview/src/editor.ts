@@ -29,6 +29,7 @@ import { boundedMarkdownInputPrefix, editorMarkdownLanguage, getEditorMarkdownLa
 import { indentUnit, syntaxTree, forceParsing } from '@codemirror/language';
 import { sourceHighlightStyle } from './theme';
 import { viewportSyntaxHighlighting } from './editor/viewportSyntaxHighlighting';
+import { listHistoryFocus, readListHistoryPosition } from './adapters/codeMirrorListHistoryFocus';
 import { backgroundMarkdownStructureExtensions } from './editor/backgroundMarkdownStructure';
 import { isCompleteMarkdownStructure, markdownStructureIdentity } from './editor/markdownStructure';
 import { adoptMarkdownDocumentContext } from './markdownDocumentContext';
@@ -2489,6 +2490,7 @@ export function createEditor({
         ...editorHistoryKeymap
       ]),
       historyCompartment.of(history()),
+      listHistoryFocus,
       ...blockInteractionExtensions((editorView, block) => {
         const top = editorView.coordsAtPos(block.from)?.top ?? null;
         retainBlockCaret(editorView, top === null ? null : top + editorView.defaultLineHeight, isCurrent => {
@@ -3097,7 +3099,22 @@ export function createEditor({
       viewportController.beginNavigationReveal();
       const beforeDocument = view.state.doc;
       try {
-        const applied = direction === 'undo' ? undo(view) : redo(view);
+        const target = {
+          state: view.state,
+          dispatch(transaction: Transaction) {
+            const position = readListHistoryPosition(transaction.state);
+            // Native history bypasses transaction filters. Accept its original
+            // transaction and the semantic selection in one view update, before
+            // any native caret reveal or intermediate source frame can paint.
+            if (position === null) view.dispatch(transaction);
+            else view.dispatch([transaction, transaction.state.update({
+              selection: { anchor: position },
+              annotations: Transaction.addToHistory.of(false),
+              scrollIntoView: true
+            })]);
+          }
+        };
+        const applied = direction === 'undo' ? undo(target) : redo(target);
         if (applied && !view.dom.contains(view.dom.ownerDocument.activeElement)) {
           // Replaying a change can synchronously remove the focused table or
           // rendered-block editor. Keep keyboard ownership inside the editor
@@ -3106,6 +3123,7 @@ export function createEditor({
         }
         return {
           applied,
+          targetPosition: applied ? readListHistoryPosition(view.state) : null,
           changedRange: applied ? changedCodeMirrorDocumentRange(beforeDocument, view.state.doc) : null
         };
       } finally {
@@ -3300,7 +3318,11 @@ export function createEditor({
     }
   };
   onHistoryBeforeInput = (event) => {
-    if (event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo') {
+    if ((event.inputType === 'historyUndo' || event.inputType === 'historyRedo') && event.target === view.contentDOM) {
+      event.preventDefault();
+      event.stopPropagation();
+      void requestEditorHistoryReplay(event.inputType === 'historyUndo' ? 'undo' : 'redo');
+    } else if (event.inputType !== 'historyUndo' && event.inputType !== 'historyRedo') {
       void editorHistoryRuntime?.dispatch({ type: 'cancelRestore' });
     }
   };

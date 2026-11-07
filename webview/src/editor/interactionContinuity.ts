@@ -373,6 +373,12 @@ export function createEditorInteractionContinuity(input: {
   return {
     observe(update) {
       if (disposed) return;
+      if (update.transactions.some(transaction => transaction.docChanged && transaction.isUserEvent('input.task'))) {
+        // A checkbox edits a control at the reading position. It never asks to
+        // reveal the previous text caret, including keyboard checkbox use.
+        cancel();
+        return;
+      }
       const directInput = update.transactions.some((transaction) => (
         transaction.docChanged && transaction.isUserEvent('input')
       ));

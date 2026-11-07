@@ -2774,8 +2774,16 @@ Its `--local-units` slice adds heading-preservation and viewport checks for task
 toggles, lists, quotes and heading commands, rapid toggles with undo/redo, and
 continuous row/column operations. Each table column structure must retain its
 accepted widths from the first observed frame, with source/DOM row parity.
-`--action=checkbox` narrows that slice to task interaction. History may deliberately
-reveal a changed source marker; direct task toggles must keep their control mounted.
+`--action=checkbox` narrows that slice to task interaction, including an offscreen
+old caret, same-body editing offsets, keyboard control focus, native `beforeinput`
+history and 180 task descendants. Control actions and their history retain the
+checkbox and semantic body position; explicit prefix editing still reveals source.
+`--action=task-backspace` selects rich task deletion, line-start/end Enter, indentation,
+outdent and their history, including empty-task exit. Fixtures assert the production
+work-budget assessment and pair ordinary with over-8,000-line documents. Every frame
+checks viewport and accepted heading identity. Pixel witnesses use a consistent
+compositing layer to exclude LCD/grayscale rasterization switches, retaining the
+existing pixel threshold and independent DOM/geometry checks.
 `test-live-composite-lists.ts --tasks-only` checks the two task states, uppercase
 `[X]`, literal `[~]` / `[-]` text, table-cell lists, native clicks, undo/redo and
 Source/Live roundtrips in light/dark ordinary and optimized documents. It asserts
