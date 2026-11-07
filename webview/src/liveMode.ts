@@ -112,7 +112,7 @@ import { collectDocumentMathRanges, getDisplayMathSource, type DocumentMathRange
 import { isMathFenceLanguage } from '../../src/shared/mathFence';
 import { diagnosticDataField, type EditorDiagnostic } from './helpers/diagnostics';
 import { gitDiffLineFlagsField, isGitDiffPresentationEffect } from './helpers/gitDiffGutter';
-import { isTableBaselineRefreshEffect } from './adapters/codeMirrorTableTransactionProvenanceAdapter';
+import { isTableBaselineRefreshEffect, isTableHistoryProvenanceEffect } from './adapters/codeMirrorTableTransactionProvenanceAdapter';
 import { markdownTagField } from './helpers/tags';
 import {
   getMermaidBlockMode,
@@ -169,7 +169,7 @@ import {
   renderedBlockPreview
 } from './helpers/renderedBlockPreview';
 import { getUiStrings } from './application/uiLanguage';
-import { isTableCellContentTransaction } from './adapters/tableHistoryFocus';
+import { getTableHistoryFocus, isTableCellContentTransaction } from './adapters/tableHistoryFocus';
 import {
   getUiLanguageWidgetEpoch,
   UiLanguageSensitiveWidget,
@@ -4013,11 +4013,25 @@ function isPlainProseInput(transaction: Transaction, nested = false): boolean {
   return valid && count === 1;
 }
 
-function hasUnchangedLivePresentationContext(transaction: Transaction): boolean {
-  return !transaction.reconfigured
-    && transaction.effects.every(effect => isLiveInputDerivedWorkBookkeeping(effect) || isCodeMirrorSyntaxPublicationEffect(effect)
-      || isAutomaticSymbolPairHistoryEffect(effect) || effect.is(shikiRefreshEffect) || isLongCodeBlockInteractionEffect(effect) || isEditorScrollEffect(effect))
-    && hasDefaultLivePresentation(transaction.startState) && hasDefaultLivePresentation(transaction.state)
+function hasUnchangedLivePresentationContext(
+  transaction: Transaction,
+  { allowTableHistoryEffects = false, allowPointerSelection = false, allowDocumentIdle = false }: {
+    allowTableHistoryEffects?: boolean;
+    allowPointerSelection?: boolean;
+    allowDocumentIdle?: boolean;
+  } = {}
+): boolean {
+  const tableHistory = allowTableHistoryEffects ? getTableHistoryFocus(transaction.startState) : undefined;
+  const effectsUnchanged = transaction.effects.every(effect => (
+    isLiveInputDerivedWorkBookkeeping(effect) || isCodeMirrorSyntaxPublicationEffect(effect)
+      || isAutomaticSymbolPairHistoryEffect(effect) || effect.is(shikiRefreshEffect) || isLongCodeBlockInteractionEffect(effect)
+      || isEditorScrollEffect(effect) || tableHistory?.isHistoryEffect(effect) || allowTableHistoryEffects && isTableHistoryProvenanceEffect(effect)
+  ));
+  const hasUnchangedDefaultPresentation = (state: EditorState) => hasDefaultLiveBlockPresentation(state)
+    && (allowDocumentIdle || !state.field(liveDocumentIdleField))
+    && (allowPointerSelection || !state.field(livePointerSelectionActiveField).active);
+  return !transaction.reconfigured && effectsUnchanged
+    && hasUnchangedDefaultPresentation(transaction.startState) && hasUnchangedDefaultPresentation(transaction.state)
     && (!transaction.selection || transaction.docChanged
       || transaction.startState.selection.eq(transaction.state.selection));
 }
@@ -4072,19 +4086,7 @@ function canMapUnchangedProseDecorations(decorations: DecorationSet, transaction
   catch { return false; } // The guarded scoped builder owns unsupported projections.
 }
 
-function projectLiveTableCommand(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {
-  if (!transaction.docChanged || !(transaction.isUserEvent('input.table-command')
-    || transaction.isUserEvent('input.hex-color'))) return;
-  // A table command already owns a closed source range. Rebuild that table
-  // directly, without waiting for a partial document parse or exposing its
-  // Markdown in the meantime. Unrelated presentation keeps its accepted DOM.
-  let from = Infinity, to = -Infinity;
-  transaction.changes.iterChangedRanges((start, end) => { from = Math.min(from, start); to = Math.max(to, end); });
-  let table: SourceRange | undefined;
-  decorations.between(from, to, (start, end, decoration) => {
-    if (decoration.spec.meoTable && start <= from && end >= to) table = { from: start, to: end };
-  });
-  if (!table) return;
+function projectLiveTableRange(decorations: DecorationSet, transaction: Transaction, table: SourceRange): DecorationSet | undefined {
   const state = transaction.state;
   const nextFrom = transaction.changes.mapPos(table.from, -1), nextTo = transaction.changes.mapPos(table.to, 1);
   const ranges: Range<Decoration>[] = [];
@@ -4097,6 +4099,52 @@ function projectLiveTableCommand(decorations: DecorationSet, transaction: Transa
     ?? decorations.map(transaction.changes);
   liveDecorationMetadata.set(state, { complete: false });
   return replaceLivePresentationRanges(mapped, nextFrom, nextTo, ranges);
+}
+
+function projectLiveTableCommand(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {
+  if (!transaction.docChanged || !(transaction.isUserEvent('input.table-command')
+    || transaction.isUserEvent('input.hex-color'))) return;
+  // A table command already owns a closed source range. Rebuild that table
+  // directly, without waiting for a partial document parse or exposing its
+  // Markdown in the meantime. Unrelated presentation keeps its accepted DOM.
+  let from = Infinity, to = -Infinity;
+  transaction.changes.iterChangedRanges((start, end) => { from = Math.min(from, start); to = Math.max(to, end); });
+  let table: SourceRange | undefined;
+  decorations.between(from, to, (start, end, decoration) => {
+    if (decoration.spec.meoTable && start <= from && end >= to) table = { from: start, to: end };
+  });
+  return table ? projectLiveTableRange(decorations, transaction, table) : undefined;
+}
+
+/** A table history focus identifies the one closed replacement whose current
+ * source has just been restored. Its native selection may intentionally differ
+ * from the presentation checkpoint, so rebuild that table from the new source
+ * instead of mapping the old replacement away until deferred work completes. */
+function projectLiveTableHistory(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {
+  if (!transaction.docChanged || !(transaction.isUserEvent('undo') || transaction.isUserEvent('redo'))) return;
+  const target = getTableHistoryFocus(transaction.state).read(transaction.state);
+  if (!target || isTableCellContentTransaction(transaction)
+    // Only effects identified by their existing table-history owners may
+    // accompany this replay; a persisted table range is its valid interaction.
+    || !hasUnchangedLivePresentationContext(transaction, {
+      allowTableHistoryEffects: true, allowPointerSelection: true, allowDocumentIdle: true
+    })) return;
+  const previousPosition = transaction.changes.invertedDesc.mapPos(target.tableFrom, -1);
+  let table: SourceRange | undefined;
+  decorations.between(Math.max(0, previousPosition - 1), Math.min(transaction.startState.doc.length, previousPosition + 1),
+    (from, to, decoration) => {
+      if (decoration.spec.meoTable && from <= previousPosition && to > previousPosition) table = { from, to };
+    });
+  if (!table) return;
+  const nextFrom = transaction.changes.mapPos(table.from, -1), nextTo = transaction.changes.mapPos(table.to, 1);
+  // Follow the existing local-projection capacity limit. History outside this
+  // one bounded replacement remains owned by the authoritative deferred path.
+  if (table.to - table.from > 32_768 || nextTo - nextFrom > 32_768) return;
+  let closed = true;
+  transaction.changes.iterChangedRanges((from, to, mappedFrom, mappedTo) => {
+    if (from < table!.from || to > table!.to || mappedFrom < nextFrom || mappedTo > nextTo) closed = false;
+  });
+  return closed ? projectLiveTableRange(decorations, transaction, table) : undefined;
 }
 
 /** Rebuild a closed changed block from the shared renderer and map the rest.
@@ -4515,6 +4563,12 @@ const liveDecorationField = StateField.define<DecorationSet>({
       try { inline = projectLiveLocalInput(decorations, transaction); }
       catch { /* The authoritative builder handles unsupported history edits. */ }
       if (inline !== undefined) return inline;
+    }
+    if (usesLargeDocumentDerivedWorkBudget(transaction.state)) {
+      let tableHistory: DecorationSet | undefined;
+      try { tableHistory = projectLiveTableHistory(decorations, transaction); }
+      catch { /* The deferred renderer owns malformed or no-longer-mounted targets. */ }
+      if (tableHistory !== undefined) return tableHistory;
     }
     if (shouldDeferLiveInputDerivedWork(transaction)) {
       // Phase bookkeeping, especially settlement after an authoritative refresh,

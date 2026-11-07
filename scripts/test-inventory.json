@@ -28,7 +28,7 @@
     "scripts/test-editor-loading-presentation.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-editor-loading-presentation.ts",
-      "reason": "Production Live/Source delayed loading feedback across cold module loading, slow/fast switching, cancellation, late completion, silent editing and failed preparation; verifies bootstrap visibility and absence of the mode progress underline."
+      "reason": "Production Live/Source immediate cold loading and delayed feedback over accepted content: held editor entry, slow/fast switching, cancellation, late completion, silent editing and failed preparation; verifies bootstrap visibility and absence of the mode progress underline."
     },
     "scripts/test-outline-loading.ts": {
       "kind": "targeted",
@@ -43,7 +43,7 @@
     "scripts/test-preview-loading-presentation.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-preview-loading-presentation.ts",
-      "reason": "Production Preview loading feedback: silent fast/warm activation, delayed full/side loading, editable Source, silent refresh, cancellation and failure. Captures actual loading surfaces."
+      "reason": "Production Preview loading feedback: delayed activation over retained editor content, immediate empty side/startup loading, warm full silence, editable Source, silent refresh, cancellation and failure. Captures actual loading surfaces."
     },
     "scripts/test-source-preview-edit-ownership.ts": {
       "kind": "targeted",
@@ -731,6 +731,7 @@
       "scripts/test-source-preview-edit-ownership.ts",
       "scripts/test-source-preview-late-layout.ts",
       "scripts/test-source-preview-mermaid-updates.ts",
+      "scripts/test-source-preview-mode-transition.ts",
       "scripts/test-source-side-preview.ts",
       "scripts/test-source-syntax-first-paint.ts",
       "scripts/test-source-syntax-stability.ts",

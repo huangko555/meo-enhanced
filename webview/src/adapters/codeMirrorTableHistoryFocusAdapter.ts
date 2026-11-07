@@ -51,6 +51,7 @@ export function createCodeMirrorTableHistoryFocusAdapter(): CodeMirrorTableHisto
     get extension() { return extension; },
     effect: (target, inverse = target) => restoreTableHistoryFocusEffect.of({ target, inverse }),
     read: (state) => state.field(stateField, false) ?? null,
+    isHistoryEffect: (effect) => effect.is(restoreTableHistoryFocusEffect),
     isContentOnly: (transaction) => transaction.effects.some(effect => effect.is(restoreTableHistoryFocusEffect) && effect.value.target?.contentOnly === true)
   };
   extension = [tableHistoryFocusFacet.of(adapter), stateField, historyExtension];

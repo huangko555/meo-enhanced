@@ -946,6 +946,12 @@ native behavior checks regardless of the chosen environment.
 
 ## Daily repair loop
 
+Mode classes and mounted editor DOM alone do not establish interactive readiness.
+For return-focus cases, admit the active editable host (non-inert, loading hidden)
+before opening the panel, and retain immediate return assertions. Deliberate
+pending-work cases must keep their unfinished work. Catalog rows can be rebuilt
+as Host replies arrive; deliver selection through a stable native locator.
+
 Browser fixtures must establish the state their assertions inspect. Reset an
 inherited selection and fit a finite fixture before querying its complete reading
 DOM; offscreen nodes may be virtualized. After a pointer release, wait for the
@@ -2073,6 +2079,12 @@ default/custom layout settings and verifies that initial settings do not save a
 temporary default mode as a user preference. Source's optional side-by-side
 preview is covered by
 `scripts/test-source-side-preview.ts` in the production browser matrix.
+`scripts/test-source-preview-mode-transition.ts` exercises the same production
+entry with ordinary and windowed Preview documents. It holds the full-layout
+response, checks that Source and unfinished iframe content remain hidden behind
+immediate loading feedback without a blank interval, then verifies
+cancellation, stale completion and successful round trips without text loss.
+It runs in the source-side-preview contract and the release browser suite.
 Build the production assets before running the startup contract directly. Its
 module-preload case holds the actual shell script response, requires the editor
 module to be fetched independently, and verifies that Source mount reuses that

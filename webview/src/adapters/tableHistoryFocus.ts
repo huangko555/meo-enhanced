@@ -17,6 +17,7 @@ export type CodeMirrorTableHistoryFocus = {
   readonly extension: Extension;
   effect(target: TableHistoryFocusTarget | null, inverse?: TableHistoryFocusTarget | null): StateEffect<unknown>;
   read(state: EditorState): TableHistoryFocusTarget | null;
+  isHistoryEffect(effect: StateEffect<unknown>): boolean;
   isContentOnly(transaction: Transaction): boolean;
 };
 

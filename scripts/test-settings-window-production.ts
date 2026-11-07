@@ -1050,6 +1050,16 @@ try {
     });
     assert.ok(feedback.left === entry.left && feedback.right === entry.right && feedback.height === entry.height && feedback.promptRight < feedback.actionLeft && !feedback.overflow,
       `${language}/${appearance}: the feedback description and action fit the aligned narrow row`);
+    await page.hover('.more-tools-feedback-link');
+    await page.waitForSelector('.feedback-version-popover:not([hidden])');
+    await page.waitForSelector('.feedback-version-copy:not([disabled])');
+    await page.click('.feedback-version-copy');
+    await page.waitForFunction(() => /已复制|Copied/.test(document.querySelector('.feedback-version-copy')!.getAttribute('aria-label')!));
+    assert.match(await page.evaluate(() => (window as any).__clipboard), /^MEO Enhanced: .+\nVisual Studio Code: .+\nOS: /);
+    assert.equal(await page.$eval('.more-tools-panel', element => (element as HTMLElement).hidden), false, 'The production outside-pointer handler keeps the menu open when copying');
+    assert.equal(await page.$eval('.feedback-version-popover', element => (element as HTMLElement).hidden), false);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.$eval('.feedback-version-popover', element => (element as HTMLElement).hidden), true);
     if (process.env.MEO_SETTINGS_SCREENSHOTS) {
       await page.screenshot({ path: path.join(path.resolve(process.env.MEO_SETTINGS_SCREENSHOTS), `settings-entry-${language}-${appearance}.png`) });
     }
@@ -1545,6 +1555,8 @@ try {
   await openFixture(largeText);
   await page.waitForSelector('.cm-editor.meo-mode-source');
   await page.waitForFunction(() => !document.querySelector('.mode-toolbar')?.classList.contains('meo-preload-toolbar'));
+  await page.waitForFunction(() => !document.querySelector<HTMLElement>('.editor-host')!.inert
+    && document.querySelector<HTMLElement>('.editor-loading')?.hidden !== false);
   assert.equal(await page.evaluate(() => {
     const harness = (window as any).EditingSettingsHarness;
     return harness.usesLargeDocumentDerivedWorkBudget(harness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state);

@@ -74,9 +74,21 @@ try {
         mkdirSync('.local/probes/linked-image-hover', { recursive: true });
         await page.screenshot({ path: '.local/probes/linked-image-hover/html-link-title.png' });
       }
-      assert.equal(await page.$eval('img[alt="picture"]', element => getComputedStyle(element).cursor), 'pointer');
-      await page.keyboard.down('Control');
-      await page.keyboard.up('Control');
+      assert.equal(await page.$eval('img[alt="picture"]', element => getComputedStyle(element).cursor), 'default');
+      for (const modifier of ['Control', 'Meta'] as const) {
+        await page.keyboard.down(modifier);
+        assert.equal(await page.$eval('img[alt="picture"]', element => getComputedStyle(element).cursor), 'pointer',
+          `${modifier} enables the linked image cursor without moving the mouse`);
+        await page.keyboard.down('Shift');
+        assert.equal(await page.$eval('img[alt="picture"]', element => getComputedStyle(element).cursor), 'default',
+          'an extra selection modifier keeps the ordinary image cursor');
+        await page.keyboard.up('Shift');
+        await page.keyboard.up(modifier);
+        assert.equal(await page.$eval('img[alt="picture"]', element => getComputedStyle(element).cursor), 'default',
+          'releasing the navigation modifier restores the ordinary image cursor');
+      }
+      assert.equal(await page.$eval('.meo-md-image-control-btn', element => getComputedStyle(element).cursor), 'pointer',
+        'image action buttons retain their interactive cursor');
       await page.waitForFunction(expected => document.querySelector('.meo-tooltip.is-visible .meo-tooltip-label')?.textContent === expected,
         { timeout: 1500 }, expected);
       assert.equal(await page.$eval('.meo-tooltip.is-visible .meo-tooltip-label', element => element.textContent), expected,

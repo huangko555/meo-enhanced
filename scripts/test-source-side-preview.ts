@@ -928,6 +928,10 @@ try {
   let previewRenderCount = 0;
   let nextPreviewRenderDelayMs = 0;
   await page.exposeFunction('__renderSourceSidePreview', async (message: any) => {
+    if (message.type === 'getPreviewFonts') return {
+      type: 'previewFontsResult', requestId: message.requestId,
+      result: { ok: true, value: ['Arial', 'Georgia', 'Microsoft YaHei', 'Segoe UI'].map(family => ({ family, aliases: [] })) }
+    };
     if (message.type !== 'requestPreviewRender') return null;
     previewRenderCount += 1;
     const delayMs = nextPreviewRenderDelayMs;
@@ -1307,7 +1311,7 @@ try {
         started,
         mode: document.querySelector<HTMLElement>('#app')?.dataset.mode ?? '',
         covered: document.querySelector<HTMLElement>('.editor-host')?.hasAttribute('data-preview-cover') ?? false,
-        visible: !host.hidden && getComputedStyle(host).visibility !== 'hidden'
+        visible: !host.hidden && getComputedStyle(frame).visibility !== 'hidden'
           && host.querySelector<HTMLElement>('.preview-loading')?.hidden !== false,
         offset: projection?.offset ?? null,
         scrollTop: frameDocument.scrollingElement?.scrollTop ?? 0,
@@ -2047,7 +2051,8 @@ try {
     const sample = () => {
       const host = document.querySelector<HTMLElement>('.preview-host')!;
       const frameDocument = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument;
-      const hidden = host.hidden || getComputedStyle(host).visibility === 'hidden';
+      const hidden = host.hidden || getComputedStyle(host).visibility === 'hidden'
+        || host.querySelector<HTMLElement>('.preview-loading')?.hidden === false;
       samples.push({ hidden, scrollTop: frameDocument?.scrollingElement?.scrollTop ?? 0 });
       if (!hidden) visibleFrames += 1;
       // Cover the first visible frames even when asynchronous rendering finishes later.
@@ -2488,25 +2493,13 @@ try {
   const lastSplitFrame = sourceToFullPreviewFrames
     .filter(frame => !frame.started && frame.split && frame.editorVisible && frame.editorOffset !== null)
     .at(-1);
-  const coveredSourceFrames = sourceToFullPreviewFrames.filter(frame => (
-    frame.started && frame.covered && frame.editorVisible && frame.editorOffset !== null
-  ));
-  assert.ok(lastSplitFrame && coveredSourceFrames.length > 0, JSON.stringify(sourceToFullPreviewFrames));
-  assert.ok(
-    coveredSourceFrames.every(frame => (
-      Math.abs(frame.editorWidth - lastSplitFrame.editorWidth) <= 1
-      && Math.abs((frame.editorOffset as number) - (lastSplitFrame.editorOffset as number)) <= 1
-    )),
-    `Source-to-Preview must not reflow the visible Source cover before Preview paints: ${JSON.stringify(sourceToFullPreviewFrames)}`
-  );
+  assert.ok(lastSplitFrame, JSON.stringify(sourceToFullPreviewFrames));
+  assert.ok(sourceToFullPreviewFrames.filter(frame => frame.started).every(frame => !frame.editorVisible),
+    `Source-to-Preview must not leave Source over the full-width Preview: ${JSON.stringify(sourceToFullPreviewFrames)}`);
   const visibleSourceToFullPreviewFrames = sourceToFullPreviewFrames
     .filter(frame => frame.mode === 'preview' && frame.visible && frame.offset !== null);
   const finalFullPreviewFrame = visibleSourceToFullPreviewFrames.at(-1);
   assert.ok(finalFullPreviewFrame, JSON.stringify(sourceToFullPreviewFrames));
-  assert.ok(
-    sourceToFullPreviewFrames.some(frame => frame.started && frame.covered),
-    `Source-to-Preview must cover the resized iframe until its compositor is ready: ${JSON.stringify(sourceToFullPreviewFrames)}`
-  );
   const uncoveredTransitionFrames = sourceToFullPreviewFrames
     .filter(frame => frame.started && frame.visible && !frame.covered && frame.offset !== null);
   assert.ok(
@@ -2906,7 +2899,8 @@ try {
   await page.click('.source-preview-more-button');
   await page.click('.source-preview-more-panel .preview-font-family-dropdown');
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('role')), 'combobox');
-  await page.click('.preview-font-family-dropdown-panel [role="option"]:nth-child(2)');
+  // The asynchronous font catalog can rebuild and reposition these rows.
+  await page.locator('.preview-font-family-dropdown-panel [role="option"]:nth-child(2)').click();
   await page.waitForFunction(() => document.activeElement === document.querySelector('.preview-font-family-dropdown-panel input'));
   assert.equal(await page.$eval('.preview-font-family-dropdown-panel', panel => (panel as HTMLElement).hidden), false, 'Choosing a font keeps comparison open');
   await page.keyboard.press('Escape');

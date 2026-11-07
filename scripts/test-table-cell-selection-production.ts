@@ -1,7 +1,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import assert from 'node:assert/strict';
+import type { Page } from 'puppeteer-core';
 import { launchTestBrowser } from './browser-test-helpers';
+import { assessLargeDocument } from '../src/foundation/largeDocument';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-table-cell-selection-'));
@@ -18,6 +21,255 @@ const source = [
   '| c1 | d1 |',
   '| c2 | d2 |'
 ].join('\n');
+
+async function checkSingleCellDrag(page: Page) {
+  const sourceTable = '.meo-md-html-table:not(.meo-md-html-table-sticky-table)';
+  const first = `${sourceTable} tbody tr:first-child td:first-child .meo-md-html-table-cell-preview`;
+  const last = `${sourceTable} tbody tr:nth-child(2) td:nth-child(2) .meo-md-html-table-cell-preview`;
+  const selected = `${sourceTable} .meo-md-html-table-cell-selected`;
+  const targetCell = `${sourceTable} tbody tr:first-child td:first-child`;
+  const viewportFrameCount = 32;
+  const center = (selector: string) => page.$eval(selector, element => {
+    const box = element.getBoundingClientRect();
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+  });
+  const facts = () => page.evaluate(selector => ({
+    cells: Array.from(document.querySelectorAll(selector), cell => {
+      const input = cell.querySelector<HTMLTextAreaElement>('textarea')!;
+      return `${input.dataset.tableRow}:${input.dataset.tableCol}`;
+    }),
+    active: document.activeElement?.tagName,
+    editing: document.querySelectorAll('.meo-md-html-table .is-editing').length,
+    text: (window as any).__singleCellEditor.getText()
+  }), selected);
+  const placeTargetAtReadingPosition = async (label: string) => {
+    const readingPosition = await page.evaluate((cellSelector) => {
+      const editor = (window as any).__singleCellEditor;
+      const cell = document.querySelector<HTMLElement>(cellSelector)!;
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      const rect = cell.getBoundingClientRect();
+      editor.view.scrollDOM.scrollTop += rect.top - viewport.top - viewport.height / 3;
+      return { scrollTop: editor.view.scrollDOM.scrollTop };
+    }, targetCell);
+    assert.ok(readingPosition.scrollTop > 0, `${label}/single-cell target starts away from document top`);
+    await page.waitForFunction((cellSelector) => {
+      const editor = (window as any).__singleCellEditor;
+      const cell = document.querySelector<HTMLElement>(cellSelector)!;
+      const viewport = editor.view.scrollDOM.getBoundingClientRect();
+      const rect = cell.getBoundingClientRect();
+      return editor.view.scrollDOM.scrollTop > 0 && rect.top >= viewport.top && rect.bottom <= viewport.bottom;
+    }, {}, targetCell);
+  };
+  const viewportSnapshot = () => page.evaluate((cellSelector) => {
+    const editor = (window as any).__singleCellEditor;
+    const cell = document.querySelector<HTMLElement>(cellSelector)!;
+    const rect = cell.getBoundingClientRect();
+    const viewport = editor.view.scrollDOM.getBoundingClientRect();
+    return {
+      scrollTop: editor.view.scrollDOM.scrollTop,
+      target: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+      visible: rect.top >= viewport.top && rect.bottom <= viewport.bottom
+    };
+  }, targetCell);
+  const beginViewportTrace = async () => {
+    await page.evaluate(({ cellSelector, frameCount }) => {
+      const editor = (window as any).__singleCellEditor;
+      const trace: Array<unknown> = [];
+      (window as any).__singleCellViewportTrace = trace;
+      const sample = () => {
+        const cell = document.querySelector<HTMLElement>(cellSelector);
+        const table = cell?.closest<HTMLTableElement>('table');
+        const viewport = editor.view.scrollDOM.getBoundingClientRect();
+        const rect = cell?.getBoundingClientRect();
+        const active = document.activeElement;
+        const selectedCells = Array.from(document.querySelectorAll(
+          '.meo-md-html-table:not(.meo-md-html-table-sticky-table) .meo-md-html-table-cell-selected'
+        ), (selectedCell) => {
+          const selectedInput = selectedCell.querySelector<HTMLTextAreaElement>('textarea')!;
+          return `${selectedInput.dataset.tableRow}:${selectedInput.dataset.tableCol}`;
+        });
+        trace.push({
+          scrollTop: editor.view.scrollDOM.scrollTop,
+          target: rect ? { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom } : null,
+          visible: !!rect && rect.top >= viewport.top && rect.bottom <= viewport.bottom,
+          expectedCellValue: editor.view.state.doc.line((window as any).__singleCellSourceLine).text.includes('**alpha**') ? '**alpha**' : '',
+          focus: active === table
+            ? { kind: 'table', cells: selectedCells }
+            : active instanceof HTMLTextAreaElement
+              ? {
+                kind: 'input', row: active.dataset.tableRow ?? null, col: active.dataset.tableCol ?? null,
+                value: active.value,
+                selectionStart: active.selectionStart, selectionEnd: active.selectionEnd,
+                stickyClone: Boolean(active.closest('.meo-md-html-table-sticky-table'))
+              }
+              : { kind: 'other', tag: active?.tagName ?? null }
+        });
+        if (trace.length < frameCount) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    }, { cellSelector: targetCell, frameCount: viewportFrameCount });
+  };
+  const assertViewportTrace = async (
+    label: string,
+    before: Awaited<ReturnType<typeof viewportSnapshot>>,
+    acceptsFocus: (focus: any) => boolean
+  ) => {
+    await page.waitForFunction(frameCount => (window as any).__singleCellViewportTrace.length === frameCount, {}, viewportFrameCount);
+    const trace = await page.evaluate(() => (window as any).__singleCellViewportTrace) as Array<{
+      scrollTop: number; target: unknown; visible: boolean; focus: any; expectedCellValue: string;
+    }>;
+    assert.equal(trace.length, viewportFrameCount, `${label}/captured every viewport frame`);
+    for (const [index, frame] of trace.entries()) {
+      assert.equal(frame.scrollTop, before.scrollTop, `${label}/frame ${index} did not jump scrollTop`);
+      assert.deepEqual(frame.target, before.target, `${label}/frame ${index} kept target geometry`);
+      assert.equal(frame.visible, true, `${label}/frame ${index} kept target in the reading viewport`);
+      assert.ok(acceptsFocus(frame.focus), `${label}/frame ${index} kept a valid native focus or selection: ${JSON.stringify(frame.focus)}`);
+      if (frame.focus.kind === 'input') assert.equal(frame.focus.value, frame.expectedCellValue,
+        `${label}/frame ${index} paired native cell text with the accepted document`);
+    }
+  };
+  const acceptsSingleCellRange = (focus: any) => focus?.kind === 'table'
+    && JSON.stringify(focus.cells) === JSON.stringify(['1:0']);
+  const acceptsTargetInput = (focus: any) => focus?.kind === 'input'
+    && focus.row === '1' && focus.col === '0' && focus.selectionStart === 0 && focus.selectionEnd === 0
+    && !focus.stickyClone;
+  const acceptsRangeOrTargetInput = (focus: any) => acceptsSingleCellRange(focus) || acceptsTargetInput(focus);
+
+  for (const large of [false, true]) {
+    const readingPrefix = Array.from({ length: 36 }, (_, index) => `Before table ${index + 1}`).join('\n');
+    const text = `${readingPrefix}\n\n| A | B |\n| --- | --- |\n| **alpha** | beta |\n| gamma | delta |\n\noutside`
+      + (large ? '\n\n' + 'padding text\n'.repeat(8100) : '');
+    const label = large ? 'optimized' : 'ordinary';
+    assert.equal(assessLargeDocument(text).boundedEditorWork, large, `${label}/policy`);
+    await page.evaluate(text => {
+      (window as any).__singleCellEditor?.destroy();
+      (window as any).__singleCellEditor = (window as any).TableStabilityHarness.createEditor({
+        parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
+      });
+      (window as any).__singleCellSourceLine = (window as any).__singleCellEditor.view.state.doc.lineAt(text.indexOf('| **alpha** |') + 2).number;
+    }, text);
+    await page.waitForSelector(first);
+    await page.waitForFunction(large => (window as any).TableStabilityHarness
+      .usesLargeDocumentDerivedWorkBudget((window as any).__singleCellEditor.view.state) === large, {}, large);
+    await placeTargetAtReadingPosition(label);
+
+    const selectSingle = async (releaseOutside = false) => {
+      const start = await center(first), end = await center(last);
+      await page.mouse.move(start.x, start.y);
+      await page.mouse.down();
+      await page.mouse.move(end.x, end.y, { steps: 4 });
+      assert.equal(await page.$$eval(selected, cells => cells.length), 4, `${label}/cross-cell range`);
+      await page.mouse.move(start.x, start.y, { steps: 4 });
+      assert.deepEqual(await facts(), { cells: ['1:0'], active: 'TABLE', editing: 0, text }, `${label}/held single-cell range`);
+      if (releaseOutside) {
+        const outside = await page.$eval('.meo-md-html-table', table => ({
+          x: table.getBoundingClientRect().left - 12
+        }));
+        await page.mouse.move(outside.x, start.y);
+      }
+      await page.mouse.up();
+      assert.deepEqual(await facts(), { cells: ['1:0'], active: 'TABLE', editing: 0, text }, `${label}/released single-cell range`);
+    };
+
+    for (const key of ['Delete', 'Backspace'] as const) {
+      await selectSingle(key === 'Backspace');
+      if (process.env.MEO_TEST_SCREENSHOTS && key === 'Delete') {
+        fs.mkdirSync(process.env.MEO_TEST_SCREENSHOTS, { recursive: true });
+        for (const appearance of ['light', 'dark'] as const) {
+          await page.evaluate(appearance => (window as any).TableStabilityHarness.applyBuiltInVisualBaseline(appearance), appearance);
+          await (await page.$('.meo-md-html-table-shell'))!.screenshot({
+            path: path.join(process.env.MEO_TEST_SCREENSHOTS, `single-cell-${label}-${appearance}.png`)
+          });
+        }
+      }
+      const historyBeforeCopy = await page.evaluate(() => (window as any).__singleCellEditor.getHistoryDepth());
+      const beforeCopy = await viewportSnapshot();
+      await beginViewportTrace();
+      const copied = await page.evaluate(() => {
+        const clipboard = new DataTransfer();
+        const event = new ClipboardEvent('copy', { clipboardData: clipboard, bubbles: true, cancelable: true });
+        document.dispatchEvent(event);
+        return {
+          prevented: event.defaultPrevented,
+          plain: clipboard.getData('text/plain'),
+          html: clipboard.getData('text/html'),
+          meo: clipboard.getData('application/x-meo-table-cells+json'),
+          history: (window as any).__singleCellEditor.getHistoryDepth()
+        };
+      });
+      assert.equal(copied.prevented, true, `${label}/single-cell copy handled`);
+      assert.equal(copied.plain, '**alpha**', `${label}/single-cell copy source`);
+      assert.equal(copied.html, '<table><tr><td><strong>alpha</strong></td></tr></table>', `${label}/single-cell copy format`);
+      assert.ok(copied.meo, `${label}/single-cell copy internal format`);
+      assert.deepEqual(copied.history, historyBeforeCopy, `${label}/copy adds no history`);
+      await assertViewportTrace(`${label}/${key}/copy`, beforeCopy, acceptsSingleCellRange);
+
+      const cleared = text.replace('| **alpha** | beta |', '|  | beta |');
+      const beforeClear = await viewportSnapshot();
+      await beginViewportTrace();
+      await page.keyboard.press(key);
+      await page.waitForFunction(expected => (window as any).__singleCellEditor.getText() === expected, {}, cleared);
+      const assertEditing = async (expected: string) => {
+        await page.waitForFunction(expected => {
+          const input = document.activeElement;
+          return (window as any).__singleCellEditor.getText() === expected
+            && input instanceof HTMLTextAreaElement && input.dataset.tableRow === '1'
+            && input.dataset.tableCol === '0' && input.selectionStart === 0 && input.selectionEnd === 0
+            && !input.closest('.meo-md-html-table-sticky-table')
+            && !document.querySelector('.meo-md-html-table-cell-selected');
+        }, {}, expected);
+      };
+      await assertEditing(cleared);
+      await assertViewportTrace(`${label}/${key}/clear`, beforeClear, acceptsRangeOrTargetInput);
+      const beforeUndo = await viewportSnapshot();
+      await beginViewportTrace();
+      await page.keyboard.down('Control');
+      await page.keyboard.press('KeyZ');
+      await page.keyboard.up('Control');
+      await assertEditing(text);
+      await assertViewportTrace(`${label}/${key}/undo`, beforeUndo, acceptsTargetInput);
+      const beforeRedo = await viewportSnapshot();
+      await beginViewportTrace();
+      await page.keyboard.down('Control');
+      await page.keyboard.press('KeyY');
+      await page.keyboard.up('Control');
+      await assertEditing(cleared);
+      await assertViewportTrace(`${label}/${key}/redo`, beforeRedo, acceptsTargetInput);
+      const beforeSecondUndo = await viewportSnapshot();
+      await beginViewportTrace();
+      await page.keyboard.down('Control');
+      await page.keyboard.press('KeyZ');
+      await page.keyboard.up('Control');
+      await assertEditing(text);
+      await assertViewportTrace(`${label}/${key}/second undo`, beforeSecondUndo, acceptsTargetInput);
+      await page.keyboard.press('Escape');
+    }
+
+    await selectSingle();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.$$eval(selected, cells => cells.length), 0, `${label}/Escape clears single-cell range`);
+    await selectSingle();
+    await page.click('#outside');
+    assert.equal(await page.$$eval(selected, cells => cells.length), 0, `${label}/outside click clears single-cell range`);
+
+    await selectSingle();
+    await page.click(first);
+    await page.waitForFunction(() => document.activeElement instanceof HTMLTextAreaElement);
+    assert.equal(await page.$$eval(selected, cells => cells.length), 0, `${label}/click returns to text editing`);
+    const nativeCopy = await page.evaluate(() => {
+      const input = document.activeElement as HTMLTextAreaElement;
+      input.setSelectionRange(2, 4);
+      const event = new ClipboardEvent('copy', { clipboardData: new DataTransfer(), bubbles: true, cancelable: true });
+      input.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(nativeCopy, false, `${label}/text copy remains native`);
+    await page.keyboard.press('Backspace');
+    assert.equal(await page.$eval('tbody textarea', input => input.value), '**pha**', `${label}/text deletion keeps the rest of the cell`);
+    console.log(`single-cell drag, copy, clear and history checks passed (${label}, actual derived-work budget)`);
+  }
+  await page.evaluate(() => (window as any).__singleCellEditor.destroy());
+}
 
 async function main() {
   const build = await Bun.build({
@@ -36,6 +288,8 @@ async function main() {
     await page.setContent('<!doctype html><button id="outside">outside</button><div id="app"></div>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+    await checkSingleCellDrag(page);
+    if (process.argv.includes('--single-cell-only')) return;
     await page.evaluate((text) => {
       (window as any).__selectionEditor = (window as any).TableStabilityHarness.createEditor({
         parent: document.getElementById('app')!, text, initialMode: 'live', onApplyChanges() {}
@@ -519,7 +773,7 @@ async function main() {
         { edge: 'right, shrink', x: box.right + 16, y: first.y, selected: ['1:0', '1:1'] },
         { edge: 'right, grow', x: box.right + 16, y: last.y, selected: all },
         { edge: 'left', x: box.left - 16, y: last.y, selected: ['1:0', '2:0'] },
-        { edge: 'collapse to anchor', x: box.left - 16, y: first.y, selected: [] },
+        { edge: 'collapse to anchor', x: box.left - 16, y: first.y, selected: ['1:0'] },
         { edge: 'left, grow again', x: box.left - 16, y: last.y, selected: ['1:0', '2:0'] },
         { edge: 'top, grow', x: last.x, y: box.top - 12, selected: ['0:0', '0:1', '1:0', '1:1'] },
         { edge: 'top, shrink', x: first.x, y: box.top - 12, selected: ['0:0', '1:0'] },

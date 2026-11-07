@@ -40,6 +40,10 @@ use the same presentation controller.
 - When a split Preview is already visible and becomes the standalone Preview,
   it remains the transition anchor owner. The final-width layout reprojects that
   same Preview reading point instead of recapturing an approximate Source line.
+- A split-to-standalone transition hides Source and covers the resizing iframe
+  with immediate loading feedback until its final-width reading position is painted.
+  A half-width Source cover must
+  never expose the other half of the unfinished full-width iframe.
 
 VS Code's Markdown Preview follows the same broad model: it caches mapped
 elements by document version, ignores duplicate list and `pre` containers,
@@ -148,12 +152,15 @@ checks the quiet window, cancellation and pending-to-empty completion.
 
 ## Preview loading feedback
 
-Opening Preview, opening its side pane, or changing between their final widths
-starts a single 200ms presentation deadline. A ready surface cancels it without
-showing a busy label or animation. After the deadline, a theme-colored opaque
-loading surface replaces the previous editor cover (or occupies only the right
-pane), with a localized status and a reduced-motion-aware spinner. The unfinished
-iframe stays inert; Source and the mode/side-pane controls remain usable.
+An explicit activation retains an accepted reading surface or shows loading
+feedback from the destination's first visible frame. Full Preview opened over
+an existing editor uses a single 200ms deadline to avoid flashing feedback on a
+fast switch. A newly opened side pane, split-to-full transition and initial
+Preview have no retained cover in their destination region, so they show the
+theme-colored opaque loading surface immediately, with a localized status and
+a reduced-motion-aware spinner. A cached side payload can still need final-width
+alignment; feedback covers that preparation without adding a minimum duration.
+The unfinished iframe stays inert; Source and mode controls remain usable.
 
 Feedback ends on accepted paint readiness, after final split geometry and source
 alignment when applicable. Receiving a Host payload alone does not end loading.
@@ -165,13 +172,16 @@ resource refreshes never start this feedback or clear the existing reading surfa
 
 `scripts/test-preview-loading-presentation.ts` drives the production bootstrap,
 holds actual Host responses and iframe commit separately, and checks delayed
-full/side loading, warm silence, input silence, cancellation, errors and initial
-Preview startup. Its screenshots are actual DOM captures under an injected wait.
+full loading, immediate side loading, warm full silence, input silence,
+cancellation, errors and initial Preview startup. Its screenshots are actual DOM
+captures under an injected wait.
 The full and split captures are saved in `.local/preview-loading/`.
 
-Live and Source use the same 200ms quiet window for initial mounting and explicit
-mode preparation. Their loading surface follows the existing mode intent through
-actual readiness; it does not advance parsing, own mode state or start on edits.
+Live and Source show immediate feedback for initial mounting or a destination
+with no accepted cover. Established mode preparation retains its 200ms quiet
+window over the previous document. Their loading surface follows the existing
+mode intent through actual readiness; it does not advance parsing, own mode
+state or start on edits.
 The bootstrap shell is revealed when feedback becomes visible. In established
 split layouts the overlay occupies only the editor's final grid column. A full
 Preview remains a cover until the atomic split commit, so feedback covers that
@@ -184,6 +194,9 @@ buttons keep their selected pill and keyboard focus without a progress underline
 `scripts/test-editor-loading-presentation.ts` holds actual cold module requests
 and the production adapter's asynchronous preparation boundary to verify those
 rules, quiet fast transitions, silent editing and Preview/split coordination.
+The HTML startup shell includes localized feedback with inline styles. Bootstrap
+retains it across module loading until ready content or the active mode's
+loading surface takes over, so startup feedback has no runtime-script dependency.
 
 VS Code's official Preview implementation similarly moves new styles into place
 before morphing specifically to prevent an unstyled flash, and preserves equal

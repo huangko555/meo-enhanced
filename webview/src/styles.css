@@ -186,18 +186,19 @@ body {
   opacity: 0;
 }
 
-/* During Source split -> Preview, keep the old Source half at its painted
-   width while the Preview iframe prepares its full-width compositor frame. */
-.editor-surface[data-source-preview-exit-cover] {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+.meo-startup-loading {
+  inset: var(--meo-editor-toolbar-height, 40px) 0 0;
+  font-family: var(--vscode-font-family, system-ui);
 }
 
-.editor-surface[data-source-preview-exit-cover] > .editor-host {
-  grid-area: 1 / 1;
+/* A split-to-full transition prepares at its final width behind one opaque
+   Preview surface with immediate loading feedback. */
+.editor-surface[data-preview-preparing] > .preview-host > :not(.preview-loading):not(.preview-status) {
+  visibility: hidden;
 }
 
-.editor-surface[data-source-preview-exit-cover] > .preview-host {
-  grid-area: 1 / 1 / 2 / 3;
+.editor-surface[data-preview-preparing] > .preview-host {
+  background: var(--meo-preview-background, var(--meo-background));
 }
 
 .editor-surface[data-source-preview-preparing] > .editor-host {
@@ -5515,6 +5516,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   line-height: normal;
   margin: 0;
   padding: 0;
+  cursor: default;
 }
 
 .cm-editor .meo-md-image-group {
@@ -5533,7 +5535,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   margin: 0;
   padding: 0;
   vertical-align: bottom;
-  cursor: pointer;
+  cursor: inherit;
 }
 
 .cm-editor .meo-md-image-fallback {
@@ -5555,7 +5557,7 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   background: var(--meo-semantic-imageBackground);
 }
 
-.cm-editor .meo-md-image-linked {
+.cm-editor.meo-mode-live.meo-link-modifier-hover .meo-md-image-linked {
   cursor: pointer;
 }
 
@@ -8440,6 +8442,28 @@ html[data-meo-ui-contrast='high'] .appearance-color-field:not(:focus-within):not
 .more-tools-option.more-tools-navigation-option:active:not(:disabled) { background: var(--meo-ui-surface-pressed); }
 .more-tools-navigation-action { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; white-space: nowrap; }
 .more-tools-feedback-action, .more-tools-sponsor-action { color: var(--meo-ui-feedback-action); }
+.more-tools-feedback-link.is-version-open { background: var(--meo-ui-surface-hover); }
+.feedback-version-popover { position: fixed; z-index: var(--meo-layer-window-popover); box-sizing: border-box; width: 232px; color: var(--meo-ui-text); font: 12px/1.5 var(--vscode-font-family, system-ui, sans-serif); }
+.feedback-version-popover[hidden] { display: none; }
+.feedback-version-popover::after { content: ''; position: absolute; pointer-events: auto; }
+.feedback-version-popover[data-side='left']::after { top: 0; right: -3px; bottom: 0; width: 3px; }
+.feedback-version-popover[data-side='right']::after { top: 0; left: -3px; bottom: 0; width: 3px; }
+.feedback-version-popover[data-side='bottom']::after { top: -3px; right: 0; left: 0; height: 3px; }
+.feedback-version-popover[data-side='top']::after { bottom: -3px; right: 0; left: 0; height: 3px; }
+.feedback-version-information { box-sizing: border-box; max-height: calc(100dvh - 16px); overflow-y: auto; padding: 8px 10px; border: 1px solid var(--meo-ui-border-float); border-radius: 8px; background: var(--meo-ui-surface-raised); box-shadow: var(--meo-ui-shadow); }
+.feedback-version-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.feedback-version-title { margin: 0; color: var(--meo-ui-text); font: inherit; font-weight: 500; }
+.settings-button.feedback-version-copy { flex: 0 0 auto; width: 24px; min-width: 24px; height: 24px; min-height: 24px; padding: 0; border: 1px solid var(--meo-ui-border-control); }
+.feedback-version-copy > svg { flex: 0 0 auto; }
+.feedback-version-values { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 4px 10px; margin: 0; font-size: 11px; line-height: 1.5; font-weight: 400; }
+.feedback-version-values dt { color: var(--meo-ui-text-muted); font-weight: 400; overflow-wrap: anywhere; }
+.feedback-version-values dd { margin: 0; text-align: right; font-weight: 400; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.feedback-version-values [hidden] { display: none; }
+.feedback-version-status { margin: 8px 0 0; padding-top: 6px; border-top: 1px solid var(--meo-ui-separator); color: var(--meo-ui-text-muted); font-size: 12px; line-height: 18px; }
+.feedback-version-status.is-error { color: var(--meo-ui-danger); }
+.feedback-version-copy-status { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.feedback-version-retry { margin-top: 8px; }
+.feedback-version-retry[hidden] { display: none; }
 @media (max-width: 620px) {
   .settings-window { width: calc(100vw - 16px); height: calc(100dvh - 16px); }
   .settings-titlebar { padding-inline: 16px; }

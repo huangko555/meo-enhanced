@@ -73,6 +73,12 @@ export function isTableBaselineRefreshEffect(effect: StateEffect<unknown>): bool
   return effect.is(provenanceEffect) && effect.value.type === 'baselineRefreshed';
 }
 
+/** Provenance facts that CodeMirror inverts with a table history transaction. */
+export function isTableHistoryProvenanceEffect(effect: StateEffect<unknown>): boolean {
+  return effect.is(provenanceEffect) && effect.value.type !== 'baselineRefreshed'
+    && effect.value.type !== 'externalDocumentPresented';
+}
+
 function normalizedChanges(transaction: Transaction) {
   const changes: Array<{ from: number; to: number; insertedLength: number }> = [];
   transaction.changes.iterChanges((fromA, toA, fromB, toB) => {

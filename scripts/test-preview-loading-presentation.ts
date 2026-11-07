@@ -51,7 +51,9 @@ async function exercise(side: boolean) {
   try {
     await gate(); await page.click(trigger);
     await page.waitForFunction(() => (window as any).__loadingEntered);
-    assert.equal(await shown(), false, 'The first feedback must remain silent below the threshold');
+    assert.equal(await shown(), side, side
+      ? 'A newly opened empty side pane must show feedback immediately'
+      : 'The retained editor cover keeps fast full Preview activation silent');
     await page.waitForFunction(() => {
       const e = document.querySelector<HTMLElement>('.preview-loading');
       return e && !e.hidden && getComputedStyle(e).visibility === 'visible';
@@ -63,7 +65,8 @@ async function exercise(side: boolean) {
         editorCovered: editor.hasAttribute('data-preview-cover'), editorInert: editor.inert,
         frameInert: document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.documentElement.inert };
     });
-    assert.ok(state.elapsed >= 195 && state.elapsed < 1_000, JSON.stringify(state));
+    assert.ok(side ? state.elapsed >= 0 && state.elapsed < 195
+      : state.elapsed >= 195 && state.elapsed < 1_000, JSON.stringify(state));
     assert.match(state.text!, /正在加载预览/);
     assert.equal(state.frameInert, true, 'An unfinished frame must not become interactive');
     if (side) assert.equal(state.editorInert, false, 'Loading the side Preview must not block editing');
@@ -87,11 +90,12 @@ async function exercise(side: boolean) {
       await release(); await delay(350); await frames(page);
     }
 
-    // A warm reopen does not insert a loading frame.
+    // Full Preview retains its editor cover on a warm reopen. A side pane must
+    // still cover its pending final geometry, even when its payload is cached.
     await page.click(side ? trigger : '[data-mode="source"]'); await frames(page, 8);
     await page.evaluate(() => { (window as any).__loadingShows = []; });
     await page.click(trigger); await ready(); await delay(250);
-    assert.deepEqual(await page.evaluate(() => (window as any).__loadingShows), [], 'A warm reopen must stay silent');
+    if (!side) assert.deepEqual(await page.evaluate(() => (window as any).__loadingShows), [], 'A warm full reopen must stay silent');
     await page.click(side ? trigger : '[data-mode="source"]'); await frames(page, 8);
 
     // Force a new source revision while hidden, then cancel a real pending load.
@@ -156,6 +160,22 @@ async function delayedFramePaint() {
     await page.evaluate(() => {
       const scope = window as any, frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!;
       const descriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'srcdoc')!;
+      scope.__loadingPaintTimeline = [];
+      scope.__loadingSamplePaint = () => {
+        const sample = () => {
+          const loading = document.querySelector<HTMLElement>('.preview-loading');
+          const previewDocument = frame.contentDocument;
+          scope.__loadingPaintTimeline.push({
+            contentCommitted: !!previewDocument?.querySelector('main.meo-export-doc'),
+            frameVisible: getComputedStyle(frame).visibility === 'visible',
+            loadingVisible: !!loading && !loading.hidden,
+            hostBusy: frame.closest<HTMLElement>('.preview-host')?.getAttribute('aria-busy') === 'true',
+            frameInert: previewDocument?.documentElement.inert ?? null
+          });
+          if (scope.__loadingPaintTimeline.length < 32) requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      };
       Object.defineProperty(frame, 'srcdoc', { configurable: true,
         get() { return descriptor.get!.call(frame); },
         set(value) { scope.__loadingCommitFrame = () => { delete (frame as any).srcdoc; descriptor.set!.call(frame, value); }; }
@@ -168,8 +188,29 @@ async function delayedFramePaint() {
     await page.waitForFunction(() => !!(window as any).__loadingCommitFrame);
     await page.waitForFunction(() => !document.querySelector<HTMLElement>('.preview-loading')!.hidden);
     assert.equal(await page.$eval('.preview-host', e => e.getAttribute('aria-busy')), 'true');
-    await page.evaluate(() => (window as any).__loadingCommitFrame());
+    await page.evaluate(() => {
+      const scope = window as any;
+      scope.__loadingPaintTimeline = [];
+      scope.__loadingSamplePaint();
+      scope.__loadingCommitFrame();
+    });
     await page.waitForFunction(() => document.querySelector<HTMLElement>('.preview-loading')!.hidden);
+    await frames(page, 3);
+    const timeline = await page.evaluate(() => (window as any).__loadingPaintTimeline as Array<{
+      contentCommitted: boolean; frameVisible: boolean; loadingVisible: boolean; hostBusy: boolean; frameInert: boolean | null;
+    }>);
+    const committedAt = timeline.findIndex(sample => sample.contentCommitted && sample.frameVisible);
+    assert.ok(committedAt >= 0, `The delayed iframe must expose its committed reading document: ${JSON.stringify(timeline)}`);
+    const settledAt = timeline.findIndex((sample, index) => index >= committedAt
+      && !sample.loadingVisible && !sample.hostBusy && sample.frameInert === false);
+    assert.ok(settledAt >= committedAt,
+      `A committed, visible Preview must atomically replace the loading presentation: ${JSON.stringify(timeline)}`);
+    // The production paint gate deliberately waits for compositor frames. Bound
+    // the user-visible handoff to that ready boundary, rather than to the Host
+    // response timestamp: a second 200 ms dwell after content commits would
+    // occupy many more samples while normal layout remains valid.
+    assert.ok(settledAt - committedAt <= 4,
+      `Loading must clear with the committed Preview, not after a second dwell: ${JSON.stringify(timeline)}`);
     assert.deepEqual(host.errors, []);
     console.log('Preview loading presentation passed (Host complete, frame still pending)');
   } finally { host.dispose(); await page.close(); }

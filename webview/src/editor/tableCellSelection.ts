@@ -143,6 +143,7 @@ export class TableCellSelection {
   private phase: TableCellSelectionPhase = 'idle';
   private anchor: TableCellCoordinates | null = null;
   private range: TableCellRange | null = null;
+  private hasCellSelection = false;
   private pointerId: number | null = null;
   private anchorCaret = 0;
   private headCaret = 0;
@@ -190,6 +191,7 @@ export class TableCellSelection {
       if (this.pointerId !== null) return rejected();
       this.anchor = event.cell;
       this.range = normalizeRange(event.cell, event.cell);
+      this.hasCellSelection = false;
       this.phase = 'persisted';
       return accepted(
         { kind: 'set-action-target', pointerId: event.pointerId, cell: event.cell },
@@ -202,6 +204,7 @@ export class TableCellSelection {
       const captured = this.captured;
       this.anchor = event.anchor;
       this.range = normalizeRange(event.anchor, event.head);
+      this.hasCellSelection = event.anchor.row !== event.head.row || event.anchor.col !== event.head.col;
       this.pointerId = null;
       this.captured = false;
       this.pendingCaret = null;
@@ -266,6 +269,7 @@ export class TableCellSelection {
       this.pointerId = event.pointerId;
       this.anchor = event.cell;
       this.range = normalizeRange(event.cell, event.cell);
+      this.hasCellSelection = false;
       const request = {
         kind: 'caret-request', requestId: this.nextCaretRequestId++, phase: 'begin',
         pointerId: event.pointerId, cell: event.cell, fallbackOffset: event.fallbackOffset,
@@ -305,13 +309,12 @@ export class TableCellSelection {
       }
       this.phase = 'dragging';
       this.range = normalizeRange(this.anchor, event.cell);
+      this.hasCellSelection = true;
       return accepted({ kind: 'cells', pointerId: event.pointerId, range: this.range, focus: 'table' });
     }
     if (event.type === 'end') {
       // An outside release commits the latest visible range from the drag adapter.
-      const hasVisibleRange = this.range !== null && (
-        this.range.fromRow !== this.range.toRow || this.range.fromCol !== this.range.toCol
-      );
+      const hasVisibleRange = this.selectedCellRange() !== null;
       if (!event.insideTable && !hasVisibleRange) {
         this.reset();
         return accepted(
@@ -357,6 +360,7 @@ export class TableCellSelection {
       this.pointerId = null;
       this.captured = false;
       this.phase = 'persisted';
+      this.hasCellSelection = true;
       return accepted(
         { kind: 'release-pointer', pointerId: event.pointerId },
         { kind: 'cells', pointerId: event.pointerId, range: this.range, focus: 'table' }
@@ -377,14 +381,18 @@ export class TableCellSelection {
     return this.pointerId === pointerId;
   }
 
+  /** Whole cells selected by a drag/range, excluding the native editing target. */
+  selectedCellRange(): TableCellRange | null {
+    return this.hasCellSelection ? this.range : null;
+  }
+
   copy(cells: readonly (readonly TableCellCopyValue[])[]): SerializedTableCellSelection | null {
-    if (!this.range || this.phase === 'disposed') return null;
-    const cellCount = (this.range.toRow - this.range.fromRow + 1) * (this.range.toCol - this.range.fromCol + 1);
-    if (cellCount <= 1) return null;
+    const range = this.selectedCellRange();
+    if (!range) return null;
     const rows: TableCellCopyValue[][] = [];
-    for (let row = this.range.fromRow; row <= this.range.toRow; row += 1) {
+    for (let row = range.fromRow; row <= range.toRow; row += 1) {
       const values: TableCellCopyValue[] = [];
-      for (let col = this.range.fromCol; col <= this.range.toCol; col += 1) {
+      for (let col = range.fromCol; col <= range.toCol; col += 1) {
         values.push(cells[row]?.[col] ?? { plain: '', inline: [] });
       }
       rows.push(values);
@@ -402,6 +410,7 @@ export class TableCellSelection {
     this.phase = 'idle';
     this.anchor = null;
     this.range = null;
+    this.hasCellSelection = false;
     this.pointerId = null;
     this.anchorCaret = 0;
     this.headCaret = 0;
