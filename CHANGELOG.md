@@ -36,6 +36,10 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Reported successful large-document saves correctly when their optional saved comparison exceeds its size budget, while retaining real save and revision-mismatch errors.
 - Preserved pending local edits across closing and Webview recreation, and kept external revisions unchanged when a separate recovery copy is required.
 - Retried Preview recovery after a failed attempt and kept shared Mermaid loading usable when consumers cancel, loads are abandoned or old results arrive late.
+- Kept single-cell table selection and its undo/redo presentation stable when dragging across cells and returning to the starting cell, including optimized documents.
+- Made Preview loading and Source/Preview transitions visible without briefly mixing old and new layouts, while retaining immediate completion when content is ready.
+- Used the default cursor over Live images, showing a link cursor only when Ctrl or Meta makes a linked image navigable.
+- Added version details to the feedback menu and kept repeated version-copy feedback stable without a transient copying message.
 
 ## 0.3.40
 - Aligned HTML rendering across Live, Preview and exports, including omitted child end tags, native author-defined sizing and supported SVG fill rules, while preserving source-completion boundaries.
