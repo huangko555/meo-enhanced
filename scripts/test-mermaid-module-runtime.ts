@@ -14,6 +14,9 @@ const entry = await build.outputs[0]!.text();
 let failElkOnce = false;
 let delayElkOnce = false;
 let failDependencyOnce = false;
+let holdRuntimeModuleOnce = false;
+let releaseHeldRuntimeModule: (() => void) | null = null;
+let markHeldRuntimeModuleRequest: (() => void) | null = null;
 const moduleRequests = new Map<string, number>();
 const preloadNames: string[] = JSON.parse(fs.readFileSync(path.join(dist, 'preload.json'), 'utf8'));
 const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
@@ -23,6 +26,12 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) 
   if (pathname === '/reference.js') return new Response(Bun.file('node_modules/mermaid/dist/mermaid.min.js'));
   if (pathname.startsWith('/module/') || pathname.startsWith('/mermaid/')) {
     moduleRequests.set(pathname, (moduleRequests.get(pathname) ?? 0) + 1);
+    if (pathname.endsWith('/mermaidRuntime.js') && holdRuntimeModuleOnce) {
+      holdRuntimeModuleOnce = false;
+      markHeldRuntimeModuleRequest?.();
+      await new Promise<void>(resolve => { releaseHeldRuntimeModule = resolve; });
+      releaseHeldRuntimeModule = null;
+    }
     if (pathname.endsWith(`/${preloadNames[1]}`) && failDependencyOnce) {
       failDependencyOnce = false;
       return new Response('Unavailable', { status: 503 });
@@ -146,6 +155,99 @@ try {
     return rejected && typeof runtime.render === 'function';
   });
   assert.ok(retried, 'a failed module URL cannot poison a later valid runtime request');
+  const uncancelledRuntimeLoad = await browser.newPage();
+  try {
+    await uncancelledRuntimeLoad.goto(new URL('?no-preload', server.url).href);
+    let heldRuntimeRequest!: () => void;
+    const runtimeRequestStarted = new Promise<void>(resolve => { heldRuntimeRequest = resolve; });
+    holdRuntimeModuleOnce = true;
+    markHeldRuntimeModuleRequest = heldRuntimeRequest;
+    await uncancelledRuntimeLoad.evaluate(() => {
+      const scope = window as any;
+      scope.__cancelledMermaidRuntimeController = new AbortController();
+      scope.__cancelledMermaidRuntimeLoad = scope.__loadMermaidRuntime(
+        scope.__cancelledMermaidRuntimeController.signal
+      );
+      scope.__sharedMermaidRuntimeLoad = scope.__loadMermaidRuntime();
+    });
+    await runtimeRequestStarted;
+    assert.equal(await uncancelledRuntimeLoad.evaluate(async () => {
+      const scope = window as any;
+      scope.__cancelledMermaidRuntimeController.abort();
+      return await scope.__cancelledMermaidRuntimeLoad.then(() => false, () => true);
+    }), true, 'a cancelled caller must settle without cancelling an ordinary shared runtime caller');
+    releaseHeldRuntimeModule?.();
+    releaseHeldRuntimeModule = null;
+    assert.ok(await uncancelledRuntimeLoad.evaluate(async () =>
+      typeof (await (window as any).__sharedMermaidRuntimeLoad).render === 'function'
+    ), 'an ordinary shared runtime caller must retain the pending load after another caller aborts');
+  } finally {
+    markHeldRuntimeModuleRequest = null;
+    releaseHeldRuntimeModule?.();
+    releaseHeldRuntimeModule = null;
+    await uncancelledRuntimeLoad.close();
+  }
+  const siblingSignalRuntimeLoad = await browser.newPage();
+  try {
+    await siblingSignalRuntimeLoad.goto(new URL('?no-preload', server.url).href);
+    let heldRuntimeRequest!: () => void;
+    const runtimeRequestStarted = new Promise<void>(resolve => { heldRuntimeRequest = resolve; });
+    holdRuntimeModuleOnce = true;
+    markHeldRuntimeModuleRequest = heldRuntimeRequest;
+    await siblingSignalRuntimeLoad.evaluate(() => {
+      const scope = window as any;
+      scope.__firstMermaidRuntimeController = new AbortController();
+      scope.__secondMermaidRuntimeController = new AbortController();
+      scope.__firstMermaidRuntimeLoad = scope.__loadMermaidRuntime(scope.__firstMermaidRuntimeController.signal);
+      scope.__secondMermaidRuntimeLoad = scope.__loadMermaidRuntime(scope.__secondMermaidRuntimeController.signal);
+    });
+    await runtimeRequestStarted;
+    assert.equal(await siblingSignalRuntimeLoad.evaluate(async () => {
+      const scope = window as any;
+      scope.__firstMermaidRuntimeController.abort();
+      return await scope.__firstMermaidRuntimeLoad.then(() => false, () => true);
+    }), true, 'one signal waiter may leave a shared runtime load');
+    releaseHeldRuntimeModule?.();
+    releaseHeldRuntimeModule = null;
+    assert.ok(await siblingSignalRuntimeLoad.evaluate(async () =>
+      typeof (await (window as any).__secondMermaidRuntimeLoad).render === 'function'
+    ), 'a remaining signal waiter must retain the shared runtime load after its sibling aborts');
+  } finally {
+    markHeldRuntimeModuleRequest = null;
+    releaseHeldRuntimeModule?.();
+    releaseHeldRuntimeModule = null;
+    await siblingSignalRuntimeLoad.close();
+  }
+  const abandonedRuntimeLoad = await browser.newPage();
+  try {
+    await abandonedRuntimeLoad.goto(new URL('?no-preload', server.url).href);
+    let heldRuntimeRequest!: () => void;
+    const runtimeRequestStarted = new Promise<void>(resolve => { heldRuntimeRequest = resolve; });
+    holdRuntimeModuleOnce = true;
+    markHeldRuntimeModuleRequest = heldRuntimeRequest;
+    await abandonedRuntimeLoad.evaluate(() => {
+      const scope = window as any;
+      scope.__abandonedMermaidRuntimeController = new AbortController();
+      scope.__abandonedMermaidRuntimeLoad = scope.__loadMermaidRuntime(
+        scope.__abandonedMermaidRuntimeController.signal
+      );
+    });
+    await runtimeRequestStarted;
+    const recoveredAfterAbort = await abandonedRuntimeLoad.evaluate(async () => {
+      const scope = window as any;
+      scope.__abandonedMermaidRuntimeController.abort();
+      const abandoned = await scope.__abandonedMermaidRuntimeLoad.then(() => false, () => true);
+      const runtime = await scope.__loadMermaidRuntime();
+      return abandoned && typeof runtime.render === 'function';
+    });
+    assert.ok(recoveredAfterAbort,
+      'an abandoned module load must release its shared pending identity so a later load can recover');
+  } finally {
+    markHeldRuntimeModuleRequest = null;
+    releaseHeldRuntimeModule?.();
+    releaseHeldRuntimeModule = null;
+    await abandonedRuntimeLoad.close();
+  }
   const classicRetry = await browser.newPage();
   await classicRetry.goto(new URL('?no-preload', server.url).href);
   failDependencyOnce = true;

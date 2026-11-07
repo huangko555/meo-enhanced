@@ -690,6 +690,53 @@ releaseSharedWarm();
 sharedWarmFactory.dispose();
 sharedWarmPool.dispose();
 
+const hangingInitializationStarted = deferred<void>();
+const hangingInitialization = deferred<void>();
+const hangingInitializationSignal = deferred<AbortSignal | undefined>();
+let initializationAttempts = 0;
+const hangingInitializationPool = createMermaidDiagramRenderPool({
+  async initialize(_theme, _config, signal) {
+    initializationAttempts += 1;
+    if (initializationAttempts !== 1) return;
+    hangingInitializationSignal.resolve(signal);
+    hangingInitializationStarted.resolve();
+    await hangingInitialization.promise;
+  },
+  async render(_id, source) {
+    return `<svg data-source="${source}"/>`;
+  }
+});
+const hangingInitializationGroup = hangingInitializationPool.acquireGroup();
+const hangingInitializationLeaf = hangingInitializationGroup.createLeaf();
+const stalledInitializationRequest = request('INITIALIZATION_MUST_NOT_BLOCK_REPLACEMENT');
+const stalledInitialization = hangingInitializationLeaf.render(stalledInitializationRequest);
+await hangingInitializationStarted.promise;
+hangingInitializationGroup.replaceForExternalDocument();
+assert.equal((await hangingInitializationSignal.promise)?.aborted, true,
+  'replacing the owner must abort its initializer instead of only releasing the queue slot');
+assert.match(
+  (await stalledInitialization).error,
+  /replaced for an external Document/,
+  'replacing the owner must settle a render that is still waiting for Mermaid initialization'
+);
+const recoveredInitializationRequest = request('INITIALIZATION_RECOVERS_AFTER_REPLACEMENT', 'dark', 'strict');
+assert.deepEqual(
+  await hangingInitializationLeaf.render(recoveredInitializationRequest),
+  { ok: true, svg: '<svg data-source="INITIALIZATION_RECOVERS_AFTER_REPLACEMENT"/>' },
+  'a replacement render must not remain behind an abandoned initializer'
+);
+assert.equal(initializationAttempts, 2, 'the replacement render must own a fresh initialization attempt');
+hangingInitialization.resolve();
+await Promise.resolve();
+assert.equal(
+  hangingInitializationPool.getCached(stalledInitializationRequest),
+  null,
+  'a late abandoned initializer must not cache its obsolete render request'
+);
+hangingInitializationLeaf.release();
+hangingInitializationGroup.end();
+hangingInitializationPool.dispose();
+
 pool.dispose();
 pool.dispose();
 assert.throws(() => pool.acquireGroup(), /disposed/);

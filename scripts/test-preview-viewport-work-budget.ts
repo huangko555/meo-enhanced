@@ -448,6 +448,45 @@ try {
   assert.ok(productionWindow.nodes < 2000, `production window retained ${productionWindow.nodes} nodes`);
   assert.deepEqual(productionWindow.errors, []);
   assert.equal(productionWindow.anchor.line, 5003);
+  stage = 'expired document recovery retries after a failed replacement render';
+  const expiredRecovery = await page.evaluate(async () => {
+    const scope = window as any, controller = scope.__previewController;
+    const normalHostMessage = scope.__previewHostMessage;
+    let documentRequests = 0, recoveryRenders = 0;
+    let secondExpirySettled!: () => void;
+    const secondExpiry = new Promise<void>(resolve => { secondExpirySettled = resolve; });
+    const respond = (response: any, afterAccept?: () => void) => queueMicrotask(() => {
+      if (response.type === 'previewDocumentResult') controller.acceptDocumentResponse(response);
+      else controller.acceptRenderResponse(response);
+      afterAccept?.();
+    });
+    scope.__previewHostMessage = (message: any) => {
+      if (message.type === 'requestPreviewDocument') {
+        documentRequests += 1;
+        respond({ type: 'previewDocumentResult', requestId: message.requestId, documentId: message.documentId,
+          result: { ok: false, error: { code: 'operation-failed', message: 'Preview document expired' } } });
+        if (documentRequests === 2) setTimeout(secondExpirySettled, 0);
+        return;
+      }
+      if (message.type === 'requestPreviewRender') {
+        recoveryRenders += 1;
+        respond({ type: 'previewRenderResult', requestId: message.requestId,
+          result: { ok: false, error: { code: 'operation-failed', message: 'Controlled expired-document recovery failure' } } },
+        recoveryRenders === 1 ? () => setTimeout(() => {
+          controller.getSearchAdapter().setSearchQuery('needle-2499', { wholeWord: true });
+        }, 0) : undefined);
+      }
+    };
+    controller.getSearchAdapter().setSearchQuery('needle-2498', { wholeWord: true });
+    await secondExpiry;
+    scope.__previewHostMessage = normalHostMessage;
+    return { documentRequests, recoveryRenders };
+  });
+  assert.deepEqual(
+    expiredRecovery,
+    { documentRequests: 2, recoveryRenders: 2 },
+    'each later expired document operation must be allowed one replacement render after the prior replacement failed'
+  );
   stage = 'production accessibility complete-document route';
   await page.evaluate(() => document.body.classList.add('vscode-using-screen-reader'));
   await page.waitForFunction(() => (window as any).__previewController.host.querySelector('iframe').contentDocument.querySelectorAll('p').length === 5003);

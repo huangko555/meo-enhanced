@@ -9,7 +9,7 @@ import {
 } from '../application/mermaidDiagramRenderResources';
 
 export type MermaidDiagramRenderPoolOptions = {
-  readonly initialize: (themeKey: string, configKey: string) => Promise<void> | void;
+  readonly initialize: (themeKey: string, configKey: string, signal?: AbortSignal) => Promise<void> | void;
   readonly render: (renderId: string, normalizedSource: string, signal?: AbortSignal, interactive?: boolean) => Promise<string>;
   readonly cacheLimit?: number;
   readonly heightCacheLimit?: number;
@@ -178,6 +178,27 @@ export function createMermaidDiagramRenderPool(
     }
   };
 
+  const awaitAbortableInitialization = async (
+    initialize: () => Promise<void> | void,
+    signal: AbortSignal
+  ): Promise<void> => {
+    signal.throwIfAborted();
+    let removeAbortListener: () => void = () => undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      const rejectForAbort = () => reject(signal.reason ?? new Error('Mermaid initialization was aborted'));
+      signal.addEventListener('abort', rejectForAbort, { once: true });
+      removeAbortListener = () => signal.removeEventListener('abort', rejectForAbort);
+    });
+    try {
+      // The renderer loader does not own this pool and cannot be cancelled
+      // directly. The pool can still stop awaiting it so a replaced owner does
+      // not retain the only active queue slot forever.
+      await Promise.race([Promise.resolve().then(initialize), aborted]);
+    } finally {
+      removeAbortListener();
+    }
+  };
+
   const runNext = (): void => {
     if (activeJob || disposed) return;
     let job = highPriority.shift() ?? normalPriority.shift();
@@ -288,7 +309,10 @@ export function createMermaidDiagramRenderPool(
         try {
           const identity = JSON.stringify([request.themeKey, request.configKey]);
           if (initializedIdentity !== identity) {
-            await options.initialize(request.themeKey, request.configKey);
+            await awaitAbortableInitialization(
+              () => options.initialize(request.themeKey, request.configKey, abortController.signal),
+              abortController.signal
+            );
             if (!disposed && generation === resourceGeneration) initializedIdentity = identity;
           }
           abortController.signal.throwIfAborted();

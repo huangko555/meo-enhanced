@@ -346,10 +346,74 @@ function getMermaidRuntime() {
   return runtime;
 }
 
-type MermaidRuntimeScript = HTMLScriptElement & { runtimePromise?: Promise<MermaidRuntime> };
-type MermaidRuntimeModule = HTMLMetaElement & { runtimePromise?: Promise<MermaidRuntime> };
+type MermaidRuntimeLoader = {
+  runtimePromise?: Promise<MermaidRuntime>;
+  abandonRuntimeLoad?: () => void;
+  signalWaiterCount?: number;
+  hasUncancelledWaiter?: boolean;
+};
+type MermaidRuntimeScript = HTMLScriptElement & MermaidRuntimeLoader;
+type MermaidRuntimeModule = HTMLMetaElement & MermaidRuntimeLoader;
 
-export function loadMermaidRuntime(): Promise<MermaidRuntime> {
+const MERMAID_RUNTIME_LOAD_ATTEMPT_DATASET = 'meoMermaidRuntimeLoadAttempt';
+
+function abortError(signal?: AbortSignal): unknown {
+  return signal?.reason ?? new Error('Mermaid runtime load was abandoned');
+}
+
+function nextMermaidRuntimeLoadUrl(source: string): string {
+  const rawAttempt = Number(document.documentElement.dataset[MERMAID_RUNTIME_LOAD_ATTEMPT_DATASET] ?? '0');
+  const attempt = Number.isSafeInteger(rawAttempt) && rawAttempt > 0 ? rawAttempt : 0;
+  if (attempt === 0) return source;
+  const separator = source.includes('?') ? '&' : '?';
+  return `${source}${separator}meoMermaidLoadAttempt=${attempt}`;
+}
+
+function abandonMermaidRuntimeLoadAttempt(): void {
+  const rawAttempt = Number(document.documentElement.dataset[MERMAID_RUNTIME_LOAD_ATTEMPT_DATASET] ?? '0');
+  const attempt = Number.isSafeInteger(rawAttempt) && rawAttempt >= 0 ? rawAttempt : 0;
+  document.documentElement.dataset[MERMAID_RUNTIME_LOAD_ATTEMPT_DATASET] = String(attempt + 1);
+}
+
+function awaitMermaidRuntimeLoad(
+  loader: MermaidRuntimeLoader,
+  signal?: AbortSignal
+): Promise<MermaidRuntime> {
+  const pending = loader.runtimePromise!;
+  // Preserve the public shared-Promise contract for ordinary callers. A
+  // caller without a cancellation boundary keeps the shared attempt alive.
+  if (!signal) {
+    loader.hasUncancelledWaiter = true;
+    return pending;
+  }
+  if (signal.aborted) {
+    if ((loader.signalWaiterCount ?? 0) === 0 && !loader.hasUncancelledWaiter) loader.abandonRuntimeLoad?.();
+    return Promise.reject(abortError(signal));
+  }
+  loader.signalWaiterCount = (loader.signalWaiterCount ?? 0) + 1;
+  return new Promise<MermaidRuntime>((resolve, reject) => {
+    let released = false;
+    const release = (abandonIfLastWaiter: boolean) => {
+      if (released) return;
+      released = true;
+      loader.signalWaiterCount = Math.max(0, (loader.signalWaiterCount ?? 1) - 1);
+      if (abandonIfLastWaiter && loader.signalWaiterCount === 0 && !loader.hasUncancelledWaiter) {
+        loader.abandonRuntimeLoad?.();
+      }
+    };
+    const rejectForAbort = () => {
+      release(true);
+      reject(abortError(signal));
+    };
+    signal.addEventListener('abort', rejectForAbort, { once: true });
+    void pending.then(
+      value => { release(false); signal.removeEventListener('abort', rejectForAbort); resolve(value); },
+      error => { release(false); signal.removeEventListener('abort', rejectForAbort); reject(error); }
+    );
+  });
+}
+
+export function loadMermaidRuntime(signal?: AbortSignal): Promise<MermaidRuntime> {
   const existing = getMermaidRuntime();
   if (existing) {
     return Promise.resolve(existing);
@@ -358,29 +422,46 @@ export function loadMermaidRuntime(): Promise<MermaidRuntime> {
   const moduleSrc = document.body.dataset.meoMermaidModuleSrc;
   if (moduleSrc) {
     const pending = document.querySelector<MermaidRuntimeModule>('meta[data-meo-mermaid-module-loader]');
-    if (pending?.content === moduleSrc && pending.runtimePromise) return pending.runtimePromise;
+    if (pending?.content === moduleSrc && pending.runtimePromise) return awaitMermaidRuntimeLoad(pending, signal);
     // The document owns pending resource loading, as with the classic script.
     // An inert marker shares that promise without mutable module-wide state.
     const marker: MermaidRuntimeModule = document.createElement('meta');
     marker.dataset.meoMermaidModuleLoader = '';
     marker.content = moduleSrc;
-    const promise: Promise<MermaidRuntime> = import(moduleSrc).then(module => {
+    let rejectAbandoned!: (reason: unknown) => void;
+    const abandoned = new Promise<never>((_resolve, reject) => { rejectAbandoned = reject; });
+    marker.abandonRuntimeLoad = () => {
+      if (!marker.isConnected) return;
+      abandonMermaidRuntimeLoadAttempt();
+      marker.remove();
+      rejectAbandoned(new Error('Mermaid runtime load was abandoned'));
+    };
+    const promise: Promise<MermaidRuntime> = Promise.race([
+      import(nextMermaidRuntimeLoadUrl(moduleSrc)),
+      abandoned
+    ]).then(module => {
       const runtime: MermaidRuntime | undefined = module.default;
       if (!runtime || typeof runtime.render !== 'function' || typeof runtime.initialize !== 'function') {
         throw new Error('Loaded Mermaid runtime unavailable');
       }
-      window.mermaid = runtime;
+      // A late abandoned import may still resolve, but it must not replace the
+      // runtime selected by a newer load attempt.
+      if (marker.isConnected) window.mermaid = runtime;
       return runtime;
     }).catch(error => {
       throw new Error('Mermaid runtime failed to load', { cause: error });
-    }).finally(() => marker.remove());
+    }).finally(() => {
+      marker.abandonRuntimeLoad = undefined;
+      marker.signalWaiterCount = 0;
+      marker.remove();
+    });
     marker.runtimePromise = promise;
     document.head.appendChild(marker);
-    return promise;
+    return awaitMermaidRuntimeLoad(marker, signal);
   }
 
   const pending = document.querySelector<MermaidRuntimeScript>('script[data-meo-mermaid-runtime-loader]');
-  if (pending?.runtimePromise) return pending.runtimePromise;
+  if (pending?.runtimePromise) return awaitMermaidRuntimeLoad(pending, signal);
   const src = document.body.dataset.meoMermaidSrc;
   if (!src) return Promise.reject(new Error('Mermaid runtime URL unavailable'));
 
@@ -394,6 +475,12 @@ export function loadMermaidRuntime(): Promise<MermaidRuntime> {
       script.onload = null;
       script.onerror = null;
       script.remove();
+    };
+    script.abandonRuntimeLoad = () => {
+      if (!script.isConnected) return;
+      abandonMermaidRuntimeLoadAttempt();
+      cleanup();
+      reject(new Error('Mermaid runtime load was abandoned'));
     };
     script.onload = () => {
       const ready = (window as typeof window & { __MEO_MERMAID_READY__?: Promise<MermaidRuntime> }).__MEO_MERMAID_READY__;
@@ -410,7 +497,7 @@ export function loadMermaidRuntime(): Promise<MermaidRuntime> {
     };
     document.head.appendChild(script);
   });
-  return script.runtimePromise;
+  return awaitMermaidRuntimeLoad(script, signal);
 }
 
 export function getMermaidEditorPresentationIdentity(): {
@@ -425,9 +512,11 @@ export function getMermaidEditorPresentationIdentity(): {
 
 export async function initializeMermaidEditorRuntime(
   _themeKey: string,
-  configKey: string
+  configKey: string,
+  signal?: AbortSignal
 ): Promise<void> {
-  const runtime = await loadMermaidRuntime();
+  const runtime = await loadMermaidRuntime(signal);
+  signal?.throwIfAborted();
   const { config } = getMermaidThemeConfig();
   if (configKey !== MERMAID_EDITOR_CONFIG_KEY) throw new Error('Unsupported Mermaid editor config');
   runtime.initialize(config);

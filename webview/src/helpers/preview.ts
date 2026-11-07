@@ -1379,16 +1379,24 @@ export function createPreviewController({
     findPrevious(text, options) { searchAdapter.setSearchQuery(text, options); return searchTarget().findPrevious(text, options); },
     focus: () => searchTarget().focus()
   };
-  let recoveringExpiredDocument = false;
+  let nextExpiredDocumentRecoveryAttempt = 0;
+  let activeExpiredDocumentRecoveryAttempt: number | null = null;
   const requestPreviewDocument: typeof previewDocumentTransport.request = (id, operation) =>
-    previewDocumentTransport.request(id, operation).then(result => { recoveringExpiredDocument = false; return result; });
+    previewDocumentTransport.request(id, operation);
   const handleWindowError = (error: unknown) => {
     if (disposed) return;
     const message = error instanceof Error ? error.message : String(error);
-    if (/document (?:expired|was released)/.test(message) && !recoveringExpiredDocument && frameRenderedText !== null
+    if (/document (?:expired|was released)/.test(message) && activeExpiredDocumentRecoveryAttempt === null && frameRenderedText !== null
       && isCurrentText?.(frameRenderedText) !== false) {
-      recoveringExpiredDocument = true;
-      void requestRender(frameRenderedText, { force: true, preserveViewport: true });
+      const attempt = ++nextExpiredDocumentRecoveryAttempt;
+      activeExpiredDocumentRecoveryAttempt = attempt;
+      void performRequestRender(frameRenderedText, {
+        force: true,
+        preserveViewport: true,
+        recoveryAttempt: attempt
+      }).finally(() => {
+        if (activeExpiredDocumentRecoveryAttempt === attempt) activeExpiredDocumentRecoveryAttempt = null;
+      });
       return;
     }
     latestAcceptedEnvironmentGeneration = -1;
@@ -2677,16 +2685,23 @@ export function createPreviewController({
 
   const performRequestRender = (
     text: string,
-    { force = false, preserveViewport = false, preserveFrame = false, layout = previewLayout, prepareOnly = false }: {
+    { force = false, preserveViewport = false, preserveFrame = false, layout = previewLayout, prepareOnly = false, recoveryAttempt }: {
       background?: boolean;
       force?: boolean;
       preserveViewport?: boolean;
       preserveFrame?: boolean;
       layout?: 'side' | 'full';
       prepareOnly?: boolean;
+      /** Only expired-document recovery retains its own retry latch across this render. */
+      recoveryAttempt?: number;
     } = {}
   ): Promise<void> => {
     if (disposed) return Promise.resolve();
+    // A user- or environment-originated render supersedes recovery work. Its
+    // late settlement must not keep (or clear) a newer recovery attempt.
+    if (recoveryAttempt === undefined && activeExpiredDocumentRecoveryAttempt !== null) {
+      activeExpiredDocumentRecoveryAttempt = null;
+    }
     if (force) renderEnvironmentGeneration += 1;
     const environmentGeneration = renderEnvironmentGeneration;
     // Reuse is tied to text, layout and rendering inputs. Canceling a request
