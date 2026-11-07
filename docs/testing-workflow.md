@@ -1567,6 +1567,19 @@ repair passes do not turn a previous artifact or historical release report into
 evidence for a changed candidate. This contract reduces repeated omissions; it
 does not claim exhaustive coverage of all possible interaction sequences.
 
+### Word editing and deletion history
+
+`bun run test:chinese-word-navigation` covers Source/Live Chinese words, keyboard
+and double-click dragging, native non-Chinese command parity, IME preedit,
+read-only/native input ownership, bounded segmentation and macOS key fixtures.
+`bun run test:word-deletion-history` pairs ordinary and actual optimized Worker
+paths in both modes for character/word deletion, reversed and multiple selections,
+and the primary range. Its shared continuous observer checks exact logical/native
+selections, focus and viewport in each accepted Undo/Redo frame; subsequent input
+must reach the exact Host source. Both contracts run in the targeted history and
+default browser suites. Browser IME/platform fixtures do not certify native OS
+candidate windows or macOS itself.
+
 ## Document-scale coverage
 
 After changes to packaged syntax engines or Webview resource loading, run

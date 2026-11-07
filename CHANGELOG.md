@@ -5,6 +5,8 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
 ## 0.4.0
 
+- Added Chinese word movement, deletion and double-click selection in Source and Live text using the built-in `Intl.Segmenter`, including directed multiple selections.
+- Fixed deletion undo restoring the wrong caret or collapsing multiple selections in Source and Live text.
 - Prepared the editor module alongside the initial page to reduce serial loading when opening a new editor or split.
 - Shared syntax-engine, formula-font and Mermaid runtime assets across editor and export paths, reducing duplicated package resources while retaining offline rendering.
 - Kept syntax highlighting and Source-mode preparation working through VS Code's Webview resource boundary.

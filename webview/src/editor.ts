@@ -210,6 +210,7 @@ import { markExternalDocumentPresentation } from './editor/externalDocumentPrese
 import { inputAssistanceFacet, typingAssistance } from './editor/typingAssistance';
 import { defaultInputAssistance, type InputAssistance } from '../../src/foundation/editingPreferences';
 import { inlineCodeMarkers } from './application/symbolInput';
+import { chineseWordNavigation } from './editor/chineseWordNavigation';
 
 declare module '@codemirror/view' {
   interface EditorView {
@@ -2475,6 +2476,7 @@ export function createEditor({
         }
       })),
       EditorState.allowMultipleSelections.of(true),
+      chineseWordNavigation,
       secondarySelections,
       orderedListRenumberTransactionFilter(() => !applyingExternal && !editorDestroyed),
       keymap.of([
@@ -3154,8 +3156,16 @@ export function createEditor({
             // Native history already restores the real text selection. Only
             // prefer it when it belongs to the replayed edit, so an unrelated
             // old selection cannot replace a rendered control's target.
+            // A primary cursor may be unchanged at a document edge while a
+            // secondary cursor edits. Changes and native ranges are ordered,
+            // so find an overlap in one pass instead of repeatedly scanning.
+            const nativeRanges = transaction.newSelection.ranges;
+            let rangeIndex = 0;
             transaction.changes.iterChangedRanges((_from, _to, from, to) => {
-              nativeSelectionOwnsTarget ||= nativeSelection.from <= to && nativeSelection.to >= from;
+              if (nativeSelectionOwnsTarget) return;
+              while (rangeIndex < nativeRanges.length && nativeRanges[rangeIndex].to < from) rangeIndex++;
+              const range = nativeRanges[rangeIndex];
+              nativeSelectionOwnsTarget = Boolean(range && range.from <= to);
             });
             // A nonhistorical selection move can become native redo's saved
             // selection. Resolve the existing text-edit fallback before
@@ -3210,6 +3220,7 @@ export function createEditor({
     },
     attemptBoundaryRestore(request: EditorHistoryRestoreRequest, isCurrent) {
       if (!isCurrent()) return 'not-rendered';
+      if (view.state.selection.ranges.length > 1) return 'not-rendered';
       if (currentMode !== 'live') return 'not-rendered';
       const tableTarget = tableHistoryFocusAdapter.read(view.state);
       const searchCandidate = searchHistoryFocusAdapter.read(view.state);

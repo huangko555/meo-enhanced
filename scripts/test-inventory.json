@@ -801,7 +801,9 @@
       "scripts/test-task-overview-browser.ts",
       "scripts/test-search-replace-history-production.ts",
       "scripts/test-pending-table-mode-history-production.ts",
-      "scripts/test-clipboard-history-production.ts"
+      "scripts/test-clipboard-history-production.ts",
+      "scripts/test-word-deletion-history-production.ts",
+      "scripts/test-chinese-word-navigation.ts"
     ]
   }
 }

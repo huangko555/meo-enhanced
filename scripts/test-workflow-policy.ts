@@ -91,6 +91,8 @@ function targetedCommands(
         script('scripts/test-command-history-production.ts'),
         { args: ['scripts/test-live-command-presentation.ts', '--local-units', '--action=checkbox'] },
         { args: ['scripts/test-live-command-presentation.ts', '--table-history-only'] },
+        script('scripts/test-word-deletion-history-production.ts'),
+        script('scripts/test-chinese-word-navigation.ts'),
         script('scripts/test-preview-shortcuts-production.ts'),
         script('scripts/test-math-completion-production.ts'),
         script('scripts/test-input-assistance-production.ts'),
