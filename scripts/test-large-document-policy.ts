@@ -64,6 +64,27 @@ assert.equal(literalExample.dimensions.codeFences, 1);
 assert.equal(literalExample.dimensions.richBlocks, 0, 'literal examples must not count as rendered resources');
 assert.equal(assessLargeDocument('> ~~~mermaid\n> A-->B\n> ~~~').dimensions.mermaid, 1);
 assert.equal(assessLargeDocument('```latex\nx^2\n```').dimensions.math, 1);
+// Both display syntaxes have the same byte/line footprint. Potential bracket
+// math must receive the same admission budget, even while the opt-in is off.
+const bracketMath = '\\[\nx\n\\]\n\n';
+const dollarMath = '$$\nx\n$$\n\n';
+for (const count of [1, 56, 57, 127, 128, 225, 226]) {
+  assert.deepEqual(assessLargeDocument(bracketMath.repeat(count)),
+    assessLargeDocument(dollarMath.repeat(count)), `display syntax budget at ${count} blocks`);
+}
+assert.equal(assessLargeDocument(bracketMath.repeat(56)).boundedEditorWork, false);
+assert.equal(assessLargeDocument(bracketMath.repeat(57)).boundedEditorWork, true);
+assert.equal(assessLargeDocument(bracketMath.repeat(127)).windowedPreview, false);
+assert.equal(assessLargeDocument(bracketMath.repeat(128)).windowedPreview, true);
+assert.equal(assessLargeDocument(bracketMath.repeat(225)).preferSource, false);
+assert.equal(selectInitialEditorMode({ text: bracketMath.repeat(226), persistedMode: 'live',
+  optimizationEnabled: true }), 'source', 'bracket math growth crosses the opening budget');
+assert.equal(selectInitialEditorMode({ text: bracketMath.repeat(226), persistedMode: 'live',
+  optimizationEnabled: false }), 'live', 'the opening preference remains optional');
+assert.equal(assessLargeDocument('> \\[\n> x\n> \\]').dimensions.math, 1);
+assert.equal(assessLargeDocument('\\[\nx').dimensions.math, 0, 'an unpaired opener is not a rich block');
+assert.equal(assessLargeDocument('```text\n' + bracketMath.repeat(226) + '```').dimensions.math, 0,
+  'literal bracket examples must not consume the rendered-math budget');
 assert.equal(assessLargeDocument('abc\r\n12345\r\n').dimensions.maxLineLength, 5);
 assert.equal(assessLargeDocument('```\n' + 'x'.repeat(40_000)).dimensions.maxCodeBlockLength, 40_004);
 assert.equal(assessLargeDocument('| A | B |\n| --- | --- |\n| a | b |\n| c | d |\n\nTail').dimensions.maxTableRows, 2);
