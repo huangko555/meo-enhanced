@@ -585,8 +585,8 @@ for (const failure of ['false', 'throw'] as const) {
   assert.equal(recovery.hasPending(), false);
 }
 
-// Completed-cache churn never evicts the sole surviving text of failed work.
-// The completed receipt cache itself still expires old successful origins.
+// Completed-cache churn preserves independent failed origins. The completed
+// cache retains its latest 16 origins and expires the 17th most recent origin.
 {
   let available = false;
   const copies: string[] = [];
@@ -597,17 +597,27 @@ for (const failure of ['false', 'throw'] as const) {
       copies.push(text); return { replace: async () => true };
     }
   });
-  await recovery.preserveRetired({ type: 'draft', baseVersion: 1, text: 'retained failure' }, { ownerId: 'failed', receiptVersion: 1 });
+  const failed = [
+    { candidate: { type: 'draft' as const, baseVersion: 1, text: 'retained failure one' }, origin: { ownerId: 'failed-one', receiptVersion: 1 } },
+    { candidate: { type: 'draft' as const, baseVersion: 1, text: 'retained failure two' }, origin: { ownerId: 'failed-two', receiptVersion: 2 } }
+  ];
+  assert.deepEqual(await Promise.all(failed.map(job => recovery.preserveRetired(job.candidate, job.origin))), [false, false]);
   for (let index = 0; index < 24; index++) await recovery.preserveRetired(
     { type: 'draft', baseVersion: 1, text: `completed ${index}` }, { ownerId: `completed-${index}`, receiptVersion: 1 });
   assert.equal(recovery.hasPending(), true);
   assert.equal(copies.length, 24);
-  await recovery.preserveRetired({ type: 'draft', baseVersion: 1, text: 'completed 0' }, { ownerId: 'completed-0', receiptVersion: 1 });
-  assert.equal(copies.length, 25, 'completed metadata remains a bounded cache');
+  await recovery.preserveRetired({ type: 'draft', baseVersion: 1, text: 'completed 8' }, { ownerId: 'completed-8', receiptVersion: 1 });
+  assert.equal(copies.length, 24, 'the 16th most recent completed origin retains its receipt');
+  await recovery.preserveRetired({ type: 'draft', baseVersion: 1, text: 'completed 7' }, { ownerId: 'completed-7', receiptVersion: 1 });
+  assert.equal(copies.length, 25, 'the 17th most recent completed origin has expired');
   available = true;
   assert.equal(await recovery.settleForTermination(), true);
-  assert.equal(copies.length, 26); assert.match(copies.at(-1)!, /retained failure/);
+  assert.equal(copies.length, 27);
+  assert.match(copies[25]!, /retained failure one/);
+  assert.match(copies[26]!, /retained failure two/);
   assert.equal(recovery.hasPending(), false);
+  assert.deepEqual(await Promise.all(failed.map(job => recovery.preserveRetired(job.candidate, job.origin))), [true, true]);
+  assert.equal(copies.length, 27, 'successful retries establish separate tombstones for both origins');
 }
 
 console.log('Pending Draft recovery checks passed');
