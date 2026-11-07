@@ -33,6 +33,8 @@ export type DocumentSessionActionAdapter = {
 
 export type DocumentSessionActionAdapterDependencies = {
   readonly pageId: string;
+  /** Reads the sole coordinator's accepted target; a null recovery clear has no text of its own. */
+  readonly readCurrentText: () => DocumentText;
   readonly postMessage: (message: ApplyChangesMessage | DraftRecoveryMessage) => void;
   readonly presentText: (
     text: string,
@@ -132,8 +134,10 @@ export function createDocumentSessionActionAdapter(
           // Committing pending native history can enqueue recovery cleanup for
           // this same presentation. Only a different local target supersedes
           // the failed operation; keep the existing manual retry otherwise.
-          if (action.text === null || !failedPresentation
-            || !equalDocumentText(action.text, failedPresentation.text)) failedPresentation = null;
+          // A null receipt clears recovery, not the coordinator's accepted text.
+          if (failedPresentation && !equalDocumentText(
+            action.text ?? dependencies.readCurrentText(), failedPresentation.text
+          )) failedPresentation = null;
           postRecovery(action);
           continue;
         }

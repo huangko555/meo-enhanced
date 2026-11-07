@@ -649,6 +649,31 @@ for (const closeImmediately of [false, true]) {
   'Dispose after a later Host revision must not resend the accepted native text');
 }
 
+{
+  const messages: WebviewToHostMessage[] = [];
+  let fail = true;
+  const native = createDocumentSessionWebviewAdapter({
+    pageId, postMessage: message => messages.push(message), presentText: () => !fail,
+    restoreReloadedView: () => undefined, showNotice: () => undefined,
+    reportUnexpectedError: (context, error) => { throw new Error(`${context}: ${String(error)}`); }
+  });
+  native.start(init);
+  await native.whenIdle();
+  const source = Text.of(['one']);
+  const changes = ChangeSet.of({ from: 3, insert: ' native' }, source.length);
+  native.localRecoveryDraftChanged(documentSnapshotFromString('one'), documentEdit(changes, source, changes.apply(source)));
+  await native.whenIdle();
+  native.accept({ type: 'docChanged', version: 2, text: 'one native' });
+  await native.whenIdle();
+  assert.equal(messages.filter(message => message.type === 'draftChanged').at(-1)?.text, null);
+  fail = false;
+  assert.equal(await native.retryPresentation(), true,
+    'The production runtime must retain retry after Host convergence clears recovery');
+  assert.equal(messages.some(message => message.type === 'applyChanges'), false,
+    'Retrying accepted native text must not submit an old-source edit');
+  native.dispose();
+}
+
 // Recovery-only native table input crosses the normal recovery encoder but
 // never submits an applyChanges operation or changes the session's document.
 {

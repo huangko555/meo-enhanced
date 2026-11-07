@@ -35,6 +35,7 @@ async function main(): Promise<void> {
     await page.evaluate((theme) => {
       (window as any).__documentSessionCandidate.initialize({
         type: 'init',
+        pageId: 'candidate-page-1',
         documentId: 'file:///candidate.md',
         text: 'alpha',
         version: 1,

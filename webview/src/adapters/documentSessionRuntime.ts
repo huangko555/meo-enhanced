@@ -79,6 +79,7 @@ export function createDocumentSessionRuntime(
       actionAdapter = createDocumentSessionActionAdapter({
         ...dependencies,
         pageId: message.pageId,
+        readCurrentText: () => requireSession().coordinator.currentText(),
         postMessage: message => { if (!disposed) dependencies.postMessage(message); },
         presentText: (text, source) => disposed ? false : dependencies.presentText(text, source),
         executeRemote: action => disposed ? Promise.reject(new Error('Document Session closed')) : dependencies.executeRemote(action),

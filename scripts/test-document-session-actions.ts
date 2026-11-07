@@ -15,6 +15,7 @@ const pageId = 'page_actions';
   const messages: unknown[] = [];
   const presentations: Array<{ text: string; source: string }> = [];
   const adapter = createDocumentSessionActionAdapter({
+    readCurrentText: () => '',
     pageId,
     postMessage: (message) => messages.push(message),
     presentText: (text, source) => {
@@ -59,6 +60,7 @@ const pageId = 'page_actions';
   const presentations: string[] = [];
   const notices: string[] = [];
   const adapter = createDocumentSessionActionAdapter({
+    readCurrentText: () => coordinator.currentText(),
     pageId,
     postMessage: (message) => messages.push(message),
     presentText: (text) => {
@@ -114,6 +116,7 @@ const pageId = 'page_actions';
   });
   const messages: unknown[] = [];
   const adapter = createDocumentSessionActionAdapter({
+    readCurrentText: () => coordinator.currentText(),
     pageId,
     postMessage: message => messages.push(message),
     presentText: () => true,
@@ -151,6 +154,7 @@ const pageId = 'page_actions';
 {
   const messages: unknown[] = [];
   const adapter = createDocumentSessionActionAdapter({
+    readCurrentText: () => '',
     pageId,
     postMessage: message => messages.push(message),
     presentText: () => true,
@@ -174,6 +178,7 @@ const pageId = 'page_actions';
   const notices: string[] = [];
   let revisionRequests = 0;
   const adapter = createDocumentSessionActionAdapter({
+    readCurrentText: () => coordinator.currentText(),
     pageId,
     postMessage: (message) => messages.push(message),
     presentText: () => true,
@@ -208,6 +213,7 @@ const pageId = 'page_actions';
   const presentations: string[] = [];
   let revisionRequests = 0;
   const adapter = createDocumentSessionActionAdapter({
+    readCurrentText: () => coordinator.currentText(),
     pageId,
     postMessage: () => undefined,
     presentText: (text) => {
@@ -236,6 +242,7 @@ const pageId = 'page_actions';
   const notices: string[] = [];
   let revisionRequests = 0;
   const adapter = createDocumentSessionActionAdapter({
+    readCurrentText: () => coordinator.currentText(),
     pageId,
     postMessage: () => undefined,
     presentText: () => true,
@@ -257,6 +264,7 @@ const pageId = 'page_actions';
   let fail = true;
   const presentations: string[] = [];
   const adapter = createDocumentSessionActionAdapter({
+    readCurrentText: () => '',
     pageId, postMessage: () => undefined,
     presentText: text => { presentations.push(text); return !fail; },
     executeRemote: async () => { throw new Error('Unexpected remote action'); },
@@ -278,6 +286,42 @@ const pageId = 'page_actions';
   fail = false;
   assert.equal(await adapter.retryPresentation(), false,
     'Different local input must still supersede a failed presentation');
+}
+
+{
+  const coordinator = createDocumentSessionCoordinator({
+    documentId: 'file:///converged-native-retry.md',
+    revision: { number: 1, text: 'before native input' },
+    savedRevision: { revisionNumber: 1, text: 'before native input' }
+  });
+  coordinator.handle({ type: 'localRecoveryDraftChanged', source: 'before native input', text: 'confirmed native input' });
+  const actions = coordinator.handle({ type: 'hostRevisionChanged', version: 2, text: 'confirmed native input' });
+  let fail = true;
+  const adapter = createDocumentSessionActionAdapter({
+    pageId, readCurrentText: () => coordinator.currentText(),
+    postMessage: () => undefined, presentText: () => !fail,
+    executeRemote: async () => { throw new Error('Unexpected remote action'); },
+    handleInput: input => coordinator.handle(input), showNotice: () => undefined
+  });
+  await adapter.execute(actions);
+  fail = false;
+  assert.equal(await adapter.retryPresentation(), true,
+    'Clearing an accepted native recovery candidate must retain its failed presentation target');
+  fail = true;
+  await adapter.execute([{ type: 'presentText', text: 'confirmed native input', source: 'rebased-draft' }]);
+  await adapter.execute([{ type: 'rememberDraft', text: null, receiptVersion: 3 }]);
+  fail = false;
+  assert.equal(await adapter.retryPresentation(), true,
+    'A queued null cleanup for the same accepted source must also retain manual retry');
+  coordinator.handle({ type: 'localDraftChanged', text: 'a different local draft' });
+  fail = true;
+  await adapter.execute([{ type: 'presentText', text: 'a different local draft', source: 'rebased-draft' }]);
+  const reverted = coordinator.handle({ type: 'localDraftChanged', text: 'confirmed native input' });
+  assert.ok(reverted.some(action => action.type === 'rememberDraft' && action.text === null));
+  await adapter.execute(reverted);
+  fail = false;
+  assert.equal(await adapter.retryPresentation(), false,
+    'A real local reversion to a different accepted source must supersede the old failed target');
 }
 
 console.log('Document Session action adapter checks passed');

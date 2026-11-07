@@ -54,18 +54,54 @@ async function open(browser: Browser, text: string, mode: 'live' | 'source' | 'p
   if (observeStartup) {
     await page.evaluate(() => {
       (window as any).__startupFrames = [];
+      (window as any).__startupRecording = true;
+      const visible = (element: HTMLElement | null): element is HTMLElement => {
+        if (!element) return false;
+        const rect = element.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if (node.hidden || style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0) return false;
+        }
+        return true;
+      };
+      const covered = (surface: HTMLElement | null, loading: HTMLElement | null): boolean => {
+        if (!surface || !visible(surface) || !visible(loading)) return false;
+        const bounds = surface.getBoundingClientRect(), mask = loading.getBoundingClientRect();
+        const style = getComputedStyle(loading);
+        if (Number(style.opacity) !== 1 || !/^rgb\(/.test(style.backgroundColor)) return false;
+        if (mask.left > bounds.left + 0.5 || mask.top > bounds.top + 0.5
+          || mask.right < bounds.right - 0.5 || mask.bottom < bounds.bottom - 0.5) return false;
+        const x = Math.max(0, Math.min(innerWidth - 1, (bounds.left + bounds.right) / 2));
+        const y = Math.max(0, Math.min(innerHeight - 1, (bounds.top + bounds.bottom) / 2));
+        const hit = document.elementFromPoint(x, y);
+        return hit !== null && loading.contains(hit);
+      };
       const sample = () => {
         const wrapper = document.querySelector<HTMLElement>('.editor-wrapper');
         const editor = document.querySelector<HTMLElement>('.cm-editor');
         const preview = document.querySelector<HTMLElement>('.preview-host');
+        const loading = document.querySelector<HTMLElement>('.editor-loading');
+        const host = document.querySelector<HTMLElement>('.editor-host');
+        const editorCovered = covered(visible(host) ? host : wrapper, loading);
+        const previewCovered = covered(preview, document.querySelector<HTMLElement>('.preview-loading'));
+        const editorExposed = visible(wrapper) && visible(host) && visible(editor) && !editorCovered;
+        const previewExposed = visible(preview) && !previewCovered;
+        const bounds = wrapper?.getBoundingClientRect();
+        const hit = bounds ? document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2) : null;
+        const rootMode = document.querySelector<HTMLElement>('#app')?.dataset.mode ?? null;
         (window as any).__startupFrames.push({
-          revealed: wrapper ? getComputedStyle(wrapper).opacity !== '0' : false,
-          rootMode: document.querySelector<HTMLElement>('#app')?.dataset.mode ?? null,
+          revealed: editorExposed || previewExposed,
+          rootMode,
           editorMode: editor?.classList.contains('meo-mode-live') ? 'live'
             : editor?.classList.contains('meo-mode-source') ? 'source' : null,
-          previewVisible: preview ? !preview.hidden : false
+          previewVisible: visible(preview), editorExposed, previewExposed, editorCovered, previewCovered,
+          uncoveredEmptyEditor: rootMode !== 'preview' && visible(wrapper) && !editor && !editorCovered,
+          loadingHidden: loading?.hidden ?? null, hostInert: host?.inert ?? null,
+          hitClass: hit instanceof HTMLElement ? hit.className : hit?.tagName ?? null,
+          loadingOwnsHit: Boolean(loading && hit && loading.contains(hit))
         });
-        if (wrapper?.classList.contains('meo-preload-editor-shell')) requestAnimationFrame(sample);
+        if ((window as any).__startupRecording) requestAnimationFrame(sample);
       };
       requestAnimationFrame(sample);
     });
@@ -570,21 +606,29 @@ async function largeDocumentStartupPreference(browser: Browser): Promise<void> {
 }
 
 async function startupModeVisibility(browser: Browser): Promise<void> {
+  console.log('Starting startup-mode visibility after pending native recovery and presentation boundaries');
   for (const mode of ['live', 'source', 'preview'] as const) {
     const page = await open(browser, `# ${mode} startup\n\nbody`, mode, 'on', true);
     try {
-      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+      await page.evaluate(async () => {
+        for (let frame = 0; frame < 2; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        (window as any).__startupRecording = false;
+      });
       const frames = await page.evaluate(() => (window as any).__startupFrames as Array<{
         revealed: boolean;
         rootMode: string | null;
         editorMode: string | null;
         previewVisible: boolean;
+        editorExposed: boolean;
+        previewExposed: boolean;
+        uncoveredEmptyEditor: boolean;
       }>);
+      assert.ok(frames.every(frame => !frame.uncoveredEmptyEditor), `${mode} startup exposed an empty unmasked shell: ${JSON.stringify(frames)}`);
       const revealed = frames.filter((frame) => frame.revealed);
       assert.ok(revealed.length > 0, `${mode} startup never revealed a frame`);
       assert.ok(revealed.every((frame) => frame.rootMode === mode), `${mode} exposed another mode: ${JSON.stringify(frames)}`);
       if (mode === 'preview') {
-        assert.ok(revealed.every((frame) => frame.previewVisible), `Preview exposed its editor surface: ${JSON.stringify(frames)}`);
+        assert.ok(revealed.every((frame) => frame.previewExposed && !frame.editorExposed), `Preview exposed its editor surface: ${JSON.stringify(frames)}`);
       } else {
         assert.ok(revealed.every((frame) => frame.editorMode === mode), `${mode} exposed another editor mode: ${JSON.stringify(frames)}`);
       }
@@ -1256,12 +1300,14 @@ async function pendingTableUnload(browser: Browser): Promise<void> {
 }
 
 async function pendingTablePresentationBoundaries(browser: Browser): Promise<void> {
-  for (const large of [false, true]) for (const failed of [false, true]) {
+  for (const large of [false, true]) for (const scenario of ['converged', 'conflicting-retry', 'converged-retry'] as const) {
+    const failed = scenario !== 'converged';
+    const converged = scenario !== 'conflicting-retry';
     const text = '# Native presentation boundary\n\n| Name | Value |\n| --- | --- |\n| Alpha | base |\n'
       + (large ? '\nPadding.\n'.repeat(8100) : '');
     const value = 'confirmed-presentation-input';
     const localText = text.replace('| Alpha | base |', `| Alpha | ${value} |`);
-    const remoteText = failed ? text.replace('| Alpha | base |', '| Alpha | remote-conflict |') : localText;
+    const remoteText = converged ? localText : text.replace('| Alpha | base |', '| Alpha | remote-conflict |');
     const { host, webview } = await openEmbeddedWebview(browser, text);
     const selector = 'tbody textarea[data-table-row="1"][data-table-col="1"]';
     try {
@@ -1297,9 +1343,9 @@ async function pendingTablePresentationBoundaries(browser: Browser): Promise<voi
       })), remoteText);
       if (failed) {
         await webview.waitForSelector('.editor-notice-action[data-action="retry-document-update"]', { timeout: 2000 });
-        await host.waitForFunction(localText => (window as any).__webviewHostMessages
-          .filter((message: any) => message.type === 'draftChanged').at(-1)?.text === localText,
-        { timeout: 1500 }, localText);
+        await host.waitForFunction(expected => (window as any).__webviewHostMessages
+          .filter((message: any) => message.type === 'draftChanged').at(-1)?.text === expected,
+        { timeout: 1500 }, converged ? null : localText);
         assert.equal(await webview.evaluate(() => (window as any).__nativeHistoryCommits), 1,
           'Automatic failed presentations must commit the confirmed native history once');
         await webview.evaluate(() => (window as any).__restoreNativePresentation());

@@ -140,6 +140,7 @@ const candidate = {
     savedText = init.savedRevision?.text ?? '';
     transport = createDocumentSessionTransport(postMessage);
     actionAdapter = createDocumentSessionActionAdapter({
+      pageId: init.pageId,
       postMessage,
       presentText: (text) => {
         requireRuntime().editor.setText(text);
@@ -147,6 +148,7 @@ const candidate = {
       },
       executeRemote: (action) => requireRuntime().transport.execute(action),
       handleInput: (input) => requireRuntime().coordinator.handle(input),
+      readCurrentText: () => requireRuntime().coordinator.currentText(),
       showNotice: (notice) => notices.push(notice)
     });
     const parent = document.querySelector<HTMLElement>('#editor');
