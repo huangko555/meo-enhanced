@@ -650,7 +650,12 @@ export function focusHistoryChange(
   isCurrent: () => boolean = () => true
 ) {
   if (!isCurrent()) return;
-  const target = targetPosition ?? changed?.to;
+  // Native history has already restored the directed ranges and main cursor.
+  // Only use a changed-position fallback when that selection is unrelated.
+  const { selection } = view.state, head = selection.main.head;
+  const nativeSelectionRestored = selection.ranges.length > 1 || !selection.main.empty
+    || (changed != null && changed.from <= head && head <= changed.to);
+  const target = nativeSelectionRestored ? head : targetPosition ?? changed?.to;
   const targetLineBeforeFocus = typeof target === 'number'
     ? view.state.doc.lineAt(Math.max(0, Math.min(target, view.state.doc.length))).number
     : null;

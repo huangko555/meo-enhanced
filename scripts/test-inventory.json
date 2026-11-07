@@ -483,6 +483,8 @@
       "scripts/test-workspace-documents-host.ts"
     ],
     "exclusive": [
+      "scripts/test-word-deletion-history-production.ts",
+      "scripts/test-chinese-word-navigation.ts",
       "scripts/test-document-block-preview-idle.ts",
       "scripts/test-document-statistics-selection.ts",
       "scripts/test-vscode-document-statistics.cjs",

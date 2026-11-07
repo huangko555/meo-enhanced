@@ -6,6 +6,8 @@
 
 ## 编辑、阅读与内容操作
 
+中文按词操作由 [分词交互与原生命令兼容性](../scripts/test-chinese-word-navigation.ts)覆盖 Source / Live、鼠标拖选、IME 按键、只读、外部输入焦点及有界分词；[统一生产历史](../scripts/test-word-deletion-history-production.ts)配对普通与实际优化 Worker 路径，验证逐字／按词删除、反向与多选区、主光标、双向历史每帧选择及继续输入后的 Host 原文。
+
 | 功能 | 必须检查的结果 | 门禁证据与边界 |
 | --- | --- | --- |
 | MEO 侧栏大纲 | 最近聚焦文档的标题树；侧栏借用焦点时保持；三种模式滚动和编辑后的跳转正确，标题身份变化时刷新旧树项，迟到点击不跳向同名项；标题无图标，视图标题统一为 MEO Outline，只高亮当前标题；`meoEnhanced.outline.expandAll` 展开全部六级标题，原生全部折叠继续可用；只订阅当前面板，隐藏、关闭和重载正确释放或恢复；中英文及深浅色切换保持状态 | [协议、投影与生命周期](../scripts/test-sidebar-outline.ts)、[生产编辑器与文档规模](../scripts/test-sidebar-outline-browser.ts)、[隔离原生工作台](../scripts/test-vscode-sidebar-outline.ps1)（真实按钮、两万标题、中英文、明暗截图及重新启动）；最低支持版本另验 |
