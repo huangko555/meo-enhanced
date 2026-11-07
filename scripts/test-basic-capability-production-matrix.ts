@@ -675,7 +675,20 @@ async function openEmbeddedWebview(
       }, '*'));
     }
     (window as any).acquireVsCodeApi = () => ({
-      postMessage(message: unknown) { parent.postMessage({ type: '__webviewHostMessage', message }, '*'); },
+      postMessage(message: any) {
+        parent.postMessage({ type: '__webviewHostMessage', message }, '*');
+        if (message.type === 'workspaceDocumentsRequest') queueMicrotask(() => window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'workspaceDocumentsResult', requestId: message.requestId,
+          result: { ok: true, value: { kind: 'catalog', current: 'file:///basic-live.md', complete: true, workspace: false, documents: [] } }
+        } })));
+        if (message.type === 'requestDocumentContent') queueMicrotask(() => window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'documentContentResult', requestId: message.requestId, result: { ok: true, value: { html: '<p>retained content</p>' } }
+        } })));
+        if (message.type === 'requestPreviewRender') queueMicrotask(() => window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'previewRenderResult', requestId: message.requestId,
+          result: { ok: true, value: { html: '<p>retained preview</p>', hasMermaid: false, styles: { light: '', dark: '' } } }
+        } })));
+      },
       getState() { return undefined; }, setState() {}
     });
   });
@@ -686,14 +699,93 @@ async function openEmbeddedWebview(
   await webview.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), init(pageId, text, mode));
   await webview.waitForSelector('.editor-host > .cm-editor');
   await webview.waitForFunction(() => !document.querySelector<HTMLElement>('.editor-host')!.inert
-    && document.querySelector<HTMLElement>('.editor-loading')?.hidden !== false);
+    && document.querySelector<HTMLElement>('.editor-loading')?.hidden !== false
+    && !document.querySelector('.meo-preload-toolbar'));
   return { host, webview };
 }
 
 const embeddedDrafts = (host: Page) => host.evaluate(() => (window as any).__webviewHostMessages
   .filter((message: any) => message.type === 'draftChanged'));
 
+async function retainedPageFunctionality(browser: Browser): Promise<void> {
+  for (const large of [false, true]) {
+    const text = '# Retained page\n\n```lifecycle\nblock content\n```\n' + (large ? '\nPadding.\n'.repeat(8100) : '');
+    const { host, webview } = await openEmbeddedWebview(browser, text);
+    try {
+      const contributionErrors: string[] = [];
+      host.on('console', message => { if (message.type() === 'error') contributionErrors.push(message.text()); });
+      const entryUri = await webview.evaluate(() => URL.createObjectURL(new Blob([`
+        export const apiVersion = 1;
+        const note = (owner, action) => parent.postMessage({ type: '__webviewHostMessage', message: { type: 'fixtureContributionLifecycle', owner, action } }, '*');
+        export function mount(container, context) {
+          const witness = document.createElement('span'); witness.className = 'lifecycle-view-witness'; container.append(witness);
+          const readWorkspace = async () => { await context.workspace.list('current'); witness.textContent = 'workspace available'; note('view', 'read'); };
+          note('view', 'mount');
+          return { update: readWorkspace, actions: [{ id: 'probe-workspace', label: 'Probe workspace', iconPaths: ['M0 0L1 1'], run: readWorkspace }], dispose() { note('view', 'dispose'); witness.remove(); } };
+        }
+        export function mountBlock(container, context) {
+          const witness = document.createElement('span'); witness.className = 'lifecycle-block-witness'; container.append(witness); note('block', 'mount');
+          return { async update(snapshot) { await context.renderContent(snapshot); witness.textContent = snapshot.text; note('block', 'update'); }, dispose() { note('block', 'dispose'); witness.remove(); } };
+        }
+      `], { type: 'text/javascript' })));
+      await webview.evaluate(entryUri => window.dispatchEvent(new MessageEvent('message', { data: {
+        type: 'documentViewsChanged', views: [{ id: 'fixture/lifecycle', label: 'Lifecycle', workspace: true,
+          entryUri, codeBlockLanguages: ['lifecycle'] }]
+      } })), entryUri);
+      await webview.waitForFunction(() => document.querySelector('.meo-contributed-block')?.shadowRoot
+        ?.querySelector('.lifecycle-block-witness')?.textContent?.trim() === 'block content', { timeout: 5000 });
+      await webview.focus('.mm-view-entry[data-view-id="fixture/lifecycle"]');
+      await host.keyboard.press('Enter');
+      try {
+        await webview.waitForFunction(() => document.querySelector('.lifecycle-view-witness')?.textContent === 'workspace available', { timeout: 3000 });
+      } catch (error) {
+        const state = await host.evaluate(() => (window as any).__webviewHostMessages);
+        throw new Error(`Contributed view positive control failed: ${JSON.stringify({ contributionErrors, messages: state })}`, { cause: error });
+      }
+      const read = async (requestId: string) => {
+        await webview.evaluate(requestId => window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'documentOperationRequest', requestId, operation: { kind: 'read' }
+        } })), requestId);
+        await host.waitForFunction(requestId => (window as any).__webviewHostMessages.some((message: any) =>
+          message.type === 'documentOperationResult' && message.requestId === requestId), { timeout: 1500 }, requestId);
+        const response = await host.evaluate(requestId => (window as any).__webviewHostMessages.find((message: any) =>
+          message.type === 'documentOperationResult' && message.requestId === requestId), requestId);
+        assert.deepEqual(response.result, { ok: true, value: { text } });
+      };
+      await read('before-persisted-pagehide');
+      await webview.evaluate(() => {
+        window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+        window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      });
+      await read('after-persisted-pagehide');
+      assert.equal(await webview.$eval('.mm-view-panel', panel => (panel as HTMLElement).hidden), false);
+      await webview.click('[data-view-action="probe-workspace"]');
+      await host.waitForFunction(() => (window as any).__webviewHostMessages.filter((message: any) =>
+        message.type === 'fixtureContributionLifecycle' && message.owner === 'view' && message.action === 'read').length === 2);
+      await webview.evaluate(() => document.documentElement.style.setProperty('--meo-user-editor-font-size', '23px'));
+      await webview.waitForFunction(() => (document.querySelector('.meo-contributed-block') as HTMLElement)
+        ?.style.getPropertyValue('--meo-view-font-size') === '23px');
+      const before = await host.evaluate(() => (window as any).__webviewHostMessages);
+      assert.equal(before.filter((message: any) => message.type === 'workspaceDocumentsClose').length, 0);
+      assert.equal(before.filter((message: any) => message.type === 'fixtureContributionLifecycle' && message.action === 'dispose').length, 0);
+      await webview.evaluate(() => {
+        window.dispatchEvent(new Event('beforeunload'));
+        window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
+        window.dispatchEvent(new Event('unload'));
+      });
+      await host.waitForFunction(() => (window as any).__webviewHostMessages.some((message: any) => message.type === 'workspaceDocumentsClose'));
+      const after = await host.evaluate(() => (window as any).__webviewHostMessages);
+      assert.equal(after.filter((message: any) => message.type === 'workspaceDocumentsClose').length, 1, 'terminal owner closes one workspace scope once');
+      assert.equal(after.filter((message: any) => message.type === 'fixtureContributionLifecycle'
+        && message.owner === 'view' && message.action === 'dispose').length, 1, 'terminal owner disposes the active view once');
+      assert.equal(await webview.$('.mm-view-panel'), null, 'terminal owner removes contributed view resources');
+      await webview.evaluate(uri => URL.revokeObjectURL(uri), entryUri);
+    } finally { await host.close(); }
+  }
+}
+
 async function pendingTableUnload(browser: Browser): Promise<void> {
+  await retainedPageFunctionality(browser);
   for (const terminalEvent of ['beforeunload', 'iframe-removal'] as const)
     for (const large of [false, true]) for (const edited of [false, true]) {
     const text = '# Unload fixture\n\n| Name | Value |\n| --- | --- |\n| Alpha | base |\n' + (large ? '\nPadding.\n'.repeat(8100) : '');

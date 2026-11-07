@@ -2999,7 +2999,6 @@ const documentOperationResponder = createDocumentOperationResponder({
     else editor?.scrollToLine(line, 'upper');
   }
 });
-window.addEventListener('pagehide', () => { workspaceDocumentsTransport.dispose(); documentOperationResponder.dispose(); }, { once: true });
 const documentStatistics = createDocumentStatisticsReporter(() => {
   const mode = getActiveEditorMode();
   if (mode === 'preview' ? !previewController.isReadingSurfaceReady()
@@ -4259,6 +4258,12 @@ const terminateWebviewSession = () => {
   // Accept confirmed native input while the document/recovery owners are
   // still alive. Session disposal performs its final synchronous handoff.
   commitEditorTransientEdits();
+  workspaceDocumentsTransport.dispose();
+  documentOperationResponder.dispose();
+  documentViews?.dispose();
+  documentBlocks.dispose();
+  documentContentTransport.cancel();
+  blockContentTransport.cancel();
   readingLayout.dispose();
   previewFontsTransport.dispose();
   fontWheelAbort.abort();
@@ -4642,7 +4647,6 @@ documentViews = mountDocumentViews({
         };
       }
 });
-window.addEventListener('pagehide', () => { documentViews?.dispose(); documentBlocks.dispose(); blockContentTransport.cancel(); }, { once: true });
 
 function refreshShortcutHints(): void {
   shortcutHints = effectiveShortcuts(editingPreferences.shortcuts, /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'mac' : 'other');
