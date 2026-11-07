@@ -84,6 +84,9 @@ function targetedCommands(
   switch (area) {
     case 'history':
       return [
+        script('scripts/test-clipboard-history-production.ts'),
+        script('scripts/test-search-replace-history-production.ts'),
+        script('scripts/test-pending-table-mode-history-production.ts'),
         script('scripts/test-navigation-reveal-production.ts'),
         script('scripts/test-command-history-production.ts'),
         { args: ['scripts/test-live-command-presentation.ts', '--local-units', '--action=checkbox'] },
@@ -106,6 +109,7 @@ function targetedCommands(
       ];
     case 'table':
       return [
+        script('scripts/test-pending-table-mode-history-production.ts'),
         script('scripts/test-table-provenance-history.ts'),
         script('scripts/test-live-command-presentation.ts'),
         script('scripts/test-editing-features-production.ts'),
@@ -140,6 +144,7 @@ function targetedCommands(
         script('scripts/test-rendered-block-mode-shell.ts'),
         script('scripts/test-history-rendered-block-interaction.ts'),
         script('scripts/test-mermaid-diagram-presentation-runtime.ts'),
+        script('scripts/test-mermaid-module-runtime.ts'),
         script('scripts/test-mermaid-editing.ts'),
         script('scripts/test-preview-rendered-actions.ts'),
         script('scripts/test-preview-image-actions.ts'),
@@ -189,6 +194,7 @@ function targetedCommands(
       ];
     case 'search':
       return [
+        script('scripts/test-search-replace-history-production.ts'),
         script('scripts/test-navigation-reveal-production.ts'),
         script('scripts/test-input-focus-return-production.ts'),
         script('scripts/test-search-replace-production.ts'),

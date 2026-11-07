@@ -105,11 +105,6 @@
       "command": "bun scripts/test-mermaid-elk-layout.ts",
       "reason": "ELK worker layout projection preserves Mermaid renderer aliases; checks bounded serialization, queue admission, errors/retry, stale replies, timeout, idle retirement and late disposal. Actual CSP and geometry use test-mermaid-module-runtime."
     },
-    "scripts/test-mermaid-module-runtime.ts": {
-      "kind": "targeted",
-      "command": "bun scripts/test-mermaid-module-runtime.ts",
-      "reason": "Actual CSP module loading, non-executing Source prefetch without duplicate downloads, shared runtime, bounded core payload, official geometry including ELK/math, worker failure retry and relocated file-URL offline HTML; run after build:webview."
-    },
     "scripts/test-markdown-mixed-languages.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-markdown-mixed-languages.ts",
@@ -803,7 +798,8 @@
       "scripts/test-block-export-browser.ts",
       "scripts/test-task-overview-browser.ts",
       "scripts/test-search-replace-history-production.ts",
-      "scripts/test-pending-table-mode-history-production.ts"
+      "scripts/test-pending-table-mode-history-production.ts",
+      "scripts/test-clipboard-history-production.ts"
     ]
   }
 }

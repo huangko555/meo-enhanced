@@ -29,6 +29,11 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Fixed sidebar heading navigation after editing large documents, preserving pending clicks through passive layout scrolling.
 - Reduced repeated language-setting reads, metadata transfers and tree rebuilding when presenting large native outlines, while keeping language changes immediate.
 - Kept formula undo and redo pending until deferred source presentation is ready, without exhausting focus recovery while background work is still pending.
+- Kept task toggles, list-prefix backspace and text undo/redo on their intended caret and reading position, including intermediate frames and optimized documents.
+- Preserved the next complete search match through replacement history, including native table-cell focus, subsequent typing and navigation across table boundaries.
+- Reported successful large-document saves correctly when their optional saved comparison exceeds its size budget, while retaining real save and revision-mismatch errors.
+- Preserved pending local edits across closing and Webview recreation, and kept external revisions unchanged when a separate recovery copy is required.
+- Retried Preview recovery after a failed attempt and kept shared Mermaid loading usable when consumers cancel, loads are abandoned or old results arrive late.
 
 ## 0.3.40
 - Aligned HTML rendering across Live, Preview and exports, including omitted child end tags, native author-defined sizing and supported SVG fill rules, while preserving source-completion boundaries.

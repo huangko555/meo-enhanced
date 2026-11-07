@@ -210,6 +210,11 @@ owner does not consume focus attempts; new input and disposal still cancel it.
 Retained Preview settings are covered by `test-preview-webview-adapter.ts`
 (cache invalidation, delayed preload/render retirement, coalescing and unchanged
 switch reuse) and the font-wheel browser contract (Custom to Auto while hidden).
+The same Preview lifecycle contract must clear a failed render attempt so a later
+user action can retry; a superseded attempt cannot consume the next request or
+leave the host callback in its diagnostic failure state. Keep this assertion
+separate from slow-resource timing so a real slow load is not converted into a
+fixed global timeout.
 `test-preview-preset-position.ts`, including its existing `--large` invocation,
 also changes font size and line spacing while hidden before restoring standalone
 and split Preview from Source/Live. It checks the first interactive typography,
@@ -1408,6 +1413,12 @@ This focused pack typically takes less than a minute.
 under the production CSP, non-executing Source prefetch without duplicate
 downloads, concurrent consumers, unchanged official geometry, worker-load
 failure/retry, and relocated offline HTML opened through ordinary `file:` URLs.
+Its cancellation cases keep an un-cancelled or still-interested consumer alive
+when another waiter aborts, abandon a load only after the last cancellable
+consumer leaves, and reject a late abandoned import from overwriting a newer
+runtime. `test-mermaid-diagram-render-pool.ts` covers the corresponding queue
+retry, stale-result and disposal boundaries. These are resource-lifecycle
+contracts; they do not assert a fixed timeout for a genuinely slow first load.
 `test-preview-mermaid-runtime.ts` also checks classic loading with nonce-only
 script authorization. Build first; the same graph serves editors and exports.
 
@@ -1506,6 +1517,41 @@ These focused contracts belong to the targeted history and release browser gates
 positions in every accepted-history frame for offscreen and visible-edge targets,
 alongside its continuous scroll and compositor assertions.
 
+The history contract has explicit cross-surface cases for interactions that can
+look correct only in their final text. `test-search-replace-history-production.ts`
+replays Source and optimized Live replacement, including the next full match far
+outside the changed range and transitions across a table boundary. Each replace
+is one isolated history entry; Undo and Redo must restore the accepted search
+selection, direction, owning surface and host text without a second scan or a
+changed-range caret taking focus first. `test-pending-table-mode-history-production.ts`
+commits a pending native cell before an immediate Live → Source switch, retains
+backward selection direction, proves the mode switch adds no history item, and
+checks every accepted Undo/Redo frame before allowing the next Source key.
+`test-clipboard-history-production.ts` covers HTML paste, large optimized
+multi-selection paste and multi-selection cut. It checks primary-range identity,
+range direction, literal text, host synchronization, and the first edit after
+Redo. These browser contracts use synthetic ClipboardEvent/DataTransfer for the
+Webview boundary; they do not replace native system-clipboard acceptance.
+
+Close and reload recovery has a separate ordering contract. The document-session
+and pending-draft suites establish one coordinator-owned receipt order for start,
+local input, host revisions and terminal close, and keep recovery idempotent. A
+stale non-overlapping host revision may be rebased, while an overlapping revision
+remains an explicit conflict: external text stays unchanged and the local draft
+remains available for a deliberate recovery path. The relevant contracts are
+`test-document-session-application.ts`, `test-document-session-webview-adapter.ts`,
+`test-draft-recovery-transport.ts` and `test-pending-draft-recovery.ts`; their
+status must be checked against the final candidate because a model change
+invalidates earlier adapter evidence.
+Same-page ready retries and replacement Webview pages are distinct lifecycle
+events. Ready, Init and draft-recovery traffic carry the page identity: only
+the matching Init may bootstrap a page, and a replacement page starts its own
+receipt sequence after the previous recovery candidate is settled. The Host's
+settlement token remains separate from that public per-page sequence. Delayed
+old-page input must not overwrite a new page, and an old disk-reload presentation
+acknowledgement must not discard a new page's candidate. Keep the ordinary input
+compact-transfer budget and retry/close failure boundaries in the owning suites.
+
 `scripts/history-acceptance-coverage.ts` requires every public editor command to
 declare its edit, contextual, neutral, replay or persistence semantics and owning
 behavioral suites. Adding a command without a route fails the workflow check.
@@ -1529,7 +1575,13 @@ production build. Its disposable native profile checks real VS Code resource
 routing, distinct Live token colors, Source preparation, full/side Preview,
 typing and undo/redo with complete saved-source equality, diagrams and formulas.
 It pairs an ordinary document with an actually bounded document above one MiB
-and requires one shared binary load per Webview. The regular
+and requires one shared binary load per Webview. Its bundled
+`test-vscode-resource-loading.cjs` probe also clicks the real toolbar Save and
+uses Ctrl+S after undo/redo, then compares the target revision and exact disk
+bytes for both ordinary and larger documents. A successful native save at the
+requested version remains successful when only the optional comparison baseline
+is too large; rejected saves, version changes and ordinary read/mismatch errors
+remain failures. The regular
 `test-background-shiki-production.ts` browser contract also disables Worker
 resource fetches and retains failure recovery, cold/warm large-document work,
 cancellation and disposal. HTTP CSP tests alone do not cover VS Code's proxy.
@@ -2744,6 +2796,20 @@ Budget approximately 3–6 minutes in addition to full-document endurance. This
 complements, rather than replaces, the native focus-change/window-change and IME
 acceptance described above. Do not use an actual user workspace or edit a user's
 original document for this runner.
+After the automatic-save rounds, the runner temporarily disables auto-save for
+two independent terminal handoffs: actual Developer Reload Webviews and native
+close/reopen with a pending cell. Before each command it requires the new value
+only in the native textarea, with the editor, Host and disk still at the previous
+revision. A new Webview generation must then expose the recovered text. Reload
+requires the original Host and Webview to agree before an explicit save. Close
+may instead preserve an exact, visible untitled recovery copy if the original
+can no longer be safely written; the reopened original and disk must remain
+unchanged, the complete local copy is saved as separate test evidence, and only
+that identified disposable buffer is discarded during cleanup. An absent or
+incomplete recovery is a failure. Synthetic beforeunload is separate evidence.
+Final release acceptance loads this owner from a normal installed VSIX through
+the isolated native observer; an extension-development launch alone does not
+prove the installed archive boundary.
 
 ## Manual F5 acceptance
 
