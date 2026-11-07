@@ -16,7 +16,7 @@ import { wireNativeSymbolInput, nativeSymbolInput } from '../editor/nativeTyping
 import { automaticSymbolPairs, symbolOriginEpoch, replaceAutomaticSymbolPairArea, inputAssistanceFacet, type AutomaticSymbolPair } from '../editor/typingAssistance';
 import { emptyMarkdownTable, markdownTableFromCells, serializeDelimitedTable, parseMarkdownTable, externalTableCellToMarkdown } from '../application/delimitedTable';
 import { defaultInputAssistance, type EditorCommandId } from '../../../src/foundation/editingPreferences';
-import { countColumn, EditorState, RangeSet, RangeValue, StateEffect, StateField, Transaction, type Annotation, type ChangeDesc, type Range, type SelectionRange as CodeMirrorSelectionRange } from '@codemirror/state';
+import { countColumn, ChangeSet, EditorState, Facet, RangeSet, RangeValue, StateEffect, StateField, Transaction, type Annotation, type ChangeDesc, type ChangeSpec, type Range, type SelectionRange as CodeMirrorSelectionRange, type Text as CodeMirrorText } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import type { SyntaxNode, SyntaxNodeRef, Tree } from '@lezer/common';
@@ -2501,6 +2501,40 @@ export function endTableCellEditing(view: EditorView): void {
   }
 }
 
+/**
+ * The editor owns the recovery publication boundary; tables only report that
+ * their native input projection changed. The callback is scoped to one
+ * CodeMirror state rather than a document-wide DOM event bus.
+ */
+export type TablePendingDraftProjectionReporter = (view: EditorView) => void;
+export const tablePendingDraftProjectionReporterFacet = Facet.define<
+  TablePendingDraftProjectionReporter,
+  TablePendingDraftProjectionReporter | null
+>({ combine: values => values.at(-1) ?? null });
+
+/**
+ * Build the pending native-cell projection from the current CodeMirror source.
+ * Only mounted controllers with pending input participate; cell line breaks
+ * serialize as `<br>`, so these changes cannot move later table line numbers.
+ */
+export function pendingTableDraftProjectionChanges(view: EditorView): ChangeSet | null {
+  const edits = Array.from(mountedTableWidgets.get(view) ?? [])
+    .flatMap(controller => controller.pendingRecoveryEdits(view))
+    .sort((left, right) => left.edit.sequence - right.edit.sequence);
+  if (edits.length === 0) return ChangeSet.empty(view.state.doc.length);
+
+  let source: CodeMirrorText = view.state.doc;
+  let projection = ChangeSet.empty(source.length);
+  for (const { controller, edit, tableStartLine } of edits) {
+    const change = controller.pendingCellSourceChange({ doc: source }, edit, tableStartLine);
+    if (!change) continue;
+    const step = ChangeSet.of(change, source.length);
+    source = step.apply(source);
+    projection = projection.compose(step);
+  }
+  return projection;
+}
+
 /** Retain a table gesture or its accepted cell range across native focus restoration. */
 export function restoreTablePointerSelection(view: EditorView, includeCompletedRange = false): void {
   for (const widget of mountedTableWidgets.get(view) ?? []) {
@@ -2902,6 +2936,23 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
 
   get hasPendingCellEdits() {
     return this.cellInteraction.snapshot().pending.length > 0;
+  }
+
+  pendingRecoveryEdits(view: EditorView): Array<{
+    controller: HtmlTableController;
+    edit: TableCellEditIntent;
+    tableStartLine: number;
+  }> {
+    const pending = this.cellInteraction.snapshot().pending;
+    if (pending.length === 0) return [];
+    const wrap = this.domRefs?.wrap;
+    if (!wrap || this.view !== view || this.destroyed) return [];
+    const range = this.resolveCurrentTableRange(view, wrap);
+    if (!range) return [];
+    return pending.flatMap((edit) => {
+      const tableStartLine = this.resolveCurrentTableStartLine(view, edit.row, range);
+      return tableStartLine === null ? [] : [{ controller: this, edit, tableStartLine }];
+    });
   }
 
   discardPendingCellEdits() {
@@ -4595,7 +4646,9 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
     const input = this.domRefs?.allRowInputs?.[row]?.[col];
     if (input) this.cellSymbolSnapshots.set(sequence, nativeSymbolInput(input)?.snapshot() ?? []);
     if (this.cellSymbolSnapshots.size > 512) this.cellSymbolSnapshots.delete(this.cellSymbolSnapshots.keys().next().value!);
-    return this.cellInteraction.accept({ type: 'input', target: { row, col }, value, sequence }).scheduleAutoCommit?.generation ?? null;
+    const inputResult = this.cellInteraction.accept({ type: 'input', target: { row, col }, value, sequence });
+    this.view?.state.facet(tablePendingDraftProjectionReporterFacet)?.(this.view);
+    return inputResult.scheduleAutoCommit?.generation ?? null;
   }
 
   cancelPendingCellAutoCommit() {
@@ -4633,7 +4686,7 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
     }, tableCellAutoCommitDelayMs);
   }
 
-  pendingCellSourceChange(state: EditorState, edit: TableCellEditIntent, tableStartLine: number) {
+  pendingCellSourceChange(state: Pick<EditorState, 'doc'>, edit: TableCellEditIntent, tableStartLine: number): ChangeSpec | null {
     const lineNumber = tableStartLine + (edit.row === 0 ? 0 : edit.row + 1);
     if (lineNumber > state.doc.lines) return null;
     const line = state.doc.line(lineNumber);

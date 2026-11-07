@@ -624,4 +624,88 @@ for (const closeImmediately of [false, true]) {
   }], 'teardown emits one full terminal retry and repeated dispose does not duplicate it');
 }
 
+{
+  const messages: WebviewToHostMessage[] = [];
+  const native = createDocumentSessionWebviewAdapter({
+    pageId, postMessage: message => messages.push(message), presentText: () => true,
+    restoreReloadedView: () => undefined, showNotice: () => undefined,
+    reportUnexpectedError: (context, error) => { throw new Error(`${context}: ${String(error)}`); }
+  });
+  native.start(init);
+  await native.whenIdle();
+  const source = Text.of(['one']);
+  const changes = ChangeSet.of({ from: 3, insert: ' native' }, source.length);
+  native.localRecoveryDraftChanged(documentSnapshotFromString('one'), documentEdit(changes, source, changes.apply(source)));
+  await native.whenIdle();
+  native.accept({ type: 'docChanged', version: 2, text: 'one native' });
+  await native.whenIdle();
+  assert.equal(messages.filter(message => message.type === 'draftChanged').at(-1)?.text, null,
+    'Host convergence must clear the recovery encoder checkpoint');
+  native.accept({ type: 'docChanged', version: 3, text: 'different Host source' });
+  await native.whenIdle();
+  native.dispose();
+  assert.equal(messages.some(message => message.type === 'draftChanged'
+    && message.terminal === true && message.text === 'one native'), false,
+  'Dispose after a later Host revision must not resend the accepted native text');
+}
+
+// Recovery-only native table input crosses the normal recovery encoder but
+// never submits an applyChanges operation or changes the session's document.
+{
+  const messages: WebviewToHostMessage[] = [];
+  const native = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => { messages.push(message); }, presentText() {}, restoreReloadedView() {},
+    showNotice() {}, reportUnexpectedError: (_context, error) => { throw error; }
+  });
+  native.start(init);
+  const source = Text.of(['one']);
+  const changes = ChangeSet.of({ from: 3, to: 3, insert: ' native' }, source.length);
+  native.localRecoveryDraftChanged(documentSnapshotFromString('one'), documentEdit(changes, source, changes.apply(source)));
+  await native.whenIdle();
+  assert.deepEqual(messages, [{
+    type: 'draftChanged', pageId, text: 'one native', baseVersion: 1, receiptVersion: 1
+  }]);
+  assert.equal(native.readCurrentText()?.toString(), 'one',
+    'recovery-only input must not become a submit-able Document Session Draft');
+  native.dispose();
+  assert.deepEqual(messages.at(-1), {
+    type: 'draftChanged', pageId, text: 'one native', baseVersion: 1, terminal: true, receiptVersion: 1
+  }, 'dispose retains the latest native recovery projection');
+}
+
+// An external overlap promotes the native projection to the existing conflict
+// Draft. Its locally presented source, recovery metadata and close handoff
+// must stay together; the Host revision is never applied over by this path.
+{
+  const messages: WebviewToHostMessage[] = [];
+  const presentations: Array<{ text: string; source: string }> = [];
+  const notices: string[] = [];
+  const native = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => { messages.push(message); },
+    presentText: (text, source) => { presentations.push({ text, source }); },
+    restoreReloadedView() {}, showNotice: notice => { notices.push(notice); }, reportUnexpectedError: (_context, error) => { throw error; }
+  });
+  native.start({ ...init, text: 'abc', savedRevision: { version: 1, text: 'abc' } });
+  const source = Text.of(['abc']);
+  const changes = ChangeSet.of({ from: 1, to: 2, insert: 'x' }, source.length);
+  native.localRecoveryDraftChanged(documentSnapshotFromString('abc'), documentEdit(changes, source, changes.apply(source)));
+  native.accept({ type: 'docChanged', version: 2, text: 'ayc' });
+  await native.whenIdle();
+  assert.deepEqual(presentations.at(-1), { text: 'axc', source: 'rebased-draft' },
+    'a conflicting native projection must present the coordinator Draft, not leave stale Host text editable');
+  const conflict = messages.filter(message => message.type === 'draftChanged').at(-1);
+  assert.deepEqual(conflict, {
+    type: 'draftChanged', pageId, text: 'axc', baseVersion: 2, conflictBaseText: 'abc', receiptVersion: 2
+  });
+  assert.deepEqual(notices, ['external-conflict']);
+  assert.equal(messages.some(message => message.type === 'applyChanges'), false,
+    'a conflicting native projection must not overwrite the external Host revision');
+  native.dispose();
+  assert.deepEqual(messages.at(-1), {
+    type: 'draftChanged', pageId, text: 'axc', baseVersion: 2, conflictBaseText: 'abc', terminal: true, receiptVersion: 2
+  }, 'terminal recovery must retain conflict metadata after native overlap');
+}
+
 console.log('Document Session Webview Adapter checks passed');

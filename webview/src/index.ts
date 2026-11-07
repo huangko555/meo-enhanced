@@ -2838,7 +2838,8 @@ const retryDocumentUpdateAction = (
 const setEditorTextSafely = async (
   text: string,
   context: string,
-  resetHistory = false
+  resetHistory = false,
+  presentation: { preservePendingNativeHistory?: boolean } = {}
 ): Promise<boolean> => {
   const basisManualIntentId = editorModeApplication.getState().manualIntent?.id ?? 0;
   if (!editor) {
@@ -2846,7 +2847,7 @@ const setEditorTextSafely = async (
   }
 
   try {
-    editor.setText(text, resetHistory);
+    editor.setText(text, resetHistory, presentation);
     failureNotice.clearFailureNotice(editorNoticeIssue.documentPresentation);
     if (getActiveEditorMode() === 'live') {
       failureNotice.clearFailureNotice(editorNoticeIssue.liveModeUnavailable);
@@ -2857,7 +2858,7 @@ const setEditorTextSafely = async (
 
     if (getActiveEditorMode() === 'live') {
       try {
-        editor.setText(text, resetHistory);
+        editor.setText(text, resetHistory, presentation);
         failureNotice.clearFailureNotice(editorNoticeIssue.documentPresentation);
         failureNotice.clearFailureNotice(editorNoticeIssue.liveModeUnavailable);
         return true;
@@ -2892,7 +2893,7 @@ const setEditorTextSafely = async (
         return false;
       }
       try {
-        editor.setText(text, resetHistory);
+        editor.setText(text, resetHistory, presentation);
         failureNotice.clearFailureNotice(editorNoticeIssue.documentPresentation);
         return true;
       } catch (retryError) {
@@ -2909,7 +2910,7 @@ const setEditorTextSafely = async (
     }
 
     try {
-      editor.setText(text, resetHistory);
+      editor.setText(text, resetHistory, presentation);
       failureNotice.clearFailureNotice(editorNoticeIssue.documentPresentation);
       return true;
     } catch (retryError) {
@@ -2972,7 +2973,9 @@ const presentDocumentText = async (
     : editor.captureDocumentPresentationAnchorToken(owner);
   let presented = false;
   const present = async (isViewportCurrent: () => boolean): Promise<void> => {
-    presented = await setEditorTextSafely(text, `documentSession.${source}`, source === 'disk-reload');
+    presented = await setEditorTextSafely(text, `documentSession.${source}`, source === 'disk-reload', {
+      preservePendingNativeHistory: source === 'rebased-draft'
+    });
     if (!presented) throw viewportPresentationFailed;
     if (previewVisible) {
       if (source === 'disk-reload' && pendingReloadPreviewViewport) {
@@ -3177,6 +3180,10 @@ const handleLocalEditorChange = (edit: DocumentTextEdit) => {
   if (isPreviewSurfaceVisible()) previewAdapter.scheduleVisibleRefresh(edit.after);
 };
 
+const handleRecoveryOnlyEditorChange = (source: DocumentText, edit: DocumentTextEdit) => {
+  documentSessionAdapter.localRecoveryDraftChanged(source, edit);
+};
+
 const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal): Promise<void> => {
   if (editor) return;
   const mountingIntent = editorModeApplication.getState().intentId;
@@ -3203,6 +3210,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
     initialDiagnostics: pendingDiagnostics,
     initialImageIntrinsicSizes: [...imageIntrinsicSizes.values()],
     onApplyTransaction: handleLocalEditorChange,
+    onRecoveryDraftChanged: handleRecoveryOnlyEditorChange,
     onStatisticsChange: () => documentStatistics.schedule(),
     onOpenLink: (href: string) => vscode.postMessage({ type: 'openLink', href }),
     onCommentBlocked: () => editorNotice.setEditorNotice(activeUiStrings.commentSelectionBlocked),

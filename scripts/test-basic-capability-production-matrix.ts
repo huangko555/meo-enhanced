@@ -676,6 +676,10 @@ async function openEmbeddedWebview(
     }
     (window as any).acquireVsCodeApi = () => ({
       postMessage(message: any) {
+        // Mirrors the native close boundary: the Webview may still execute its
+        // terminal owner after the Host can no longer receive Webview IPC.
+        // Lifecycle probes deliberately use a different browser-only channel.
+        if ((window as any).__dropWebviewHostMessages === true) return;
         parent.postMessage({ type: '__webviewHostMessage', message }, '*');
         if (message.type === 'workspaceDocumentsRequest') queueMicrotask(() => window.dispatchEvent(new MessageEvent('message', { data: {
           type: 'workspaceDocumentsResult', requestId: message.requestId,
@@ -706,6 +710,65 @@ async function openEmbeddedWebview(
 
 const embeddedDrafts = (host: Page) => host.evaluate(() => (window as any).__webviewHostMessages
   .filter((message: any) => message.type === 'draftChanged'));
+
+type EmbeddedDraft = {
+  readonly type: 'draftChanged';
+  readonly text: string | null;
+  readonly baseVersion?: number;
+  readonly conflictBaseText?: string;
+  readonly terminal?: true;
+  readonly receiptVersion: number;
+};
+
+const recoveryFingerprint = (message: EmbeddedDraft) => ({
+  text: message.text,
+  baseVersion: message.baseVersion,
+  conflictBaseText: message.conflictBaseText,
+  terminal: message.terminal === true,
+  receiptVersion: message.receiptVersion
+});
+
+// Recovery receipts are not a last-value cache: an explicit null is a real
+// clear and a terminal receipt is a separately classified close handoff. Keep
+// those distinctions visible in every iframe production assertion.
+function assertRecoveryReceiptShapes(recovery: readonly EmbeddedDraft[], label: string): void {
+  for (let index = 0; index < recovery.length; index += 1) {
+    const message = recovery[index]!;
+    assert.equal(Number.isInteger(message.receiptVersion) && message.receiptVersion >= 0, true,
+      `${label}: recovery receipt ${index} has no valid receipt version`);
+    if (message.text === null) {
+      assert.equal(message.terminal, undefined, `${label}: a clear receipt must never masquerade as terminal recovery`);
+    } else {
+      assert.equal(typeof message.baseVersion, 'number', `${label}: text recovery ${index} must name its Host base`);
+      assert.equal(message.terminal === undefined || message.terminal === true, true,
+        `${label}: recovery ${index} has an invalid terminal discriminator`);
+    }
+    if (index > 0) {
+      assert.ok(message.receiptVersion >= recovery[index - 1]!.receiptVersion,
+        `${label}: recovery receipt versions must not go backwards`);
+    }
+  }
+}
+
+function assertLatestRecoveryCandidate(
+  recovery: readonly EmbeddedDraft[], expectedText: string, label: string, options: {
+    readonly terminal?: boolean;
+    readonly baseVersion?: number;
+    readonly conflictBaseText?: string;
+  } = {}
+): EmbeddedDraft {
+  assertRecoveryReceiptShapes(recovery, label);
+  const message = recovery.at(-1);
+  assert.ok(message, `${label}: expected a recovery receipt`);
+  assert.equal(message.text, expectedText, `${label}: the latest receipt must retain the complete candidate`);
+  assert.equal(message.terminal === true, options.terminal === true,
+    `${label}: recovery terminal classification changed`);
+  if (options.baseVersion !== undefined) assert.equal(message.baseVersion, options.baseVersion,
+    `${label}: recovery must be based on the current Host revision`);
+  if (options.conflictBaseText !== undefined) assert.equal(message.conflictBaseText, options.conflictBaseText,
+    `${label}: recovery must retain the original conflict base`);
+  return message;
+}
 
 async function retainedPageFunctionality(browser: Browser): Promise<void> {
   for (const large of [false, true]) {
@@ -797,8 +860,40 @@ async function pendingTableUnload(browser: Browser): Promise<void> {
         await host.keyboard.down('Control'); await host.keyboard.press('a'); await host.keyboard.up('Control');
         await host.keyboard.sendCharacter('pending-cell-value');
         assert.equal(await webview.$eval(selector, input => (input as HTMLTextAreaElement).value), 'pending-cell-value');
+        const expected = text.replace('| Alpha | base |', '| Alpha | pending-cell-value |');
+        // The recovery owner must acknowledge native input while CodeMirror and
+        // the Host still own the old document; never turn this into a 250ms
+        // early commit just to make close reliable.
+        await webview.waitForFunction(({ expected, value }) => {
+          const input = document.querySelector<HTMLTextAreaElement>('tbody textarea[data-table-row="1"][data-table-col="1"]');
+          const content = document.querySelector('.editor-host .cm-content') as any;
+          const currentText = content?.cmTile?.root?.view?.state.doc.toString();
+          const messages = (parent as any).__webviewHostMessages as any[];
+          if (!input || input.value !== value) throw new Error('Pending textarea changed before recovery delivery');
+          if (typeof currentText !== 'string') throw new Error('Production CodeMirror document is unavailable');
+          if (currentText.includes(value)) throw new Error('The 250ms native-table commit ran before recovery delivery');
+          if (messages.some(message => message.type === 'applyChanges')) {
+            throw new Error('Pending table recovery was incorrectly presented as a Host document edit');
+          }
+          const candidate = messages.some(message => message.type === 'draftChanged'
+            && message.text === expected && message.terminal !== true);
+          if (!candidate) return false;
+          // Check each boundary again in the very task that observes the
+          // candidate; otherwise a slow timer could make this test green.
+          if (input.value !== value || currentText.includes(value)
+            || messages.some(message => message.type === 'applyChanges')) {
+            throw new Error('Pending table recovery changed ownership while admitting its receipt');
+          }
+          return true;
+        }, { timeout: 1500 }, { expected, value: 'pending-cell-value' });
       }
-      assert.deepEqual(await embeddedDrafts(host), [], 'The fixture must reach termination with unsubmitted native input');
+      const beforeTermination = await embeddedDrafts(host) as EmbeddedDraft[];
+      if (edited) {
+        const expected = text.replace('| Alpha | base |', '| Alpha | pending-cell-value |');
+        assertLatestRecoveryCandidate(beforeTermination, expected, `${terminalEvent}: proactive native recovery`, { terminal: false, baseVersion: 1 });
+      } else {
+        assert.deepEqual(beforeTermination, [], 'An unedited fixture must not create recovery state');
+      }
       if (terminalEvent === 'beforeunload') {
         await webview.evaluate(() => {
           window.dispatchEvent(new Event('beforeunload'));
@@ -809,16 +904,80 @@ async function pendingTableUnload(browser: Browser): Promise<void> {
         await host.evaluate(() => document.querySelector('iframe')!.remove());
       }
       await host.evaluate(() => new Promise(resolve => setTimeout(resolve, 25)));
-      const recovery = await embeddedDrafts(host);
-      assert.deepEqual(recovery.map((message: any) => message.text), edited ? [text.replace('| Alpha | base |', '| Alpha | pending-cell-value |')] : [],
-        `${terminalEvent} must synchronously preserve pending input and leave an unedited document clean`);
+      const recovery = await embeddedDrafts(host) as EmbeddedDraft[];
+      if (edited) {
+        const expected = text.replace('| Alpha | base |', '| Alpha | pending-cell-value |');
+        assert.ok(recovery.some(message => message.text === expected && message.terminal !== true),
+          `${terminalEvent} must retain the nonterminal recovery owner`);
+        assertLatestRecoveryCandidate(recovery, expected, `${terminalEvent}: terminal native recovery`, { terminal: true, baseVersion: 1 });
+      } else {
+        assert.deepEqual(recovery, [], `${terminalEvent} must leave an unedited document clean`);
+      }
       const lifecycle = await host.evaluate(() => (window as any).__webviewLifecycleEvents);
       if (terminalEvent === 'iframe-removal') {
         assert.deepEqual(lifecycle.map((event: any) => event.type), ['pagehide', 'unload'],
           `Removing the iframe did not expose the expected terminal events: ${JSON.stringify(lifecycle)}`);
       }
-      assert.equal((await embeddedDrafts(host)).length, recovery.length,
+      assert.deepEqual((await embeddedDrafts(host) as EmbeddedDraft[]).map(recoveryFingerprint), recovery.map(recoveryFingerprint),
         'Repeated terminal events must not publish another recovery receipt');
+    } finally { await host.close(); }
+  }
+
+  // Native close can dispose the Host message listener before the Webview's
+  // terminal owner runs. A confirmed textarea value must therefore reach the
+  // Host recovery owner before that terminal IPC becomes unavailable. Keep the
+  // table edit uncommitted: it is recovery traffic, not an early document edit.
+  for (const large of [false, true]) {
+    const text = '# Close delivery fixture\n\n| Name | Value |\n| --- | --- |\n| Alpha | base |\n'
+      + (large ? '\nPadding.\n'.repeat(8100) : '');
+    const expected = text.replace('| Alpha | base |', '| Alpha | pending-close-before-dispose |');
+    const { host, webview } = await openEmbeddedWebview(browser, text);
+    try {
+      const selector = 'tbody textarea[data-table-row="1"][data-table-col="1"]';
+      await webview.click(selector);
+      await host.keyboard.down('Control'); await host.keyboard.press('a'); await host.keyboard.up('Control');
+      await host.keyboard.sendCharacter('pending-close-before-dispose');
+      assert.equal(await webview.$eval(selector, input => (input as HTMLTextAreaElement).value), 'pending-close-before-dispose');
+      assert.equal(await webview.evaluate(() => {
+        const content = document.querySelector('.editor-host .cm-content') as any;
+        return content?.cmTile?.root?.view?.state.doc.toString().includes('pending-close-before-dispose');
+      }), false, 'The recovery candidate must precede the 250ms native-table commit');
+      assert.equal(await host.evaluate(() => (window as any).__webviewHostMessages.some((message: any) => message.type === 'applyChanges')), false,
+        'The recovery candidate must not be presented as a Host document edit');
+      await webview.waitForFunction(({ expected, value }) => {
+        const input = document.querySelector<HTMLTextAreaElement>('tbody textarea[data-table-row="1"][data-table-col="1"]');
+        const content = document.querySelector('.editor-host .cm-content') as any;
+        const currentText = content?.cmTile?.root?.view?.state.doc.toString();
+        const messages = (parent as any).__webviewHostMessages as any[];
+        if (!input || input.value !== value) throw new Error('Pending textarea changed before recovery delivery');
+        if (typeof currentText !== 'string') throw new Error('Production CodeMirror document is unavailable');
+        if (currentText.includes(value)) throw new Error('The 250ms native-table commit ran before recovery delivery');
+        if (messages.some(message => message.type === 'applyChanges')) {
+          throw new Error('Pending table recovery was incorrectly presented as a Host document edit');
+        }
+        const candidate = messages.some(message => message.type === 'draftChanged'
+          && message.text === expected && message.terminal !== true);
+        if (!candidate) return false;
+        // Recheck all user-visible ownership boundaries in the very task that
+        // admits the recovery receipt, then close the IPC path before unload.
+        if (input.value !== value || currentText.includes(value)
+          || messages.some(message => message.type === 'applyChanges')) {
+          throw new Error('Pending table recovery changed ownership while admitting its receipt');
+        }
+        (window as any).__dropWebviewHostMessages = true;
+        return true;
+      }, { timeout: 1500 }, { expected, value: 'pending-close-before-dispose' });
+      const beforeTermination = await embeddedDrafts(host) as EmbeddedDraft[];
+      assert.deepEqual(beforeTermination.map(recoveryFingerprint), [
+        { text: expected, baseVersion: 1, conflictBaseText: undefined, terminal: false, receiptVersion: 1 }
+      ], 'Exactly one current pending-cell recovery candidate must reach the Host before closing');
+      await host.evaluate(() => document.querySelector('iframe')!.remove());
+      await host.evaluate(() => new Promise(resolve => setTimeout(resolve, 25)));
+      assert.deepEqual(await embeddedDrafts(host), beforeTermination,
+        'No terminal Webview IPC may be required after the Host delivery boundary closes');
+      const lifecycle = await host.evaluate(() => (window as any).__webviewLifecycleEvents);
+      assert.deepEqual(lifecycle.map((event: any) => event.type), ['pagehide', 'unload'],
+        `Removing the iframe did not expose the terminal close boundary: ${JSON.stringify(lifecycle)}`);
     } finally { await host.close(); }
   }
 
@@ -829,14 +988,343 @@ async function pendingTableUnload(browser: Browser): Promise<void> {
     await webview.click(selector);
     await host.keyboard.down('Control'); await host.keyboard.press('a'); await host.keyboard.up('Control');
     await host.keyboard.sendCharacter('pending-bfcache-value');
+    const expected = text.replace('| Alpha | base |', '| Alpha | pending-bfcache-value |');
+    await webview.waitForFunction(({ expected, value }) => {
+      const input = document.querySelector<HTMLTextAreaElement>('tbody textarea[data-table-row="1"][data-table-col="1"]');
+      const content = document.querySelector('.editor-host .cm-content') as any;
+      const currentText = content?.cmTile?.root?.view?.state.doc.toString();
+      const messages = (parent as any).__webviewHostMessages as any[];
+      if (!input || input.value !== value) throw new Error('Persisted-page textarea changed before recovery delivery');
+      if (typeof currentText !== 'string') throw new Error('Production CodeMirror document is unavailable');
+      if (currentText.includes(value)) throw new Error('Persisted pagehide allowed the 250ms table commit to run first');
+      if (messages.some(message => message.type === 'applyChanges')) {
+        throw new Error('Persisted-page recovery was incorrectly presented as a Host document edit');
+      }
+      const candidate = messages.some(message => message.type === 'draftChanged'
+        && message.text === expected && message.terminal !== true);
+      if (!candidate) return false;
+      if (input.value !== value || currentText.includes(value)
+        || messages.some(message => message.type === 'applyChanges')) {
+        throw new Error('Persisted-page recovery changed ownership while admitting its receipt');
+      }
+      return true;
+    }, { timeout: 1500 }, { expected, value: 'pending-bfcache-value' });
+    const beforePersistedPagehide = await embeddedDrafts(host) as EmbeddedDraft[];
+    assertLatestRecoveryCandidate(beforePersistedPagehide, expected, 'persisted pagehide: pre-event candidate', {
+      terminal: false, baseVersion: 1
+    });
     await webview.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
-    assert.deepEqual(await embeddedDrafts(host), [], 'Persisted pagehide must not terminate a recoverable webview');
+    const afterPersistedPagehide = await embeddedDrafts(host) as EmbeddedDraft[];
+    assert.deepEqual(afterPersistedPagehide.map(recoveryFingerprint), beforePersistedPagehide.map(recoveryFingerprint),
+      'Persisted pagehide must preserve the current candidate and publish neither a clear nor a terminal receipt');
+    assert.equal(await webview.evaluate(() => {
+      const input = document.querySelector<HTMLTextAreaElement>('tbody textarea[data-table-row="1"][data-table-col="1"]');
+      const content = document.querySelector('.editor-host .cm-content') as any;
+      return input?.value === 'pending-bfcache-value'
+        && !content?.cmTile?.root?.view?.state.doc.toString().includes('pending-bfcache-value');
+    }), true, 'Persisted pagehide must not transfer native input to CodeMirror');
     await webview.evaluate(() => window.dispatchEvent(new Event('beforeunload')));
-    const recovery = await embeddedDrafts(host);
-    assert.deepEqual(recovery.map((message: any) => message.text), [text.replace('| Alpha | base |', '| Alpha | pending-bfcache-value |')],
-      'A later terminal event must still recover input after persisted pagehide');
+    const recovery = await embeddedDrafts(host) as EmbeddedDraft[];
+    assert.ok(recovery.some(message => message.text === expected && message.terminal !== true),
+      'Persisted pagehide must retain the original nonterminal recovery candidate');
+    assertLatestRecoveryCandidate(recovery, expected, 'later terminal after persisted pagehide', { terminal: true, baseVersion: 1 });
   } finally { await host.close(); }
+
+  // An external Host revision can land between a browser-confirmed textarea
+  // input and its 250ms CodeMirror commit. Exercise the real documentSession
+  // message seam for both normal and 8100-line documents: the old native DOM
+  // is replaced, so only the recovery owner can retain the pending local cell.
+  for (const large of [false, true]) for (const overlap of [false, true]) {
+    const text = '# Native external fixture\n\n| Name | Value |\n| --- | --- |\n| Alpha | base |\n'
+      + (large ? '\nPadding.\n'.repeat(8100) : '');
+    const localValue = overlap ? 'pending-overlap-local' : 'pending-disjoint-local';
+    const localText = text.replace('| Alpha | base |', `| Alpha | ${localValue} |`);
+    const remoteText = overlap
+      ? text.replace('| Alpha | base |', '| Alpha | remote-overlap-host |')
+      : text.replace('# Native external fixture', '# Native external fixture remote-title');
+    const mergedText = overlap
+      ? localText
+      : remoteText.replace('| Alpha | base |', `| Alpha | ${localValue} |`);
+    const { host, webview } = await openEmbeddedWebview(browser, text);
+    try {
+      const selector = 'tbody textarea[data-table-row="1"][data-table-col="1"]';
+      await webview.click(selector);
+      await host.keyboard.down('Control'); await host.keyboard.press('a'); await host.keyboard.up('Control');
+      if (!large && !overlap) {
+        // Real successive input callbacks must rebase the whole native word,
+        // while each recovery message still carries only its latest delta.
+        await host.keyboard.type(localValue, { delay: 5 });
+      } else {
+        await host.keyboard.sendCharacter(localValue);
+      }
+      await webview.waitForFunction(({ localText, localValue }) => {
+        const input = document.querySelector<HTMLTextAreaElement>('tbody textarea[data-table-row="1"][data-table-col="1"]');
+        const content = document.querySelector('.editor-host .cm-content') as any;
+        const currentText = content?.cmTile?.root?.view?.state.doc.toString();
+        const messages = (parent as any).__webviewHostMessages as any[];
+        if (!input || input.value !== localValue) throw new Error('Pending textarea changed before external-revision recovery delivery');
+        if (typeof currentText !== 'string') throw new Error('Production CodeMirror document is unavailable');
+        if (currentText.includes(localValue)) throw new Error('The 250ms native-table commit ran before external-revision recovery delivery');
+        if (messages.some(message => message.type === 'applyChanges')) {
+          throw new Error('Pending native recovery was incorrectly submitted before the external revision');
+        }
+        const candidate = messages.some(message => message.type === 'draftChanged'
+          && message.text === localText && message.terminal !== true);
+        if (!candidate) return false;
+        if (input.value !== localValue || currentText.includes(localValue)
+          || messages.some(message => message.type === 'applyChanges')) {
+          throw new Error('Pending native recovery changed ownership while admitting its receipt');
+        }
+        (window as any).__nativeInputBeforeExternalRevision = input;
+        return true;
+      }, { timeout: 1500 }, { localText, localValue });
+      const beforeExternal = await embeddedDrafts(host) as EmbeddedDraft[];
+      const firstCandidate = assertLatestRecoveryCandidate(beforeExternal, localText,
+        `${large ? 'large' : 'ordinary'} ${overlap ? 'overlap' : 'disjoint'}: pre-external candidate`, {
+          terminal: false, baseVersion: 1
+        });
+      await webview.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), {
+        type: 'docChanged', text: remoteText, version: 2
+      });
+
+      // A conflict keeps P as the current Document Session Draft. The Webview
+      // must present that model, while R remains the newer Host/disk revision
+      // protected by conflict metadata rather than being written back.
+      const expectedEditorText = overlap ? localText : mergedText;
+      await webview.waitForFunction(expectedEditorText => {
+        const content = document.querySelector('.editor-host .cm-content') as any;
+        return content?.cmTile?.root?.view?.state.doc.toString() === expectedEditorText;
+      }, { timeout: 1500 }, expectedEditorText);
+      assert.equal(await webview.$eval(selector, (input, value) => input.isConnected
+        && (input as HTMLTextAreaElement).value === value, localValue), true,
+        'The current rendered cell must retain its local value across external presentation or DOM reuse');
+      assert.equal(await host.evaluate(() => (window as any).__webviewHostMessages.some((message: any) => message.type === 'applyChanges')), false,
+        'External revision rebase must never submit a pending native table cell as a Host document edit');
+
+      await host.waitForFunction(({ expectedText, overlap }) => {
+        const messages = (window as any).__webviewHostMessages as any[];
+        const latest = messages.filter(message => message.type === 'draftChanged').at(-1);
+        return latest?.text === expectedText && latest?.baseVersion === 2
+          && latest?.terminal !== true
+          && (overlap ? latest?.conflictBaseText !== undefined : latest?.conflictBaseText === undefined);
+      }, { timeout: 1500 }, { expectedText: mergedText, overlap });
+      const afterExternal = await embeddedDrafts(host) as EmbeddedDraft[];
+      assert.ok(afterExternal.length > beforeExternal.length,
+        'The external revision must publish a newer recovery receipt rather than silently retaining an old base');
+      const latest = assertLatestRecoveryCandidate(afterExternal, mergedText,
+        `${large ? 'large' : 'ordinary'} ${overlap ? 'overlap' : 'disjoint'}: post-external candidate`, {
+          terminal: false,
+          baseVersion: 2,
+          ...(overlap ? { conflictBaseText: text } : {})
+        });
+      assert.ok(latest.receiptVersion > firstCandidate.receiptVersion,
+        'The post-external recovery candidate must supersede the pre-external receipt');
+      if (overlap) {
+        await webview.waitForFunction(() => {
+          const notice = document.querySelector<HTMLElement>('.editor-notice');
+          return notice?.hidden === false && notice.textContent?.includes('External change detected') === true;
+        }, { timeout: 1500 });
+        assert.equal(await webview.evaluate(() => {
+          const content = document.querySelector('.editor-host .cm-content') as any;
+          const current = content?.cmTile?.root?.view?.state.doc.toString();
+          return current?.includes('pending-overlap-local')
+            && !current?.includes('remote-overlap-host');
+        }), true, 'An overlapping external revision must present the current conflicting Draft, not a stale Host mirror');
+
+        // One ordinary-document continuation is sufficient to prove that the
+        // replacement did not leave a one-shot conflict projection behind.
+        // Its next projection and a return to P must both keep A and R; neither
+        // may write R back through applyChanges before conflict resolution.
+        if (!large) {
+          const nextLocalValue = 'pending-overlap-next';
+          const nextLocalText = text.replace('| Alpha | base |', `| Alpha | ${nextLocalValue} |`);
+          await webview.click(selector);
+          await host.keyboard.down('Control'); await host.keyboard.press('a'); await host.keyboard.up('Control');
+          await host.keyboard.sendCharacter(nextLocalValue);
+          await webview.waitForFunction(({ expectedText, baseText, value, selector }) => {
+            const input = document.querySelector<HTMLTextAreaElement>(selector);
+            const content = document.querySelector('.editor-host .cm-content') as any;
+            const currentText = content?.cmTile?.root?.view?.state.doc.toString();
+            const messages = (parent as any).__webviewHostMessages as any[];
+            if (!input || input.value !== value) throw new Error('Same-cell conflict textarea changed before recovery delivery');
+            if (typeof currentText !== 'string') throw new Error('Production CodeMirror document is unavailable');
+            if (currentText.includes(value)) throw new Error('Same-cell conflict input committed before protected recovery delivery');
+            const latest = messages.filter(message => message.type === 'draftChanged').at(-1);
+            const accepted = latest?.text === expectedText && latest?.baseVersion === 2
+              && latest?.conflictBaseText === baseText && latest?.terminal !== true
+              && !messages.some(message => message.type === 'applyChanges');
+            if (!accepted) return false;
+            if (input.value !== value || currentText.includes(value)
+              || messages.some(message => message.type === 'applyChanges')) {
+              throw new Error('Same-cell conflict recovery changed ownership while admitting its receipt');
+            }
+            return true;
+          }, { timeout: 1500 }, { expectedText: nextLocalText, baseText: text, value: nextLocalValue, selector }).catch(async error => {
+            const snapshot = await webview.evaluate(selector => {
+              const content = document.querySelector('.editor-host .cm-content') as any;
+              return { text: content?.cmTile?.root?.view?.state.doc.toString(),
+                value: document.querySelector<HTMLTextAreaElement>(selector)?.value,
+                messages: ((parent as any).__webviewHostMessages as any[])
+                  .filter(message => ['draftChanged', 'draftPatched', 'applyChanges'].includes(message.type)).slice(-6) };
+            }, selector);
+            throw new Error(`Conflict continuation did not preserve recovery: ${JSON.stringify(snapshot)}`, { cause: error });
+          });
+          const afterNextNativeInput = await embeddedDrafts(host) as EmbeddedDraft[];
+          assertLatestRecoveryCandidate(afterNextNativeInput, nextLocalText, 'overlap: same-cell follow-up candidate', {
+            terminal: false, baseVersion: 2, conflictBaseText: text
+          });
+
+          await webview.click(selector);
+          await host.keyboard.down('Control'); await host.keyboard.press('a'); await host.keyboard.up('Control');
+          await host.keyboard.sendCharacter(localValue);
+          await webview.waitForFunction(({ expectedText, baseText, value, selector }) => {
+            const input = document.querySelector<HTMLTextAreaElement>(selector);
+            const content = document.querySelector('.editor-host .cm-content') as any;
+            const currentText = content?.cmTile?.root?.view?.state.doc.toString();
+            const messages = (parent as any).__webviewHostMessages as any[];
+            if (!input || input.value !== value) throw new Error('Returned same-cell conflict textarea changed before recovery delivery');
+            if (typeof currentText !== 'string') throw new Error('Production CodeMirror document is unavailable');
+            if (currentText !== expectedText) throw new Error('Returned same-cell conflict input diverged from the current conflicting Draft');
+            const latest = messages.filter(message => message.type === 'draftChanged').at(-1);
+            const accepted = latest?.text === expectedText && latest?.baseVersion === 2
+              && latest?.conflictBaseText === baseText && latest?.terminal !== true
+              && !messages.some(message => message.type === 'applyChanges');
+            if (!accepted) return false;
+            if (input.value !== value || currentText !== expectedText
+              || messages.some(message => message.type === 'applyChanges')) {
+              throw new Error('Returned same-cell conflict recovery changed ownership while admitting its receipt');
+            }
+            return true;
+          }, { timeout: 1500 }, { expectedText: localText, baseText: text, value: localValue, selector });
+          const afterReturningToOriginal = await embeddedDrafts(host) as EmbeddedDraft[];
+          assertLatestRecoveryCandidate(afterReturningToOriginal, localText, 'overlap: same-cell return candidate', {
+            terminal: false, baseVersion: 2, conflictBaseText: text
+          });
+        }
+      } else {
+        assert.equal(await webview.evaluate(() => {
+          const content = document.querySelector('.editor-host .cm-content') as any;
+          const current = content?.cmTile?.root?.view?.state.doc.toString();
+          return current?.includes('pending-disjoint-local') && current?.includes('remote-title');
+        }), true, 'A disjoint external revision must present both the Host change and pending native cell');
+
+        // The rebase presentation itself must be one real history entry. Do
+        // not dispatch a synthetic CodeMirror change: exercise the same native
+        // cell and keyboard path users use after the external replacement.
+        if (!large) {
+          const applyChangesBeforeHistory = await host.evaluate(() => (window as any).__webviewHostMessages
+            .filter((message: any) => message.type === 'applyChanges').length);
+          await webview.click(selector);
+          await host.keyboard.down('Control'); await host.keyboard.press('z'); await host.keyboard.up('Control');
+          await webview.waitForFunction(({ expectedText, expectedValue, selector }) => {
+            const content = document.querySelector('.editor-host .cm-content') as any;
+            const input = document.querySelector<HTMLTextAreaElement>(selector);
+            return content?.cmTile?.root?.view?.state.doc.toString() === expectedText
+              && document.activeElement === input && input?.value === expectedValue
+              && input.selectionStart !== null && input.selectionEnd !== null;
+          }, { timeout: 1500 }, { expectedText: remoteText, expectedValue: 'base', selector });
+          await host.keyboard.down('Control'); await host.keyboard.press('y'); await host.keyboard.up('Control');
+          await webview.waitForFunction(({ expectedText, expectedValue, selector }) => {
+            const content = document.querySelector('.editor-host .cm-content') as any;
+            const input = document.querySelector<HTMLTextAreaElement>(selector);
+            return content?.cmTile?.root?.view?.state.doc.toString() === expectedText
+              && document.activeElement === input && input?.value === expectedValue
+              && input.selectionStart !== null && input.selectionEnd !== null;
+          }, { timeout: 1500 }, { expectedText: mergedText, expectedValue: localValue, selector });
+          await host.waitForFunction(start => (window as any).__webviewHostMessages
+            .filter((message: any) => message.type === 'applyChanges').length > start,
+          { timeout: 1500 }, applyChangesBeforeHistory);
+          const historyApplies = await host.evaluate(start => (window as any).__webviewHostMessages
+            .filter((message: any) => message.type === 'applyChanges').slice(start), applyChangesBeforeHistory);
+          // This fixture deliberately has no Host applied acknowledgement. A
+          // user-requested redo is therefore allowed to commit one current-base
+          // change; it must transform R into R+P, never replay old source A.
+          assert.equal(historyApplies.length, 1, 'Redo must submit exactly one current-base change without a Host acknowledgement');
+          assert.equal(historyApplies[0]?.baseVersion, 2, 'Redo must target the external Host revision R, not old source A');
+          const replayedHostText = [...historyApplies[0]!.changes].sort((left: any, right: any) => right.from - left.from)
+            .reduce((current: string, change: any) => current.slice(0, change.from) + change.insert + current.slice(change.to), remoteText);
+          assert.equal(replayedHostText, mergedText,
+            'Redo changes must preserve the external prefix and reconstruct exactly R+P');
+          const afterHistoryReplay = await embeddedDrafts(host) as EmbeddedDraft[];
+          assertLatestRecoveryCandidate(afterHistoryReplay, mergedText, 'disjoint rebase redo recovery', {
+            terminal: false, baseVersion: 2
+          });
+        }
+      }
+    } finally { await host.close(); }
+  }
 }
 
-async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { if (process.argv.includes('--unload-only')) { await pendingTableUnload(browser); } else if (process.argv.includes('--history-only')) { await matrix(browser); } else { await pendingTableUnload(browser); await startupModeVisibility(browser); await reopenedPreviewMode(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await resolveMergeConflicts(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await headingWeightPreference(browser); await largeDocumentStartupPreference(browser); } } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
+async function pendingTablePresentationBoundaries(browser: Browser): Promise<void> {
+  for (const large of [false, true]) for (const failed of [false, true]) {
+    const text = '# Native presentation boundary\n\n| Name | Value |\n| --- | --- |\n| Alpha | base |\n'
+      + (large ? '\nPadding.\n'.repeat(8100) : '');
+    const value = 'confirmed-presentation-input';
+    const localText = text.replace('| Alpha | base |', `| Alpha | ${value} |`);
+    const remoteText = failed ? text.replace('| Alpha | base |', '| Alpha | remote-conflict |') : localText;
+    const { host, webview } = await openEmbeddedWebview(browser, text);
+    const selector = 'tbody textarea[data-table-row="1"][data-table-col="1"]';
+    try {
+      await webview.click(selector);
+      await host.keyboard.down('Control'); await host.keyboard.press('a'); await host.keyboard.up('Control');
+      await host.keyboard.sendCharacter(value);
+      await webview.waitForFunction(({ value, selector, localText }) => {
+        const view = (document.querySelector('.editor-host .cm-content') as any)?.cmTile?.root?.view;
+        const messages = (parent as any).__webviewHostMessages;
+        if (view?.state.doc.toString() === localText) throw new Error('Native boundary committed before the external presentation');
+        return document.querySelector<HTMLTextAreaElement>(selector)?.value === value
+          && messages.some((message: any) => message.type === 'draftChanged' && message.text === localText);
+      }, { timeout: 1500 }, { value, selector, localText });
+      if (failed) await webview.evaluate(localText => {
+        const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+        const dispatch = view.dispatch.bind(view);
+        let failPresentation = false;
+        (window as any).__nativeHistoryCommits = 0;
+        document.addEventListener('meo-table-selection-external-presentation', () => { failPresentation = true; }, { once: true });
+        view.dispatch = (...args: any[]) => {
+          if (failPresentation) throw new Error('forced presentation failure after confirmed native history');
+          const before = view.state.doc;
+          const result = dispatch(...args);
+          if (before !== view.state.doc && view.state.doc.toString() === localText) {
+            (window as any).__nativeHistoryCommits++;
+          }
+          return result;
+        };
+        (window as any).__restoreNativePresentation = () => { view.dispatch = dispatch; };
+      }, localText);
+      await webview.evaluate(remoteText => window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'docChanged', version: 2, text: remoteText }
+      })), remoteText);
+      if (failed) {
+        await webview.waitForSelector('.editor-notice-action[data-action="retry-document-update"]', { timeout: 2000 });
+        await host.waitForFunction(localText => (window as any).__webviewHostMessages
+          .filter((message: any) => message.type === 'draftChanged').at(-1)?.text === localText,
+        { timeout: 1500 }, localText);
+        assert.equal(await webview.evaluate(() => (window as any).__nativeHistoryCommits), 1,
+          'Automatic failed presentations must commit the confirmed native history once');
+        await webview.evaluate(() => (window as any).__restoreNativePresentation());
+        await webview.click('.editor-notice-action[data-action="retry-document-update"]');
+        await webview.waitForFunction(() => document.querySelector<HTMLElement>('.editor-notice')?.hidden === true,
+          { timeout: 2000 });
+      } else {
+        await host.waitForFunction(() => (window as any).__webviewHostMessages
+          .filter((message: any) => message.type === 'draftChanged').at(-1)?.text === null, { timeout: 1500 });
+      }
+      await webview.waitForFunction(localText => (document.querySelector('.editor-host .cm-content') as any)
+        ?.cmTile?.root?.view?.state.doc.toString() === localText, { timeout: 1500 }, localText);
+      assert.equal(await host.evaluate(() => (window as any).__webviewHostMessages
+        .some((message: any) => message.type === 'applyChanges')), false,
+      'Host convergence or presentation retry must not submit the old native source');
+      await webview.click('.editor-host .cm-content');
+      await host.keyboard.down('Control'); await host.keyboard.press('z'); await host.keyboard.up('Control');
+      await webview.waitForFunction(text => (document.querySelector('.editor-host .cm-content') as any)
+        ?.cmTile?.root?.view?.state.doc.toString() === text, { timeout: 1500 }, text);
+      await host.keyboard.down('Control'); await host.keyboard.press('y'); await host.keyboard.up('Control');
+      await webview.waitForFunction(localText => (document.querySelector('.editor-host .cm-content') as any)
+        ?.cmTile?.root?.view?.state.doc.toString() === localText, { timeout: 1500 }, localText);
+    } finally { await host.close(); }
+  }
+}
+
+async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { if (process.argv.includes('--unload-only')) { await pendingTableUnload(browser); await pendingTablePresentationBoundaries(browser); } else if (process.argv.includes('--history-only')) { await matrix(browser); } else { await pendingTableUnload(browser); await pendingTablePresentationBoundaries(browser); await startupModeVisibility(browser); await reopenedPreviewMode(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await resolveMergeConflicts(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await headingWeightPreference(browser); await largeDocumentStartupPreference(browser); } } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
 main().finally(() => fs.rmSync(temp, { recursive: true, force: true })).catch((e) => { console.error(e instanceof Error ? e.stack : e); process.exitCode = 1; });

@@ -17,6 +17,7 @@ export type DocumentSessionWebviewAdapter = {
   start(message: InitMessage): void;
   accept(message: HostToWebviewMessage): boolean;
   localDraftChanged(change: string | DocumentTextEdit): void;
+  localRecoveryDraftChanged(source: DocumentText, change: DocumentTextEdit): void;
   requestSave(): void;
   requestReloadFromDisk(position: DocumentSessionViewPosition): void;
   retryPresentation(): Promise<boolean>;
@@ -189,6 +190,18 @@ export function createDocumentSessionWebviewAdapter(
         const submitted = runtime.handle({ type: 'submitPendingDraft' }, () => { receipts[1]!.accepted = true; });
         await Promise.all([changed, submitted]);
       });
+    },
+    localRecoveryDraftChanged(source, change) {
+      if (disposed) return;
+      const input = {
+        type: 'localRecoveryDraftChanged' as const,
+        source,
+        text: change.after,
+        edit: change
+      };
+      enqueueSession('local recovery draft', [input], receipts => runtime.handle(input, () => {
+        receipts[0]!.accepted = true;
+      }));
     },
     requestSave() {
       const input = { type: 'saveRequested' } as const;

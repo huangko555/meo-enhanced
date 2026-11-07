@@ -69,6 +69,7 @@ import {
   type PanelSession
 } from './extension/panelSession';
 import { createVscodePendingDraftRecoveryAdapter } from './host/vscodePendingDraftRecoveryAdapter';
+import { createVscodePendingDraftShutdownRecovery, type PendingDraftShutdownRecovery } from './host/vscodePendingDraftShutdownRecovery';
 import { createGitBaselineRefreshTimerAdapter } from './host/gitBaselineRefreshTimerAdapter';
 import { createVscodeSavedRevisionFileAdapter } from './host/vscodeSavedRevisionFileAdapter';
 import { createSavedRevisionRefreshTimerAdapter } from './host/savedRevisionRefreshTimerAdapter';
@@ -113,6 +114,7 @@ import type { PreviewPresetsChanged, PreviewPresetRequest, PreviewPresetResponse
 
 const ACTIVE_EDITOR_CONTEXT_KEY = 'meoEnhanced.activeEditor';
 const FIND_OPTIONS_STATE_KEY = 'findOptions';
+let pendingDraftShutdownRecovery: PendingDraftShutdownRecovery | null = null;
 
 type FindOptionsState = {
   wholeWord: boolean;
@@ -230,9 +232,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<Docume
   const customPreviewPresets = await createVscodePreviewPresets(context);
   const documentViews = createDocumentViewsRegistry();
   const extensionFeatures = createExtensionFeatures();
+  const shutdownRecovery = createVscodePendingDraftShutdownRecovery({
+    storageDirectory: (context.storageUri ?? context.globalStorageUri).fsPath,
+    openRecoveryCopy: async text => {
+      const recovery = await vscode.workspace.openTextDocument({ content: text, language: 'markdown' });
+      await vscode.window.showTextDocument(recovery, { preview: false, preserveFocus: false });
+    }
+  });
+  pendingDraftShutdownRecovery = shutdownRecovery;
   documentViews.api.registerFeature = extensionFeatures.registerFeature;
   context.subscriptions.push(documentViews, extensionFeatures);
-  const provider = new MarkdownWebviewProvider(context, agentReviewHandoff, appearanceSettings, editingPreferences, createVscodeImageStorage(), customPreviewPresets, documentViews, extensionFeatures);
+  const provider = new MarkdownWebviewProvider(context, agentReviewHandoff, appearanceSettings, editingPreferences, createVscodeImageStorage(), customPreviewPresets, documentViews, extensionFeatures, shutdownRecovery);
   context.subscriptions.push(vscode.commands.registerCommand('meoEnhanced.managePreviewPresets', () => provider.managePreviewPresets()));
   void provider.initializeGitWatcher();
   provider.initializeDevelopmentStyleWatcher();
@@ -398,6 +408,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Docume
       await provider.exportActiveDocument('docx');
     })
   );
+  await shutdownRecovery.restore();
   return documentViews.api;
 }
 
@@ -422,7 +433,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
     private readonly imageStorage: ReturnType<typeof createVscodeImageStorage>,
     private readonly customPreviewPresets: Awaited<ReturnType<typeof createVscodePreviewPresets>>,
     private readonly documentViews: ReturnType<typeof createDocumentViewsRegistry>,
-    private readonly extensionFeatures: ReturnType<typeof createExtensionFeatures>
+    private readonly extensionFeatures: ReturnType<typeof createExtensionFeatures>,
+    private readonly pendingDraftShutdownRecovery: PendingDraftShutdownRecovery
   ) {
     this.sidebarOutline = createVscodeSidebarOutline(() => this.getUiLanguage());
     this.previewRenderer = createBackgroundPreviewRenderer(
@@ -699,7 +711,8 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
       agentReviewHandoff: this.agentReviewHandoff,
       pendingDraftRecovery: createVscodePendingDraftRecoveryAdapter({
         document,
-        noteOwnedFileChange: (uri) => this.agentReviewHandoff.noteRecentMEOOwnedFileChangeForUri(uri)
+        noteOwnedFileChange: (uri) => this.agentReviewHandoff.noteRecentMEOOwnedFileChangeForUri(uri),
+        onRecoveryCreated: recovery => this.pendingDraftShutdownRecovery.watch(recovery)
       }),
       gitBaselineRefreshTimer: createGitBaselineRefreshTimerAdapter(),
       savedRevisionFile: createVscodeSavedRevisionFileAdapter(documentUri),
@@ -1277,4 +1290,7 @@ function getNativeWorkingTreeTitle(gitUri: vscode.Uri, fileUri: vscode.Uri): str
   return fileName;
 }
 
-export function deactivate(): void {}
+export function deactivate(): void {
+  pendingDraftShutdownRecovery?.persistForShutdown();
+  pendingDraftShutdownRecovery = null;
+}

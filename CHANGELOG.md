@@ -35,6 +35,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Preserved the next complete search match through replacement history, including native table-cell focus, subsequent typing and navigation across table boundaries.
 - Reported successful large-document saves correctly when their optional saved comparison exceeds its size budget, while retaining real save and revision-mismatch errors.
 - Preserved pending local edits across closing and Webview recreation, and kept external revisions unchanged when a separate recovery copy is required.
+- Protected confirmed table-cell input before its delayed commit, retaining Undo/Redo through external revisions and failed presentation retries, and reopening an independent recovery copy after normal window shutdown when needed.
 - Retried Preview recovery after a failed attempt and kept shared Mermaid loading usable when consumers cancel, loads are abandoned or old results arrive late.
 - Kept single-cell table selection and its undo/redo presentation stable when dragging across cells and returning to the starting cell, including optimized documents.
 - Made Preview loading and Source/Preview transitions visible without briefly mixing old and new layouts, while retaining immediate completion when content is ready.

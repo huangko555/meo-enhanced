@@ -424,6 +424,7 @@
       "scripts/test-panel-session-tab-navigation.ts",
       "scripts/test-panel-session-window-focus.ts",
       "scripts/test-pending-draft-recovery.ts",
+      "scripts/test-vscode-pending-draft-shutdown-recovery.ts",
       "scripts/test-preview-code-bands.ts",
       "scripts/test-preview-container-bands.ts",
       "scripts/test-preview-export-images.ts",

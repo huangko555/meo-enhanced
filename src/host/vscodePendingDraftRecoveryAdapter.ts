@@ -7,6 +7,7 @@ import {
 export type VscodePendingDraftRecoveryAdapterParams = {
   readonly document: vscode.TextDocument;
   readonly noteOwnedFileChange: (uri: vscode.Uri) => void;
+  readonly onRecoveryCreated?: (recovery: PendingDraftRecovery) => void;
 };
 
 /** Connects Pending Draft recovery to one VS Code document. */
@@ -15,7 +16,7 @@ export function createVscodePendingDraftRecoveryAdapter(
 ): PendingDraftRecovery {
   const { document, noteOwnedFileChange } = params;
   const isOriginalDocumentOpen = (): boolean => vscode.workspace.textDocuments.includes(document);
-  return createPendingDraftRecovery({
+  const recovery = createPendingDraftRecovery({
     readCurrentRevision: () => isOriginalDocumentOpen()
       ? { version: document.version, text: document.getText() } : null,
     applyDraft: async (expected, draftText) => {
@@ -54,4 +55,6 @@ export function createVscodePendingDraftRecoveryAdapter(
       };
     }
   });
+  params.onRecoveryCreated?.(recovery);
+  return recovery;
 }

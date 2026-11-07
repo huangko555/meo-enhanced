@@ -129,7 +129,11 @@ export function createDocumentSessionActionAdapter(
         if (!action) continue;
 
         if (action.type === 'rememberDraft') {
-          failedPresentation = null;
+          // Committing pending native history can enqueue recovery cleanup for
+          // this same presentation. Only a different local target supersedes
+          // the failed operation; keep the existing manual retry otherwise.
+          if (action.text === null || !failedPresentation
+            || !equalDocumentText(action.text, failedPresentation.text)) failedPresentation = null;
           postRecovery(action);
           continue;
         }

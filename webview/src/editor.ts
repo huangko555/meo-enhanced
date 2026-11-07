@@ -18,9 +18,9 @@ import { nativeSymbolInput, planNativeHtmlCommentToggle } from './editor/nativeT
 import { formatMultipleSelections, toggleHtmlComment, runEditorCommand, secondarySelections } from './editor/commands';
 import type { EditorCommandId } from '../../src/foundation/editingPreferences';
 import { pasteAssistance, insertPlainClipboardText } from './editor/pasteAssistance';
-import { EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type Annotation, type ChangeDesc, type ChangeSet, type ChangeSpec, type TransactionSpec, EditorSelection, type Extension, type SelectionRange, type Text } from '@codemirror/state';
-import { documentEdit } from './adapters/documentSnapshot';
-import type { DocumentTextEdit } from '../../src/foundation/documentSnapshot';
+import { ChangeSet, EditorState, Compartment, Prec, Transaction, StateEffect, StateField, RangeSetBuilder, type Annotation, type ChangeDesc, type ChangeSpec, type TransactionSpec, EditorSelection, type Extension, type SelectionRange, type Text } from '@codemirror/state';
+import { documentEdit, documentSnapshot } from './adapters/documentSnapshot';
+import type { DocumentText, DocumentTextEdit } from '../../src/foundation/documentSnapshot';
 import { EditorView, keymap, highlightActiveLine, lineNumbers, highlightActiveLineGutter, Decoration, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, isolateHistory, redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
@@ -122,6 +122,7 @@ import {
   mountedTableStatisticsSelection,
   tableHeaderAlignmentOverrideField,
   commitPendingTableEdits,
+  pendingTableDraftProjectionChanges,
   endTableCellEditing,
   restoreTablePointerSelection,
   tablePointerTarget,
@@ -134,7 +135,8 @@ import {
   flushMountedTableLayouts,
   mountedTableEntryInput,
   mountedTableInputsForLine,
-  tableUsableViewportBounds
+  tableUsableViewportBounds,
+  tablePendingDraftProjectionReporterFacet
 } from './helpers/tables';
 import { parseFrontmatter, parseFrontmatterCandidate } from './helpers/frontmatter';
 import { collectLatexMathRanges, renderLatexMathToHtml } from './helpers/math';
@@ -265,6 +267,8 @@ type CreateEditorOptions = {
   parent: HTMLElement;
   text: string | Text;
   onApplyTransaction: (edit: DocumentTextEdit) => void;
+  /** A recovery-only projection of uncommitted native table cells. */
+  onRecoveryDraftChanged?: (source: DocumentText, edit: DocumentTextEdit) => void;
   onStatisticsChange?: () => void;
   onOpenLink?: (href: string) => void;
   onCommentBlocked?: () => void;
@@ -435,6 +439,7 @@ export function createEditor({
   parent,
   text: initialDocument,
   onApplyTransaction,
+  onRecoveryDraftChanged,
   onStatisticsChange,
   onOpenLink,
   onCommentBlocked,
@@ -497,6 +502,7 @@ export function createEditor({
   let imeCompositionChanged = false;
   let imeCompositionBaseText: Text | null = null;
   let unpublishedChanges: { before: Text; changes: ChangeSet } | null = null;
+  let pendingTableRecovery: { source: Text; changes: ChangeSet; text: Text } | null = null;
   let outlinePending = false;
   let outlineChanges: ChangeDesc | null = null;
   let outlineCache: {
@@ -650,7 +656,54 @@ export function createEditor({
     imeCompositionBaseText = null;
     const pending = unpublishedChanges;
     unpublishedChanges = null;
-    if (pending) onApplyTransaction(documentEdit(pending.changes, pending.before, view.state.doc));
+    if (pending) {
+      onApplyTransaction(documentEdit(pending.changes, pending.before, view.state.doc));
+      if (pendingTableRecovery) {
+        publishPendingTableRecovery(view.state.doc, { before: pending.before, changes: pending.changes });
+      }
+    }
+  };
+  const publishPendingTableRecovery = (
+    source: Text,
+    bridge?: { readonly before: Text; readonly changes: ChangeSet }
+  ): void => {
+    if (!onRecoveryDraftChanged || editorDestroyed || applyingExternal) return;
+    const changes = pendingTableDraftProjectionChanges(view);
+    if (changes === null) return;
+    const nextText = changes.apply(source);
+    const previous = pendingTableRecovery;
+    if (!previous) {
+      if (changes.empty) return;
+      onRecoveryDraftChanged(documentSnapshot(source), documentEdit(changes, source, nextText));
+      pendingTableRecovery = { source, changes, text: nextText };
+      return;
+    }
+    let transition: ChangeSet | null = null;
+    let before: Text | null = null;
+    if (previous.source === source) {
+      transition = previous.changes.invert(previous.source).compose(changes);
+      before = previous.text;
+    } else if (bridge && previous.source === bridge.before) {
+      transition = previous.changes.invert(previous.source).compose(bridge.changes).compose(changes);
+      before = previous.text;
+    }
+    // A source replacement has its own recovery action. Do not derive a full
+    // document diff from a stale native textarea merely to preserve it.
+    if (!transition || !before) {
+      pendingTableRecovery = null;
+      return;
+    }
+    onRecoveryDraftChanged(documentSnapshot(source), documentEdit(transition, before, nextText));
+    pendingTableRecovery = changes.empty ? null : { source, changes, text: nextText };
+  };
+  const invalidatePendingTableRecovery = (source: Text): void => {
+    if (!pendingTableRecovery || !onRecoveryDraftChanged || editorDestroyed) {
+      pendingTableRecovery = null;
+      return;
+    }
+    pendingTableRecovery = null;
+    const unchanged = ChangeSet.empty(source.length);
+    onRecoveryDraftChanged(documentSnapshot(source), documentEdit(unchanged, source, source));
   };
   const emitGitDiffSummary = (state: EditorState) => {
     if (typeof onGitDiffSummaryChange !== 'function') return;
@@ -2540,6 +2593,7 @@ export function createEditor({
       longCodeBlockPreferenceCompartment.of(longCodeBlockEnabledFacet.of(initialLongCodeBlockFolding)),
       tableTransactionProvenanceAdapter.extension,
       tableHistoryFocusAdapter.extension,
+      tablePendingDraftProjectionReporterFacet.of(() => publishPendingTableRecovery(view.state.doc)),
       ...gitDiffGutterBaselineExtensions(),
       gitGutterCompartment.of(startMode === 'live' ? gitDiffGutterLiveRenderExtensions() : gitDiffGutterRenderExtensions()),
       highlightActiveLine(),
@@ -2858,6 +2912,7 @@ export function createEditor({
         } else if (update.docChanged && applyingExternal) {
           unpublishedChanges = null;
           if (imeCompositionBaseText !== null) imeCompositionBaseText = update.state.doc;
+          invalidatePendingTableRecovery(update.state.doc);
         }
 
         // Search indicators consume accepted Document/Selection and must not
@@ -4237,11 +4292,21 @@ export function createEditor({
       imagePresentationFactory.dispose();
       imagePresentationResourcePool.dispose();
     },
-    setText(textValue: string, resetHistory = false) {
-      document.dispatchEvent(new CustomEvent('meo-table-selection-external-presentation', {
-        detail: { owner: view.dom }
-      }));
+    setText(textValue: string, resetHistory = false,
+      { preservePendingNativeHistory = false }: { preservePendingNativeHistory?: boolean } = {}) {
       viewportController.runDocumentPresentation(() => {
+        if (preservePendingNativeHistory && !resetHistory && pendingTableRecovery) {
+          // The session has already rebased or protected this confirmed input.
+          // Accept its real table transaction before replacing the native DOM,
+          // retaining its Undo metadata without submitting an old-source edit.
+          const wasApplyingExternal = applyingExternal;
+          applyingExternal = true;
+          try { commitPendingTableEdits(view); }
+          finally { applyingExternal = wasApplyingExternal; }
+        }
+        document.dispatchEvent(new CustomEvent('meo-table-selection-external-presentation', {
+          detail: { owner: view.dom }
+        }));
         const dispatchTextUpdate = (spec: TransactionSpec): void => {
           const transaction = view.state.update(spec);
           if (!resetHistory) {
@@ -4273,6 +4338,7 @@ export function createEditor({
               markExternalDocumentPresentation()
             ]
           });
+          invalidatePendingTableRecovery(view.state.doc);
           return;
         }
 
@@ -4300,6 +4366,7 @@ export function createEditor({
         } finally {
           applyingExternal = false;
         }
+        invalidatePendingTableRecovery(view.state.doc);
         syncSelectionClass();
         emitSelectionChange();
       });

@@ -1549,6 +1549,18 @@ remains available for a deliberate recovery path. The relevant contracts are
 `test-draft-recovery-transport.ts` and `test-pending-draft-recovery.ts`; their
 status must be checked against the final candidate because a model change
 invalidates earlier adapter evidence.
+Confirmed native table input must publish a recovery-only projection before the
+normal commit debounce; it must not add a Host edit or Undo entry at that point.
+The basic-capability production matrix checks ordinary and large documents,
+multiple successive inputs, lost terminal IPC, page removal, external disjoint
+and conflicting revisions, and subsequent real Undo/Redo. The transfer-budget
+suite keeps repeated projection updates incremental and checks that their
+validation cache ends with the active projection.
+Normal shutdown captures the existing Host recovery owner's unsettled candidates
+once, without per-input file writes. The shutdown-storage unit contract checks
+actual final/temporary files, failed rename and cleanup, unreadable evidence,
+concurrent startup recovery, and release of settled owners. Startup opens
+independent recovery copies rather than replacing the original document.
 Same-page ready retries and replacement Webview pages are distinct lifecycle
 events. Ready, Init and draft-recovery traffic carry the page identity: only
 the matching Init may bootstrap a page, and a replacement page starts its own
@@ -2871,6 +2883,15 @@ incomplete recovery is a failure. Synthetic beforeunload is separate evidence.
 Final release acceptance loads this owner from a normal installed VSIX through
 the isolated native observer; an extension-development launch alone does not
 prove the installed archive boundary.
+Editor-tab close does not establish whole-window shutdown recovery. Also use a
+fresh installed profile with auto-save off and normal hot exit: input a confirmed
+native cell value, prove that CodeMirror, TextDocument and disk still contain the
+previous revision, then immediately issue normal Workbench Quit. Observe that
+all owned Code processes exit, restart the same profile, and admit the restored
+document independently of the expected text. Require the exact original or a
+visible complete recovery copy; the observer must not supply recovery content.
+Keep this result separate from same-process reload/close and clean-file restart.
+This normal-quit check does not establish forced termination or crash recovery.
 
 ## Manual F5 acceptance
 

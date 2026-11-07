@@ -253,4 +253,31 @@ const pageId = 'page_actions';
   assert.deepEqual(notices, ['resync-failed']);
 }
 
+{
+  let fail = true;
+  const presentations: string[] = [];
+  const adapter = createDocumentSessionActionAdapter({
+    pageId, postMessage: () => undefined,
+    presentText: text => { presentations.push(text); return !fail; },
+    executeRemote: async () => { throw new Error('Unexpected remote action'); },
+    handleInput: () => [], showNotice: () => undefined
+  });
+  await adapter.execute([{ type: 'presentText', text: 'confirmed native', source: 'rebased-draft' }]);
+  await adapter.execute([{
+    type: 'rememberDraft', text: 'confirmed native', baseVersion: 4, receiptVersion: 1
+  }]);
+  fail = false;
+  assert.equal(await adapter.retryPresentation(), true,
+    'The same presentation\'s native history cleanup must retain its manual retry');
+  assert.deepEqual(presentations, ['confirmed native', 'confirmed native']);
+  fail = true;
+  await adapter.execute([{ type: 'presentText', text: 'failed target', source: 'rebased-draft' }]);
+  await adapter.execute([{
+    type: 'rememberDraft', text: 'new local input', baseVersion: 4, receiptVersion: 2
+  }]);
+  fail = false;
+  assert.equal(await adapter.retryPresentation(), false,
+    'Different local input must still supersede a failed presentation');
+}
+
 console.log('Document Session action adapter checks passed');

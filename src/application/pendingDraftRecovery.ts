@@ -15,6 +15,14 @@ export type PendingDraftRecovery = {
   settleForTermination(): Promise<boolean>;
   /** Retired text never writes Host. Supply origin for replay protection; unscoped calls are independent. */
   preserveRetired(candidate: DraftRecoveryCandidate, origin?: DraftRecoveryOrigin): Promise<boolean>;
+  /**
+   * Capture unsettled text as complete, non-destructive recovery documents for
+   * a process shutdown. The caller persists the returned strings; this owner
+   * never writes storage while the user is typing.
+   */
+  captureForRestart(): readonly string[];
+  /** Notifies the shutdown owner when this recovery can gain or lose a capture. */
+  onDidChangePending(listener: () => void): { dispose(): void };
 };
 
 type DraftRecoveryArtifact = { readonly replace: (copyText: string) => Promise<boolean> };
@@ -77,11 +85,16 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
   let unscopedRetiredSequence = 0;
   const retiredJobs: RetiredJob[] = [];
   const linkedRetiredJobs: RetiredJob[] = [];
+  const inFlightRetiredJobs = new Set<RetiredJob>();
   // Unsettled input is not an evictable history cache. Keep only the latest
   // failed full snapshot per admitted origin until an explicit retry settles it.
   const failedRetired = new Map<string, PendingRetired>();
   const scopes: ScopeState[] = [];
   const pinnedScopes = new Set<string>();
+  const pendingListeners = new Set<() => void>();
+  const notifyPendingChanged = (): void => {
+    for (const listener of pendingListeners) listener();
+  };
 
   const findScope = (scope: string): ScopeState | null => scopes.find(entry => entry.scope === scope) ?? null;
   const scopeState = (scope: string): ScopeState => {
@@ -114,6 +127,7 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
     const failed = failedRetired.get(scope);
     if (failed && failed.receipt <= state.settledReceipt) failedRetired.delete(scope);
     settleCoveredLinked();
+    notifyPendingChanged();
   };
   const finishLinked = (failure?: { readonly error: unknown }): void => {
     settleCoveredLinked();
@@ -144,6 +158,7 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
     if (newer) {
       newer.waiters.push(...selected.waiters);
       newer.retryForActiveRequest ||= selected.retryForActiveRequest;
+      notifyPendingChanged();
       return;
     }
     for (let index = retiredJobs.length - 1; index >= 0; index--) {
@@ -153,6 +168,7 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
       selected.retryForActiveRequest ||= previous.retryForActiveRequest;
     }
     retiredJobs.push(selected);
+    notifyPendingChanged();
   };
   const discardUnsettledScope = (state: ScopeState): void => {
     if (state.settledReceipt >= 0 || state.artifact !== null) return;
@@ -198,7 +214,7 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
       const handled = await preserve(job.candidate, scope, current);
       if (handled) markSettled(scope, receipt);
       return handled;
-    } finally { pinnedScopes.delete(scope); }
+    } finally { pinnedScopes.delete(scope); notifyPendingChanged(); }
   };
 
   const processActive = async (request: ActiveRequest): Promise<'handled' | 'cleared' | 'retry'> => {
@@ -209,12 +225,18 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
     pinnedScopes.add(scope);
     try {
       if (isSettled(scope, receipt)) {
-        if (active === snapshot) active = null;
+        if (active === snapshot) {
+          active = null;
+          notifyPendingChanged();
+        }
         return 'cleared';
       }
       const current = dependencies.readCurrentRevision();
       if (current !== null && normalizeLineEndings(current.text) === normalizeLineEndings(snapshot.candidate.text)) {
-        if (active === snapshot) active = null;
+        if (active === snapshot) {
+          active = null;
+          notifyPendingChanged();
+        }
         markSettled(scope, receipt);
         return 'cleared';
       }
@@ -232,10 +254,13 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
         handled = await preserve(snapshot.candidate, scope, current);
       }
       if (!handled) return 'retry';
-      if (active === snapshot) active = null;
+      if (active === snapshot) {
+        active = null;
+        notifyPendingChanged();
+      }
       markSettled(scope, receipt);
       return 'handled';
-    } finally { pinnedScopes.delete(scope); }
+    } finally { pinnedScopes.delete(scope); notifyPendingChanged(); }
   };
 
   const runDrain = async (): Promise<void> => {
@@ -254,6 +279,8 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
           linkedRetiredJobs.push(job);
           continue;
         }
+        inFlightRetiredJobs.add(job);
+        notifyPendingChanged();
         try {
           const settled = await processRetired(job) || isSettled(job.scope, job.receipt);
           if (!settled) retainRetired(job);
@@ -262,6 +289,9 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
         } catch (error) {
           if (isSettled(job.scope, job.receipt)) settleRetired(job, true);
           else { retainRetired(job); rejectRetired(job, error); }
+        } finally {
+          inFlightRetiredJobs.delete(job);
+          notifyPendingChanged();
         }
         continue;
       }
@@ -323,6 +353,7 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
       nextInternalReceipt = receiptVersion;
       active = candidate === null ? null : { candidate, internalReceipt: receiptVersion, origin };
       if (candidate === null) markSettled(scopeFor(origin), receiptFor(origin, receiptVersion));
+      notifyPendingChanged();
       return nextInternalReceipt;
     },
     discardIfCurrent(receiptVersion) {
@@ -330,11 +361,12 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
       if (nextInternalReceipt !== receiptVersion) return false;
       active = null;
       if (snapshot !== null) markSettled(scopeFor(snapshot.origin), receiptFor(snapshot.origin, receiptVersion));
+      notifyPendingChanged();
       return true;
     },
     hasPending() {
       return active !== null || failedRetired.size > 0 || retiredJobs.length > 0
-        || linkedRetiredJobs.length > 0 || pinnedScopes.size > 0;
+        || linkedRetiredJobs.length > 0 || inFlightRetiredJobs.size > 0 || pinnedScopes.size > 0;
     },
     recover() { return startActive(false); },
     settleForTermination() { return startActive(true); },
@@ -351,6 +383,26 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
       enqueueRetired({ candidate, scope, receipt, waiters: [{ resolve, reject }], retryForActiveRequest: false });
       ensureDrain();
       return promise;
+    },
+    captureForRestart() {
+      const current = dependencies.readCurrentRevision();
+      const candidates = new Map<string, { readonly candidate: DraftRecoveryCandidate; readonly receipt: number }>();
+      const retain = (scope: string, receipt: number, candidate: DraftRecoveryCandidate): void => {
+        if (isSettled(scope, receipt)
+          || (current !== null && normalizeLineEndings(current.text) === normalizeLineEndings(candidate.text))) return;
+        const previous = candidates.get(scope);
+        if (!previous || previous.receipt <= receipt) candidates.set(scope, { candidate, receipt });
+      };
+      if (active !== null) retain(scopeFor(active.origin), receiptFor(active.origin, active.internalReceipt), active.candidate);
+      for (const job of retiredJobs) retain(job.scope, job.receipt, job.candidate);
+      for (const job of linkedRetiredJobs) retain(job.scope, job.receipt, job.candidate);
+      for (const job of inFlightRetiredJobs) retain(job.scope, job.receipt, job.candidate);
+      for (const job of failedRetired.values()) retain(job.scope, job.receipt, job.candidate);
+      return Array.from(new Set(Array.from(candidates.values(), entry => formatConflictCopy(entry.candidate, current))));
+    },
+    onDidChangePending(listener) {
+      pendingListeners.add(listener);
+      return { dispose: () => { pendingListeners.delete(listener); } };
     }
   };
 }

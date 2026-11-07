@@ -620,4 +620,43 @@ for (const failure of ['false', 'throw'] as const) {
   assert.equal(copies.length, 27, 'successful retries establish separate tombstones for both origins');
 }
 
+// Process shutdown must capture every unsettled recovery location. In particular,
+// a terminal copy already waiting on an asynchronous Host artifact cannot vanish
+// merely because it has left the queued list.
+{
+  let currentSnapshot = { version: 1, text: 'Host text' };
+  let releaseCopy!: () => void;
+  let signalCopyStarted!: () => void;
+  const copyStarted = new Promise<void>(resolve => { signalCopyStarted = resolve; });
+  const copyReleased = new Promise<void>(resolve => { releaseCopy = resolve; });
+  const shutdown = createPendingDraftRecovery({
+    readCurrentRevision: () => currentSnapshot,
+    applyDraft: async () => false,
+    preserveConflict: async () => {
+      signalCopyStarted();
+      await copyReleased;
+      return false;
+    }
+  });
+  shutdown.remember({ type: 'draft', baseVersion: 1, text: 'active shutdown value' }, 1,
+    { ownerId: 'active', receiptVersion: 1 });
+  const queued = shutdown.preserveRetired({ type: 'draft', baseVersion: 1, text: 'retired shutdown value' },
+    { ownerId: 'retired', receiptVersion: 1 });
+  assert.match(shutdown.captureForRestart().join('\n'), /active shutdown value/,
+    'an active candidate must be available to normal process shutdown');
+  assert.match(shutdown.captureForRestart().join('\n'), /retired shutdown value/,
+    'a queued retired candidate must be available to normal process shutdown');
+  await copyStarted;
+  assert.match(shutdown.captureForRestart().join('\n'), /retired shutdown value/,
+    'an in-flight retired preservation must remain available to normal process shutdown');
+  releaseCopy();
+  assert.equal(await queued, false);
+  assert.match(shutdown.captureForRestart().join('\n'), /retired shutdown value/,
+    'a failed retired preservation must remain available to normal process shutdown');
+  currentSnapshot = { version: 2, text: 'active shutdown value' };
+  const onlyRetired = shutdown.captureForRestart();
+  assert.equal(onlyRetired.length, 1, 'current Host text must not be duplicated as a restart copy');
+  assert.doesNotMatch(onlyRetired[0]!, /MEO local recovery \(base revision 1\)\nactive shutdown value/);
+}
+
 console.log('Pending Draft recovery checks passed');

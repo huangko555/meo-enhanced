@@ -93,6 +93,62 @@ for (let index = 0; index < 32; index += 1) {
 const encodedCharacters = messages.reduce((sum, message) => sum + JSON.stringify(message).length, 0);
 assert.ok(encodedCharacters < initial.length * 2,
   `32 single-character edits serialized ${encodedCharacters} characters for a ${initial.length}-character document`);
+// A native table recovery projection is also delta-encoded, but intentionally
+// does not emit applyChanges before its normal CodeMirror commit boundary.
+{
+  const source = Text.of(text.split('\n'));
+  const changes = ChangeSet.of({ from: 450_000, to: 450_000, insert: 'n' }, source.length);
+  const initialProjection = changes.apply(source);
+  const applyCount = messages.filter(message => message.type === 'applyChanges').length;
+  const firstProjectionMessage = messages.length;
+  adapter.localRecoveryDraftChanged(documentSnapshot(source), documentEdit(changes, source, initialProjection));
+  await adapter.whenIdle();
+  assert.equal(messages.at(-1)?.type, 'draftPatched',
+    'large native recovery projections must reuse the existing incremental checkpoint');
+  assert.equal(messages.filter(message => message.type === 'applyChanges').length, applyCount,
+    'native recovery must not submit a Host document change before the table commit boundary');
+  let previous = changes;
+  let previousText = initialProjection;
+  let fullReads = 0;
+  // The first projection validates independently constructed session/editor
+  // Text trees once. Repeated native values retain those immutable identities;
+  // scanning either persistent tree again would make this O(document) per key.
+  const textPrototype = Object.getPrototypeOf(source) as {
+    scanIdentical(other: Text, direction: number): number;
+  };
+  const scanIdentical = textPrototype.scanIdentical;
+  let treeScans = 0;
+  textPrototype.scanIdentical = function(this: Text, other: Text, direction: number) {
+    treeScans++;
+    return scanIdentical.call(this, other, direction);
+  };
+  try {
+    for (let index = 1; index <= 32; index++) {
+      const next = ChangeSet.of({ from: 450_000, insert: 'n'.repeat(index + 1) }, source.length);
+      const after = next.apply(source);
+      const transition = previous.invert(source).compose(next);
+      const edit = documentEdit(transition, previousText, after);
+      for (const snapshot of [edit.before, edit.after]) {
+        const read = snapshot.toString.bind(snapshot);
+        snapshot.toString = () => { fullReads++; return read(); };
+      }
+      adapter.localRecoveryDraftChanged(documentSnapshot(source), edit);
+      await adapter.whenIdle();
+      assert.equal(messages.at(-1)?.type, 'draftPatched',
+        'successive pending native values must remain incremental before any CM commit');
+      previous = next;
+      previousText = after;
+    }
+  } finally { textPrototype.scanIdentical = scanIdentical; }
+  assert.equal(fullReads, 0, 'successive native recovery projections must not materialize full document snapshots');
+  assert.equal(treeScans, 0,
+    'successive native recovery projections must retain the validated Text identities instead of rescanning the document');
+  assert.equal(messages.filter(message => message.type === 'applyChanges').length, applyCount,
+    'successive pending native values must never submit the Host document early');
+  const size = messages.slice(firstProjectionMessage).reduce((sum, message) => sum + JSON.stringify(message).length, 0);
+  assert.ok(size < initial.length * 0.1, `native recovery projections serialized ${size} characters`);
+  console.log(`Native recovery projection budget passed (${fullReads} full reads, ${size} serialized characters)`);
+}
 adapter.dispose();
 console.log(`Draft recovery transfer budget passed (${encodedCharacters} serialized characters)`);
 

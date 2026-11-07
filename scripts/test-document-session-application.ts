@@ -335,4 +335,160 @@ for (const [before, after] of replacementCases) {
   compare({ type: 'hostRevisionChanged', version: hostVersion + 1, text: 'external\n' + value.toString() });
 }
 
+// A native table textarea may be confirmed by the browser while its 250 ms
+// CodeMirror commit boundary is still pending. Its recovery projection must
+// not become a submit-able Draft, and an acknowledgement for an older normal
+// edit must not clear that newer recovery candidate.
+const nativeProjection = createCoordinator();
+const committedText = 'one\ntwo\nnormal';
+assert.deepEqual(nativeProjection.handle({ type: 'localDraftChanged', text: committedText }), [
+  { type: 'rememberDraft', text: committedText, baseVersion: 3, receiptVersion: 1 }
+]);
+nativeProjection.handle({ type: 'submitPendingDraft' });
+const projectedText = `${committedText}\nnative`;
+assert.deepEqual(nativeProjection.handle({
+  type: 'localRecoveryDraftChanged', source: committedText, text: projectedText
+}), [
+  { type: 'rememberDraft', text: projectedText, baseVersion: 3, receiptVersion: 2 }
+]);
+assert.equal(readDocumentText(nativeProjection.currentText()), committedText,
+  'a recovery projection must not mutate the Document Session Draft');
+assert.deepEqual(nativeProjection.handle({ type: 'hostChangeApplied', version: 4 }), [
+  { type: 'rememberDraft', text: projectedText, baseVersion: 4, receiptVersion: 3 }
+]);
+assert.equal(readDocumentText(nativeProjection.currentText()), committedText,
+  'an older Host acknowledgement must not submit native input early');
+assert.deepEqual(nativeProjection.handle({ type: 'localDraftChanged', text: projectedText }), [
+  { type: 'rememberDraft', text: projectedText, baseVersion: 4, receiptVersion: 4 }
+]);
+assert.deepEqual(nativeProjection.handle({ type: 'submitPendingDraft' }), [
+  {
+    type: 'applyTextChange',
+    baseVersion: 4,
+    changes: [{ from: committedText.length, to: committedText.length, insert: '\nnative' }]
+  }
+]);
+
+const revertedNativeProjection = createCoordinator();
+assert.deepEqual(revertedNativeProjection.handle({
+  type: 'localRecoveryDraftChanged', source: 'one\ntwo', text: 'one\ntwo'
+}), [{ type: 'rememberDraft', text: null, receiptVersion: 1 }]);
+
+const invalidatedNativeProjection = createCoordinator();
+const nativeSource = Text.of(['one', 'two']);
+const nativeChanges = ChangeSet.of({ from: nativeSource.length, to: nativeSource.length, insert: '\nnative' }, nativeSource.length);
+const nativeEdit = documentEdit(nativeChanges, nativeSource, nativeChanges.apply(nativeSource));
+const acceptedNativeProjection = createCoordinator();
+acceptedNativeProjection.handle({
+  type: 'localRecoveryDraftChanged', source: nativeEdit.before, text: nativeEdit.after, edit: nativeEdit
+});
+const acceptedNativeActions = acceptedNativeProjection.handle({
+  type: 'hostRevisionChanged', version: 4, text: nativeEdit.after
+});
+assert.deepEqual(acceptedNativeActions.filter(action => action.type === 'presentText'), [{
+  type: 'presentText', text: 'one\ntwo\nnative', source: 'rebased-draft'
+}], 'Host convergence must retain pending native history through one final presentation');
+assert.deepEqual(acceptedNativeActions.filter(action => action.type === 'rememberDraft'), [{
+  type: 'rememberDraft', text: null, receiptVersion: 2
+}], 'Host convergence must clear the obsolete native recovery candidate');
+assert.equal(acceptedNativeActions.some(action => action.type === 'applyTextChange'), false);
+assert.equal(acceptedNativeProjection.handle({
+  type: 'hostRevisionChanged', version: 5, text: 'later Host source'
+}).some(action => action.type === 'rememberDraft' && action.text !== null), false,
+'A later Host source must not revive an already accepted native projection');
+invalidatedNativeProjection.handle({
+  type: 'localRecoveryDraftChanged', source: nativeEdit.before, text: nativeEdit.after, edit: nativeEdit });
+const invalidationActions = invalidatedNativeProjection.handle({
+  type: 'hostRevisionChanged', version: 4, text: 'remote\none\ntwo'
+});
+assert.ok(invalidationActions.some(action => action.type === 'rememberDraft'
+  && readDocumentText(action.text ?? '') === 'remote\none\ntwo\nnative' && action.baseVersion === 4),
+  'a disjoint external change must rebase the native recovery projection instead of clearing it');
+assert.ok(invalidationActions.some(action => action.type === 'presentText'
+  && action.text === 'remote\none\ntwo\nnative' && action.source === 'rebased-draft'),
+  'a disjoint external change must present the rebased native recovery projection');
+assert.deepEqual(invalidationActions.filter(action => action.type === 'presentText').map(action => action.text),
+  ['remote\none\ntwo\nnative'], 'one external intent must present only its final native-rebased text');
+assert.ok(!invalidationActions.some(action => action.type === 'applyTextChange'),
+  'an external rebase must not submit native input before its normal table commit boundary');
+
+const successiveNativeProjection = createCoordinator();
+const firstNativeChanges = ChangeSet.of({ from: nativeSource.length, to: nativeSource.length, insert: '\nfirst' }, nativeSource.length);
+const firstNativeText = firstNativeChanges.apply(nativeSource);
+const firstNativeEdit = documentEdit(firstNativeChanges, nativeSource, firstNativeText);
+successiveNativeProjection.handle({
+  type: 'localRecoveryDraftChanged', source: firstNativeEdit.before, text: firstNativeEdit.after, edit: firstNativeEdit
+});
+const secondNativeChanges = ChangeSet.of({ from: firstNativeText.length, to: firstNativeText.length, insert: '\nsecond' }, firstNativeText.length);
+const secondNativeText = secondNativeChanges.apply(firstNativeText);
+const secondNativeEdit = documentEdit(secondNativeChanges, firstNativeText, secondNativeText);
+successiveNativeProjection.handle({
+  type: 'localRecoveryDraftChanged', source: firstNativeEdit.before, text: secondNativeEdit.after, edit: secondNativeEdit
+});
+const successiveRebaseActions = successiveNativeProjection.handle({
+  type: 'hostRevisionChanged', version: 4, text: 'remote\none\ntwo'
+});
+assert.deepEqual(successiveRebaseActions.filter(action => action.type === 'presentText'), [{
+  type: 'presentText', text: 'remote\none\ntwo\nfirst\nsecond', source: 'rebased-draft'
+}], 'successive native deltas must rebase from the original source once, without an intermediate Host presentation');
+assert.ok(successiveRebaseActions.some(action => action.type === 'rememberDraft'
+  && readDocumentText(action.text ?? '') === 'remote\none\ntwo\nfirst\nsecond' && action.baseVersion === 4),
+  'a later native delta must retain every earlier native character through a disjoint external rebase');
+
+const successiveNativeConflict = createCoordinator();
+successiveNativeConflict.handle({
+  type: 'localRecoveryDraftChanged', source: firstNativeEdit.before, text: firstNativeEdit.after, edit: firstNativeEdit
+});
+successiveNativeConflict.handle({
+  type: 'localRecoveryDraftChanged', source: firstNativeEdit.before, text: secondNativeEdit.after, edit: secondNativeEdit
+});
+const successiveConflictActions = successiveNativeConflict.handle({
+  type: 'hostRevisionChanged', version: 4, text: 'one\ntwo\nremote'
+});
+assert.deepEqual(successiveConflictActions.filter(action => action.type === 'presentText'), [{
+  type: 'presentText', text: 'one\ntwo\nfirst\nsecond', source: 'rebased-draft'
+}], 'a native overlap must present its one current conflicting Draft, not a stale intermediate source');
+assert.ok(successiveConflictActions.some(action => action.type === 'rememberDraft'
+  && readDocumentText(action.text ?? '') === 'one\ntwo\nfirst\nsecond'
+  && readDocumentText(action.conflictBaseText ?? '') === 'one\ntwo' && action.baseVersion === 4),
+  'a later native delta must preserve every local character and the original conflict base');
+
+const conflictingNativeProjection = createCoordinator();
+const overlappingChanges = ChangeSet.of({ from: 0, to: 3, insert: 'local' }, nativeSource.length);
+const conflictText = overlappingChanges.apply(nativeSource);
+const overlappingEdit = documentEdit(overlappingChanges, nativeSource, conflictText);
+conflictingNativeProjection.handle({
+  type: 'localRecoveryDraftChanged', source: overlappingEdit.before, text: overlappingEdit.after, edit: overlappingEdit });
+const conflictActions = conflictingNativeProjection.handle({
+  type: 'hostRevisionChanged', version: 4, text: 'remote\ntwo'
+});
+assert.ok(conflictActions.some(action => action.type === 'rememberDraft'
+  && readDocumentText(action.text ?? '') === 'local\ntwo' && readDocumentText(action.conflictBaseText ?? '') === 'one\ntwo'),
+  'an overlapping external change must retain the native value as a conflict candidate');
+assert.ok(conflictActions.some(action => action.type === 'showExternalConflict'),
+  'an overlapping external change must use the existing conflict notice path');
+assert.ok(conflictActions.some(action => action.type === 'presentText'
+  && action.text === 'local\ntwo' && action.source === 'rebased-draft'),
+  'the editor must present the current conflicting Draft so UI and session source stay aligned');
+assert.ok(!conflictActions.some(action => action.type === 'applyTextChange'),
+  'presenting a conflicting Draft must not overwrite the external Host revision');
+const conflictSource = conflictText;
+const conflictFollowUpChanges = ChangeSet.of({ from: conflictSource.length, to: conflictSource.length, insert: '\nnative' }, conflictSource.length);
+const conflictFollowUp = documentEdit(conflictFollowUpChanges, conflictSource, conflictFollowUpChanges.apply(conflictSource));
+const conflictFollowUpActions = conflictingNativeProjection.handle({
+  type: 'localRecoveryDraftChanged', source: conflictFollowUp.before, text: conflictFollowUp.after, edit: conflictFollowUp
+});
+assert.ok(conflictFollowUpActions.some(action => action.type === 'rememberDraft'
+  && readDocumentText(action.text ?? '') === 'local\ntwo\nnative'
+  && readDocumentText(action.conflictBaseText ?? '') === 'one\ntwo' && action.baseVersion === 4),
+  'continued native input after a conflict must retain the original conflict base');
+const conflictRevert = documentEdit(ChangeSet.empty(conflictSource.length), conflictSource, conflictSource);
+const conflictRevertActions = conflictingNativeProjection.handle({
+  type: 'localRecoveryDraftChanged', source: conflictRevert.before, text: conflictRevert.after, edit: conflictRevert
+});
+assert.ok(conflictRevertActions.some(action => action.type === 'rememberDraft'
+  && readDocumentText(action.text ?? '') === 'local\ntwo'
+  && readDocumentText(action.conflictBaseText ?? '') === 'one\ntwo'),
+  'returning a native value to the conflicting Draft must not silently clear conflict metadata');
+
 console.log('Document Session application contract checks passed');
