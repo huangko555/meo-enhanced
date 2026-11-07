@@ -9,6 +9,7 @@ export type PendingDraftRecovery = {
   /** Internal receipts order active input; public origin receipts are comparable only within their owner. */
   remember(candidate: DraftRecoveryCandidate | null, receiptVersion: number, origin?: DraftRecoveryOrigin): number;
   discardIfCurrent(receiptVersion: number): boolean;
+  /** Includes failed retired input awaiting a later explicit recovery attempt. */
   hasPending(): boolean;
   recover(): Promise<boolean>;
   settleForTermination(): Promise<boolean>;
@@ -38,7 +39,9 @@ type RetiredJob = {
   readonly scope: string;
   readonly receipt: number;
   readonly waiters: RetiredWaiter[];
+  retryForActiveRequest: boolean;
 };
+type PendingRetired = Omit<RetiredJob, 'waiters' | 'retryForActiveRequest'>;
 type ActiveRequest = {
   terminal: boolean;
   handled: boolean;
@@ -47,6 +50,8 @@ type ActiveRequest = {
   readonly reject: (error: unknown) => void;
 };
 
+// This bounds completed metadata/capabilities; unsettled input is retained as
+// pending work and coalesced per origin rather than evicted as cached history.
 const MAX_HANDOFF_SCOPES = 16;
 const normalizeLineEndings = (text: string): string => text.replace(/\r\n/g, '\n');
 const candidateEqual = (left: DraftRecoveryCandidate, right: DraftRecoveryCandidate): boolean =>
@@ -72,6 +77,9 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
   let unscopedRetiredSequence = 0;
   const retiredJobs: RetiredJob[] = [];
   const linkedRetiredJobs: RetiredJob[] = [];
+  // Unsettled input is not an evictable history cache. Keep only the latest
+  // failed full snapshot per admitted origin until an explicit retry settles it.
+  const failedRetired = new Map<string, PendingRetired>();
   const scopes: ScopeState[] = [];
   const pinnedScopes = new Set<string>();
 
@@ -92,13 +100,28 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
     return created;
   };
   const isSettled = (scope: string, receipt: number): boolean => (findScope(scope)?.settledReceipt ?? -1) >= receipt;
+  const settleCoveredLinked = (): void => {
+    for (let index = linkedRetiredJobs.length - 1; index >= 0; index--) {
+      const job = linkedRetiredJobs[index];
+      if (!isSettled(job.scope, job.receipt)) continue;
+      linkedRetiredJobs.splice(index, 1);
+      for (const waiter of job.waiters) waiter.resolve(true);
+    }
+  };
   const markSettled = (scope: string, receipt: number): void => {
     const state = scopeState(scope);
     state.settledReceipt = Math.max(state.settledReceipt, receipt);
+    const failed = failedRetired.get(scope);
+    if (failed && failed.receipt <= state.settledReceipt) failedRetired.delete(scope);
+    settleCoveredLinked();
   };
-  const settleLinked = (result: boolean): void => {
+  const finishLinked = (failure?: { readonly error: unknown }): void => {
+    settleCoveredLinked();
     for (const job of linkedRetiredJobs.splice(0)) {
-      for (const waiter of job.waiters) waiter.resolve(result);
+      for (const waiter of job.waiters) {
+        if (failure) waiter.reject(failure.error);
+        else waiter.resolve(false);
+      }
     }
   };
   const settleRetired = (job: RetiredJob, result: boolean): void => {
@@ -106,6 +129,30 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
   };
   const rejectRetired = (job: RetiredJob, error: unknown): void => {
     for (const waiter of job.waiters) waiter.reject(error);
+  };
+  const retainRetired = (job: RetiredJob): void => {
+    const previous = failedRetired.get(job.scope);
+    if (!previous || previous.receipt <= job.receipt) {
+      failedRetired.set(job.scope, { candidate: job.candidate, scope: job.scope, receipt: job.receipt });
+    }
+  };
+  const enqueueRetired = (job: RetiredJob): void => {
+    const retained = failedRetired.get(job.scope);
+    const selected = retained && retained.receipt > job.receipt
+      ? { ...retained, waiters: job.waiters, retryForActiveRequest: job.retryForActiveRequest } : job;
+    const newer = retiredJobs.find(queued => queued.scope === selected.scope && queued.receipt > selected.receipt);
+    if (newer) {
+      newer.waiters.push(...selected.waiters);
+      newer.retryForActiveRequest ||= selected.retryForActiveRequest;
+      return;
+    }
+    for (let index = retiredJobs.length - 1; index >= 0; index--) {
+      if (retiredJobs[index].scope !== selected.scope) continue;
+      const previous = retiredJobs.splice(index, 1)[0];
+      selected.waiters.push(...previous.waiters);
+      selected.retryForActiveRequest ||= previous.retryForActiveRequest;
+    }
+    retiredJobs.push(selected);
   };
   const discardUnsettledScope = (state: ScopeState): void => {
     if (state.settledReceipt >= 0 || state.artifact !== null) return;
@@ -207,8 +254,15 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
           linkedRetiredJobs.push(job);
           continue;
         }
-        try { settleRetired(job, await processRetired(job)); }
-        catch (error) { rejectRetired(job, error); }
+        try {
+          const settled = await processRetired(job) || isSettled(job.scope, job.receipt);
+          if (!settled) retainRetired(job);
+          else if (job.retryForActiveRequest && activeRequest !== null) activeRequest.handled = true;
+          settleRetired(job, settled);
+        } catch (error) {
+          if (isSettled(job.scope, job.receipt)) settleRetired(job, true);
+          else { retainRetired(job); rejectRetired(job, error); }
+        }
         continue;
       }
       const request = activeRequest;
@@ -216,7 +270,7 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
       if (active === null) {
         activeRequest = null;
         request.resolve(request.handled);
-        settleLinked(linkedRetiredJobs.length > 0 || request.handled);
+        finishLinked();
         continue;
       }
       try {
@@ -224,14 +278,14 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
         if (outcome === 'retry') {
           activeRequest = null;
           request.resolve(request.handled);
-          settleLinked(request.handled);
+          finishLinked();
           continue;
         }
         if (outcome === 'handled') request.handled = true;
       } catch (error) {
         activeRequest = null;
         request.reject(error);
-        for (const job of linkedRetiredJobs.splice(0)) rejectRetired(job, error);
+        finishLinked({ error });
       }
     }
   };
@@ -256,6 +310,9 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
     let reject!: (error: unknown) => void;
     const promise = new Promise<boolean>((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise; });
     activeRequest = { terminal, handled: false, promise, resolve, reject };
+    // Retry each retained origin once per explicit settlement request. Failure
+    // remains pending work, but never re-enqueues itself in this drain.
+    for (const job of failedRetired.values()) enqueueRetired({ ...job, waiters: [], retryForActiveRequest: true });
     ensureDrain();
     return promise;
   };
@@ -275,12 +332,15 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
       if (snapshot !== null) markSettled(scopeFor(snapshot.origin), receiptFor(snapshot.origin, receiptVersion));
       return true;
     },
-    hasPending() { return active !== null; },
+    hasPending() {
+      return active !== null || failedRetired.size > 0 || retiredJobs.length > 0
+        || linkedRetiredJobs.length > 0 || pinnedScopes.size > 0;
+    },
     recover() { return startActive(false); },
     settleForTermination() { return startActive(true); },
     preserveRetired(candidate, origin) {
       // Without an origin there is no public receipt identity to deduplicate.
-      // Give each call a separate bounded scope without retaining document text
+      // Give each call an independent identity without retaining document text
       // in metadata or colliding with the namespace of explicit owner IDs.
       const scope = origin ? scopeFor(origin) : `retired:${++unscopedRetiredSequence}`;
       const receipt = receiptFor(origin, 0);
@@ -288,10 +348,7 @@ export function createPendingDraftRecovery(dependencies: PendingDraftRecoveryDep
       let resolve!: (result: boolean) => void;
       let reject!: (error: unknown) => void;
       const promise = new Promise<boolean>((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise; });
-      const waiters: RetiredWaiter[] = [{ resolve, reject }];
-      const olderIndex = retiredJobs.findIndex(job => job.scope === scope && job.receipt <= receipt);
-      if (olderIndex >= 0) waiters.push(...retiredJobs.splice(olderIndex, 1)[0]!.waiters);
-      retiredJobs.push({ candidate, scope, receipt, waiters });
+      enqueueRetired({ candidate, scope, receipt, waiters: [{ resolve, reject }], retryForActiveRequest: false });
       ensureDrain();
       return promise;
     }

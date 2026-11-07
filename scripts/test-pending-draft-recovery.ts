@@ -494,4 +494,120 @@ for (const sink of ['apply', 'preserve'] as const) for (const newer of [false, t
   assert.equal(copies.length, 1); assert.match(copies[0]!, /newest retired/);
 }
 
+for (const failure of ['false', 'throw'] as const) {
+  let available = false, attempts = 0;
+  const copies: string[] = [];
+  const recovery = createPendingDraftRecovery({
+    readCurrentRevision: () => null,
+    applyDraft: async () => { throw new Error('retired retries never write Host'); },
+    preserveConflict: async text => {
+      attempts += 1;
+      if (!available) { if (failure === 'throw') throw new Error('copy unavailable'); return false; }
+      copies.push(text); return { replace: async () => true };
+    }
+  });
+  const result = recovery.preserveRetired({ type: 'draft', baseVersion: 1, text: 'only surviving draft' }, { ownerId: 'retired-only', receiptVersion: 1 });
+  if (failure === 'throw') await assert.rejects(result, /copy unavailable/);
+  else assert.equal(await result, false);
+  assert.equal(recovery.hasPending(), true, 'failed retired text must remain owned without another message');
+  for (let tick = 0; tick < 10; tick++) await Promise.resolve();
+  assert.equal(attempts, 1, 'a failed drain must not busy-retry');
+  assert.equal(await recovery.recover(), false, 'one explicit failed retry remains pending');
+  assert.equal(attempts, 2);
+  assert.equal(recovery.hasPending(), true);
+  available = true;
+  assert.equal(await recovery.settleForTermination(), true);
+  assert.equal(attempts, 3);
+  assert.match(copies[0]!, /only surviving draft/);
+  assert.equal(recovery.hasPending(), false);
+}
+
+// A success for an older receipt cannot settle the linked waiter of a newer
+// receipt whose preservation fails. Retry establishes that later tombstone.
+for (const failure of ['false', 'throw'] as const) {
+  let entered!: () => void, release!: () => void;
+  const applying = new Promise<void>(resolve => { entered = resolve; });
+  const released = new Promise<void>(resolve => { release = resolve; });
+  let available = false;
+  const copies: string[] = [];
+  const recovery = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 1, text: 'Host base' }),
+    applyDraft: async () => { entered(); await released; return true; },
+    preserveConflict: async text => {
+      if (!available) { if (failure === 'throw') throw new Error('latest unavailable'); return false; }
+      copies.push(text); return { replace: async () => true };
+    }
+  });
+  const old = { type: 'draft' as const, baseVersion: 1, text: 'older active' };
+  recovery.remember(old, 1, { ownerId: 'linked', receiptVersion: 1 });
+  const active = recovery.settleForTermination().then(value => ({ value }), error => ({ error }));
+  const oldWaiter = recovery.preserveRetired(old, { ownerId: 'linked', receiptVersion: 1 })
+    .then(value => ({ value }), error => ({ error }));
+  await applying;
+  const latest = { type: 'conflict' as const, baseVersion: 1, baseText: 'Host base', text: 'latest active' };
+  recovery.remember(latest, 2, { ownerId: 'linked', receiptVersion: 2 });
+  const newWaiter = recovery.preserveRetired(latest, { ownerId: 'linked', receiptVersion: 2 })
+    .then(value => ({ value }), error => ({ error }));
+  release();
+  await active;
+  assert.deepEqual(await oldWaiter, { value: true });
+  const outcome = await newWaiter;
+  if (failure === 'throw') assert.match(String('error' in outcome && outcome.error), /latest unavailable/);
+  else assert.deepEqual(outcome, { value: false });
+  assert.equal(recovery.hasPending(), true);
+  available = true;
+  await recovery.settleForTermination();
+  assert.equal(recovery.hasPending(), false);
+  assert.match(copies.at(-1)!, /latest active/);
+}
+
+// Retain only the newest failed full snapshot in a scope. An older replay
+// cannot replace it, and a later explicit retry needs no new Webview message.
+{
+  let available = false, attempts = 0;
+  const copies: string[] = [];
+  const recovery = createPendingDraftRecovery({
+    readCurrentRevision: () => null, applyDraft: async () => false,
+    preserveConflict: async text => {
+      attempts += 1;
+      if (!available) return false;
+      copies.push(text); return { replace: async () => true };
+    }
+  });
+  for (const [receiptVersion, text] of [[1, 'older'], [2, 'newest'], [1, 'late older']] as const) {
+    assert.equal(await recovery.preserveRetired({ type: 'draft', baseVersion: 1, text }, { ownerId: 'failed-latest', receiptVersion }), false);
+  }
+  assert.equal(attempts, 3); assert.equal(recovery.hasPending(), true);
+  available = true;
+  assert.equal(await recovery.recover(), true);
+  assert.equal(attempts, 4); assert.equal(copies.length, 1);
+  assert.match(copies[0]!, /newest/); assert.doesNotMatch(copies[0]!, /late older/);
+  assert.equal(recovery.hasPending(), false);
+}
+
+// Completed-cache churn never evicts the sole surviving text of failed work.
+// The completed receipt cache itself still expires old successful origins.
+{
+  let available = false;
+  const copies: string[] = [];
+  const recovery = createPendingDraftRecovery({
+    readCurrentRevision: () => null, applyDraft: async () => { throw new Error('retired work never writes Host'); },
+    preserveConflict: async text => {
+      if (text.includes('retained failure') && !available) return false;
+      copies.push(text); return { replace: async () => true };
+    }
+  });
+  await recovery.preserveRetired({ type: 'draft', baseVersion: 1, text: 'retained failure' }, { ownerId: 'failed', receiptVersion: 1 });
+  for (let index = 0; index < 24; index++) await recovery.preserveRetired(
+    { type: 'draft', baseVersion: 1, text: `completed ${index}` }, { ownerId: `completed-${index}`, receiptVersion: 1 });
+  assert.equal(recovery.hasPending(), true);
+  assert.equal(copies.length, 24);
+  await recovery.preserveRetired({ type: 'draft', baseVersion: 1, text: 'completed 0' }, { ownerId: 'completed-0', receiptVersion: 1 });
+  assert.equal(copies.length, 25, 'completed metadata remains a bounded cache');
+  available = true;
+  assert.equal(await recovery.settleForTermination(), true);
+  assert.equal(copies.length, 26); assert.match(copies.at(-1)!, /retained failure/);
+  assert.equal(recovery.hasPending(), false);
+}
+
 console.log('Pending Draft recovery checks passed');
