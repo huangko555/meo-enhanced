@@ -53,7 +53,7 @@ async function open(mode: 'live' | 'source') {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(String(error)));
   await page.exposeFunction('__editorLoadingHost', (message: any) => {
-    if (message.type === 'ready') return { type: 'init', documentId: 'file:///loading.md', text, version: 1,
+    if (message.type === 'ready') return { type: 'init', pageId: message.pageId, documentId: 'file:///loading.md', text, version: 1,
       savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'zh-CN', sourceLineNumbers: 'on',
       editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14, previewAppearance: 'dark',
       previewFontFamily: '', previewSourceColoring: false, gitChangesGutter: false, gitDiffLineHighlights: false,

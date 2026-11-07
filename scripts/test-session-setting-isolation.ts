@@ -96,7 +96,10 @@ const createPanel = () => {
     pendingDraftRecovery: {
       remember: (_text: string | null, version: number) => version,
       discardIfCurrent: () => true,
-      recover: async () => false
+      recover: async () => false,
+      settleForTermination: async () => false,
+      preserveRetired: async () => false,
+      hasPending: () => false
     },
     overrides: {
       getPreviewAppearance: () => defaults.previewAppearance,
@@ -121,7 +124,7 @@ const createPanel = () => {
 };
 
 const firstPanel = createPanel();
-await firstPanel.controller.handleMessage({ type: 'ready' });
+await firstPanel.controller.handleMessage({ type: 'ready', pageId: 'settings-isolation-page-1' });
 const firstInit = firstPanel.messages.find((message) => message.type === 'init');
 assert.ok(firstInit, 'the first panel must receive its frozen Init settings');
 const firstMessageCount = firstPanel.messages.length;
@@ -155,7 +158,7 @@ assert.deepEqual(
 );
 
 const secondPanel = createPanel();
-await secondPanel.controller.handleMessage({ type: 'ready' });
+await secondPanel.controller.handleMessage({ type: 'ready', pageId: 'settings-isolation-page-2' });
 const secondInit = secondPanel.messages.find((message) => message.type === 'init');
 assert.ok(secondInit, 'a later panel must receive an Init snapshot');
 assert.deepEqual(

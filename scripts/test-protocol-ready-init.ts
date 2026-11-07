@@ -28,8 +28,10 @@ import { MAX_PREVIEW_FONT_FAMILY_LENGTH, normalizePreviewFontFamily } from '../s
 assert.deepEqual(decodeHostToWebviewMessage({ type: 'localLinkResourcesChanged' }), { type: 'localLinkResourcesChanged' });
 
 const codeTheme = { name: 'VS Dark', type: 'dark' as const, colors: {}, tokenColors: [] };
+const pageId = 'page_protocol_ready';
 const completeInit = {
   type: 'init' as const,
+  pageId,
   documentId: 'file:///notes.md',
   text: '# title',
   version: 3,
@@ -76,9 +78,11 @@ const completeInit = {
   previewPresetDiagnostics: []
 };
 
-assert.deepEqual(decodeReadyMessage({ type: 'ready', extra: true }), { type: 'ready' });
+assert.deepEqual(decodeReadyMessage({ type: 'ready', pageId, extra: true }), { type: 'ready', pageId });
 assert.equal(decodeReadyMessage(null), null);
-assert.deepEqual(decodeReadyMessage({ type: 'ready', version: 1 }), { type: 'ready' });
+assert.deepEqual(decodeReadyMessage({ type: 'ready', pageId, version: 1 }), { type: 'ready', pageId });
+assert.equal(decodeReadyMessage({ type: 'ready' }), null);
+assert.equal(decodeInitMessage({ ...completeInit, pageId: undefined }), null);
 assert.equal(decodeInitMessage({ ...completeInit, latexDelimiters: undefined })?.latexDelimiters, false);
 assert.equal(decodeInitMessage({ ...completeInit, latexDelimiters: true })?.latexDelimiters, true);
 assert.equal(decodeInitMessage({ ...completeInit, latexDelimiters: 'true' }), null);
@@ -199,7 +203,7 @@ for (const removedFontKey of ['previewFontFamilyName', 'previewFontFamilyFallbac
   assert.equal(decodeInitMessage({ ...completeInit, [removedFontKey]: 'MEO Synthetic Sans' }), null);
 }
 assert.deepEqual(decodeHostToWebviewMessage(completeInit), completeInit);
-assert.deepEqual(decodeWebviewToHostMessage({ type: 'ready' }), { type: 'ready' });
+assert.deepEqual(decodeWebviewToHostMessage({ type: 'ready', pageId }), { type: 'ready', pageId });
 assert.deepEqual(
   decodeWebviewToHostMessage({ type: 'setUiLanguagePreference', language: 'zh-CN' }),
   { type: 'setUiLanguagePreference', language: 'zh-CN' }
@@ -230,11 +234,27 @@ assert.deepEqual(decodeDocumentSyncMessage({ type: 'documentReloadedFromDisk', r
 });
 assert.equal(decodeDocumentSyncMessage({ type: 'docChanged', text: 'bad', version: -1 }), null);
 assert.deepEqual(
-  decodeDocumentSyncCommand({ type: 'draftChanged', text: null, receiptVersion: 3 }),
-  { type: 'draftChanged', text: null, receiptVersion: 3 }
+  decodeDocumentSyncCommand({ type: 'draftChanged', pageId, text: null, receiptVersion: 3 }),
+  { type: 'draftChanged', pageId, text: null, receiptVersion: 3 }
 );
 assert.equal(
-  decodeDocumentSyncCommand({ type: 'draftChanged', text: 'missing receipt' }),
+  decodeDocumentSyncCommand({ type: 'draftChanged', pageId, text: 'missing receipt' }),
+  null
+);
+assert.deepEqual(
+  decodeDocumentSyncCommand({ type: 'draftChanged', pageId, text: 'base-aware draft', baseVersion: 4, receiptVersion: 5 }),
+  { type: 'draftChanged', pageId, text: 'base-aware draft', baseVersion: 4, receiptVersion: 5 }
+);
+assert.deepEqual(
+  decodeDocumentSyncCommand({ type: 'draftChanged', pageId, text: 'terminal draft', baseVersion: 4, terminal: true, receiptVersion: 6 }),
+  { type: 'draftChanged', pageId, text: 'terminal draft', baseVersion: 4, terminal: true, receiptVersion: 6 }
+);
+assert.equal(
+  decodeDocumentSyncCommand({ type: 'draftChanged', pageId, text: 'bad terminal', baseVersion: 4, terminal: false, receiptVersion: 6 }),
+  null
+);
+assert.equal(
+  decodeDocumentSyncCommand({ type: 'draftChanged', pageId, text: 'missing base', receiptVersion: 5 }),
   null
 );
 assert.deepEqual(decodeDocumentSyncCommand({

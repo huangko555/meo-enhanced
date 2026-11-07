@@ -53,14 +53,14 @@ const contribution = registry.api.registerDocumentView('test.markmap', descripto
 assert.throws(() => registry.api.registerDocumentView('test.markmap', { ...descriptor, id: 'duplicate-language' }));
 assert.throws(() => registry.api.registerDocumentView('test.markmap', descriptor));
 assert.equal(messages.length, 0);
-ready.fire({ type: 'ready' }); await Promise.resolve(); await Promise.resolve();
+ready.fire({ type: 'ready', pageId: 'document-views-page-1' }); await Promise.resolve(); await Promise.resolve();
 assert.equal(messages.at(-1).views[0].id, 'test.markmap/mindmap');
 assert.deepEqual(messages.at(-1).views[0].iconPaths, descriptor.iconPaths);
 assert.deepEqual(messages.at(-1).views[0].iconOffset, descriptor.iconOffset);
 assert.equal(panel.webview.options.localResourceRoots.length, 2);
 assert.deepEqual(decodeHostToWebviewMessage(messages.at(-1)), messages.at(-1));
 const writes = optionWrites;
-ready.fire({ type: 'ready' }); await Promise.resolve(); await Promise.resolve();
+ready.fire({ type: 'ready', pageId: 'document-views-page-1' }); await Promise.resolve(); await Promise.resolve();
 assert.equal(optionWrites, writes, 'Repeated ready must not update Webview options and reload the editor');
 assert.equal(decodeHostToWebviewMessage({ type: 'documentViewsChanged', views: [{ ...messages.at(-1).views[0], entryUri: 4 }] }), null);
 assert.equal(decodeHostToWebviewMessage({ type: 'documentViewsChanged', views: [{ ...messages.at(-1).views[0], iconOffset: { x: 4, y: 0 } }] }), null);
@@ -78,7 +78,7 @@ contribution.dispose(); await Promise.resolve(); await Promise.resolve();
 assert.deepEqual(messages.at(-1).views, []); assert.equal(panel.webview.options.localResourceRoots.length, 2);
 assert.equal(optionWrites, writes, 'Disabling a view preserves resource roots and does not reload the editor');
 closed.fire(); const count = messages.length;
-registry.api.registerDocumentView('test.markmap', descriptor); ready.fire({ type: 'ready' }); await Promise.resolve();
+registry.api.registerDocumentView('test.markmap', descriptor); ready.fire({ type: 'ready', pageId: 'document-views-page-1' }); await Promise.resolve();
 assert.equal(messages.length, count); registry.dispose();
 console.log('Document view registration, lifecycle, resource roots and protocol checks passed');
 
@@ -95,14 +95,14 @@ const feature = features.registerFeature(extrasId, { id: 'mindmap', label: 'Mind
   return { dispose() { disposals++; owned.dispose(); } };
 });
 assert.equal(activations, 0, 'Disabled features register metadata without starting runtime');
-const panels = [0, 1].map(() => {
+const panels = [0, 1].map((_, index) => {
   const incoming = new EventEmitter<any>(), closed = new EventEmitter<void>(), events: any[] = [];
   let options = { localResourceRoots: [new Uri('file:///core')] }, writes = 0;
   const panel = { webview: { get options() { return options; }, set options(value) { options = value; writes++; },
     onDidReceiveMessage: incoming.event, asWebviewUri: (uri: Uri) => uri,
     postMessage: async (event: any) => { events.push(event); return true; } }, onDidDispose: closed.event };
   views.attach(panel as any, async () => {}); features.attach(panel as any, async () => {});
-  incoming.fire({ type: 'ready' });
+  incoming.fire({ type: 'ready', pageId: `document-views-feature-page-${index + 1}` });
   return { incoming, closed, events, writes: () => writes };
 });
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));

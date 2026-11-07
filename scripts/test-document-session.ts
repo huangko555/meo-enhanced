@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { documentSnapshotFromString } from '../webview/src/adapters/documentSnapshot';
 import {
   createDocumentSession,
   transitionDocumentSession
@@ -107,12 +108,14 @@ const overlappingExternal = transitionDocumentSession(overlappingDraft.state, {
 });
 assert.equal(overlappingExternal.state.documentId, overlappingDraft.state.documentId);
 assert.deepEqual(overlappingExternal.state.revision, overlappingDraft.state.revision);
-assert.equal(overlappingExternal.state.draft, overlappingDraft.state.draft);
+const conflictingDraft = { ...overlappingDraft.state.draft!, conflictBaseText: rebaseBase.revision.text };
+assert.deepEqual(overlappingExternal.state.draft, conflictingDraft);
+assert.equal(overlappingDraft.state.draft?.conflictBaseText, undefined, 'conflict metadata must not mutate the previous state');
 assert.equal(overlappingExternal.state.pendingChange, overlappingDraft.state.pendingChange);
 assert.equal(overlappingExternal.state.savedRevision, overlappingDraft.state.savedRevision);
 assert.equal(overlappingExternal.state.savePhase, overlappingDraft.state.savePhase);
 assert.equal(overlappingExternal.state.savingRevision, overlappingDraft.state.savingRevision);
-assert.deepEqual(overlappingExternal.effects, [{ type: 'reportExternalConflict' }]);
+assert.deepEqual(overlappingExternal.effects, [{ type: 'persistDraft', draft: conflictingDraft }, { type: 'reportExternalConflict' }]);
 const duplicateOverlappingExternal = transitionDocumentSession(overlappingExternal.state, {
   type: 'revisionReceived',
   revision: { number: 2, text: 'one\nremote' }
@@ -128,7 +131,7 @@ assert.deepEqual(newerOverlappingExternal.state.lastRejectedExternalRevision, {
   number: 3,
   text: 'one\nnewer remote'
 });
-assert.deepEqual(newerOverlappingExternal.effects, [{ type: 'reportExternalConflict' }]);
+assert.deepEqual(newerOverlappingExternal.effects, [{ type: 'persistDraft', draft: conflictingDraft }, { type: 'reportExternalConflict' }]);
 const olderRejectedExternal = transitionDocumentSession(newerOverlappingExternal.state, {
   type: 'revisionReceived',
   revision: { number: 2, text: 'one\nremote' }
@@ -248,12 +251,13 @@ const saveAfterConflict = transitionDocumentSession(saveQueued.state, {
 });
 assert.equal(saveAfterConflict.state.documentId, saveQueued.state.documentId);
 assert.equal(saveAfterConflict.state.revision, saveQueued.state.revision);
-assert.equal(saveAfterConflict.state.draft, saveQueued.state.draft);
+const queuedConflictingDraft = { ...saveQueued.state.draft!, conflictBaseText: saveQueued.state.revision.text };
+assert.deepEqual(saveAfterConflict.state.draft, queuedConflictingDraft);
 assert.equal(saveAfterConflict.state.pendingChange, saveQueued.state.pendingChange);
 assert.equal(saveAfterConflict.state.savedRevision, saveQueued.state.savedRevision);
 assert.equal(saveAfterConflict.state.savePhase, saveQueued.state.savePhase);
 assert.equal(saveAfterConflict.state.savingRevision, saveQueued.state.savingRevision);
-assert.deepEqual(saveAfterConflict.effects, [{ type: 'reportExternalConflict' }]);
+assert.deepEqual(saveAfterConflict.effects, [{ type: 'persistDraft', draft: queuedConflictingDraft }, { type: 'reportExternalConflict' }]);
 const acceptedPendingAfterConflict = transitionDocumentSession(saveAfterConflict.state, {
   type: 'revisionReceived',
   revision: { number: 5, text: 'draft' }
@@ -295,4 +299,16 @@ assert.deepEqual(acceptedAfterReload.effects, [
   { type: 'presentText', text: 'new external', source: 'revision' }
 ]);
 
+for (const base of ['', documentSnapshotFromString('')]) {
+  const empty = createDocumentSession({ documentId: 'file:///empty.md', revision: { number: 1, text: base }, savedRevision: null });
+  const local = transitionDocumentSession(empty, { type: 'draftChanged', text: 'local' }).state;
+  const conflict = transitionDocumentSession(local, { type: 'revisionReceived', revision: { number: 2, text: 'remote' } }).state;
+  assert.equal(conflict.draft?.conflictBaseText, base, 'an empty conflict base is still an explicit conflict');
+  const save = transitionDocumentSession(conflict, { type: 'saveRequested' });
+  assert.equal(save.state, conflict);
+  assert.deepEqual(save.effects, [{ type: 'reportExternalConflict' }]);
+  const submit = transitionDocumentSession(conflict, { type: 'submitDraft' });
+  assert.equal(submit.state, conflict);
+  assert.deepEqual(submit.effects, [], 'conflict protection must depend on presence, not truthiness');
+}
 console.log('Document Session domain checks passed');

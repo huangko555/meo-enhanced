@@ -20,18 +20,19 @@ try {
   const page = await browser.newPage();
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
   await page.addStyleTag({ path: 'webview/src/styles.css' });
-  await page.addScriptTag({ content: `window.__sharingMessages=[];window.acquireVsCodeApi=()=>({getState(){return{}},setState(){},postMessage(message){window.__sharingMessages.push(message);if(message.type==='applyChanges')queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'applied',version:message.baseVersion+1}})));}});` });
+  await page.addScriptTag({ content: `window.__sharingMessages=[];window.acquireVsCodeApi=()=>({getState(){return{}},setState(){},postMessage(message){window.__sharingMessages.push(message);if(message.type==='ready')window.__sharingPageId=message.pageId;if(message.type==='applyChanges')queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'applied',version:message.baseVersion+1}})));}});` });
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
+  await page.waitForFunction(() => typeof (window as any).__sharingPageId === 'string');
   const text = '# Sharing\n\n' + 'Ordinary immutable document text.\n'.repeat(24_000);
-  await page.evaluate(text => window.dispatchEvent(new MessageEvent('message', { data: {
-    type: 'init', documentId: 'file:///sharing.md', text, version: 1, savedRevision: { version: 1, text },
+  await page.evaluate(({ text, pageId }) => window.dispatchEvent(new MessageEvent('message', { data: {
+    type: 'init', pageId, documentId: 'file:///sharing.md', text, version: 1, savedRevision: { version: 1, text },
     diagnostics: [], mode: 'source', uiLanguage: 'en', sourceLineNumbers: 'on',
     previewAppearance: 'dark', previewFontFamily: '', previewSourceColoring: false, previewShowComments: false,
     editorAppearance: 'dark', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false,
     diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false,
     contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false },
     outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null
-  } })), text);
+  } })), { text, pageId: await page.evaluate(() => (window as any).__sharingPageId as string) });
   await page.waitForSelector('.editor-host > .cm-editor .cm-content');
   const sharing = await page.evaluate(() => {
     const scope = window as any, view = document.querySelector<any>('.editor-host > .cm-editor .cm-content').cmTile.root.view;

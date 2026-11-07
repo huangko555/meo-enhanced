@@ -1,3 +1,5 @@
+import { isWebviewPageId } from './readyInit';
+
 export type DocumentChangedMessage = {
   readonly type: 'docChanged';
   readonly text: string;
@@ -29,7 +31,7 @@ export type DocumentSyncMessage =
   | AppliedMessage
   | DocumentReloadedFromDiskMessage
   | DocumentReloadFromDiskFailedMessage
-  | { readonly type: 'requestDraftRecoverySnapshot' };
+  | { readonly type: 'requestDraftRecoverySnapshot'; readonly pageId: string };
 
 export type TextChange = {
   readonly from: number;
@@ -43,14 +45,31 @@ export type ApplyChangesMessage = {
   readonly changes: TextChange[];
 };
 
-export type DraftChangedMessage = {
-  readonly type: 'draftChanged';
-  readonly text: string | null;
-  readonly receiptVersion: number;
-};
+export type DraftChangedMessage =
+  | {
+      readonly type: 'draftChanged';
+      readonly pageId: string;
+      readonly text: string;
+      /** Host document revision the local candidate was derived from. */
+      readonly baseVersion: number;
+      /** Present only for a terminal merge conflict; not sent on every edit. */
+      readonly conflictBaseText?: string;
+      /** One full beforeunload handoff that may outlive this page receiver. */
+      readonly terminal?: true;
+      readonly receiptVersion: number;
+    }
+  | {
+      readonly type: 'draftChanged';
+      readonly pageId: string;
+      readonly text: null;
+      readonly receiptVersion: number;
+    };
 
 export type DraftPatchedMessage = {
   readonly type: 'draftPatched';
+  readonly pageId: string;
+  /** Host document revision the reconstructed local candidate was derived from. */
+  readonly baseVersion: number;
   readonly baseReceiptVersion: number;
   readonly receiptVersion: number;
 } & (
@@ -108,7 +127,9 @@ function normalizeTopLineOffset(value: unknown): number {
 
 export function decodeDocumentSyncMessage(value: unknown): DocumentSyncMessage | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
-  if (value.type === 'requestDraftRecoverySnapshot') return { type: 'requestDraftRecoverySnapshot' };
+  if (value.type === 'requestDraftRecoverySnapshot' && isWebviewPageId(value.pageId)) {
+    return { type: 'requestDraftRecoverySnapshot', pageId: value.pageId };
+  }
   if (value.type === 'docChanged' && typeof value.text === 'string' && isVersion(value.version)) {
     return { type: 'docChanged', text: value.text, version: value.version };
   }
@@ -131,34 +152,40 @@ export function decodeDocumentSyncMessage(value: unknown): DocumentSyncMessage |
   }
   return null;
 }
-
 export function decodeDocumentSyncCommand(value: unknown): DocumentSyncCommand | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
   const text = value.text;
-  if (value.type === 'draftPatched' && isReceiptVersion(value.baseReceiptVersion)
+  if (value.type === 'draftPatched' && isWebviewPageId(value.pageId) && isVersion(value.baseVersion) && isReceiptVersion(value.baseReceiptVersion)
     && isReceiptVersion(value.receiptVersion) && value.receiptVersion > value.baseReceiptVersion
     && isTextChange(value.change) && value.changes === undefined) {
     return {
-      type: 'draftPatched', baseReceiptVersion: value.baseReceiptVersion,
+      type: 'draftPatched', pageId: value.pageId, baseVersion: value.baseVersion, baseReceiptVersion: value.baseReceiptVersion,
       receiptVersion: value.receiptVersion, change: value.change
     };
   }
-  if (value.type === 'draftPatched' && isReceiptVersion(value.baseReceiptVersion)
+  if (value.type === 'draftPatched' && isWebviewPageId(value.pageId) && isVersion(value.baseVersion) && isReceiptVersion(value.baseReceiptVersion)
     && isReceiptVersion(value.receiptVersion) && value.receiptVersion > value.baseReceiptVersion
     && value.change === undefined && Array.isArray(value.changes) && value.changes.every(isTextChange)
     && value.changes.every((change, index, changes) => index === 0 || change.from >= changes[index - 1].to)) {
     return {
-      type: 'draftPatched', baseReceiptVersion: value.baseReceiptVersion,
+      type: 'draftPatched', pageId: value.pageId, baseVersion: value.baseVersion, baseReceiptVersion: value.baseReceiptVersion,
       receiptVersion: value.receiptVersion, changes: value.changes
     };
   }
-  if (value.type === 'draftChanged' && typeof text === 'string'
-    && isReceiptVersion(value.receiptVersion)) {
-    return { type: 'draftChanged', text, receiptVersion: value.receiptVersion };
+  if (value.type === 'draftChanged' && isWebviewPageId(value.pageId) && typeof text === 'string'
+    && isVersion(value.baseVersion) && isReceiptVersion(value.receiptVersion)
+    && (value.conflictBaseText === undefined || typeof value.conflictBaseText === 'string')
+    && (value.terminal === undefined || value.terminal === true)) {
+    return {
+      type: 'draftChanged', pageId: value.pageId, text, baseVersion: value.baseVersion,
+      ...(typeof value.conflictBaseText === 'string' ? { conflictBaseText: value.conflictBaseText } : {}),
+      ...(value.terminal === true ? { terminal: true as const } : {}),
+      receiptVersion: value.receiptVersion
+    };
   }
-  if (value.type === 'draftChanged' && text === null
+  if (value.type === 'draftChanged' && isWebviewPageId(value.pageId) && text === null
     && isReceiptVersion(value.receiptVersion)) {
-    return { type: 'draftChanged', text: null, receiptVersion: value.receiptVersion };
+    return { type: 'draftChanged', pageId: value.pageId, text: null, receiptVersion: value.receiptVersion };
   }
   if (value.type === 'documentReloadPresentationCompleted'
     && isReloadId(value.reloadId) && typeof value.presented === 'boolean'
@@ -177,3 +204,4 @@ export function decodeDocumentSyncCommand(value: unknown): DocumentSyncCommand |
   }
   return null;
 }
+// Recovery payloads intentionally have no legacy page-identity fallback.

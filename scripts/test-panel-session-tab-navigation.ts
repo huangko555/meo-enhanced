@@ -44,7 +44,11 @@ const panel = {
 };
 const controller = createPanelSessionController(createPanelSessionControllerParams({
   panel, document, readDiskText: () => document.text,
-  pendingDraftRecovery: createPendingDraftRecovery({ readCurrentText: () => document.text, applyDraft: async () => true }),
+  pendingDraftRecovery: createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: document.version, text: document.text }),
+    applyDraft: async () => true,
+    preserveConflict: async () => false
+  }),
   overrides: {
     viewNavigation: createVscodeViewNavigationAdapter({
       document: document as never, documentUri: document.uri as never,
@@ -53,7 +57,7 @@ const controller = createPanelSessionController(createPanelSessionControllerPara
   }
 }) as never);
 try {
-  await controller.handleMessage({ type: 'ready' });
+  await controller.handleMessage({ type: 'ready', pageId: 'tab-navigation-page' });
   assert.equal(messages.filter(message => message.type === 'init').length, 1);
   assert.equal(messages.some(message => message.type === 'revealSelection'), false);
   await controller.handleMessage({ type: 'requestWebviewVisibility', requestId: 'visible-panel' });

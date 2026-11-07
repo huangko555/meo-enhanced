@@ -14,6 +14,7 @@ const document = createPanelSessionTestDocument(
   createPanelSessionTestUri('C:/preview-startup.md'),
   '# Preview startup\r\n\r\nBody'
 );
+const pageId = 'page_panel_ready';
 let emitSaveStateChange: () => void = () => undefined;
 let emitSave: () => void = () => undefined;
 let latexSetting = false, failLatexWrite = false, folderLatexOverride = false;
@@ -78,8 +79,9 @@ const controller = createPanelSessionController(createPanelSessionControllerPara
   panel,
   document,
   pendingDraftRecovery: createPendingDraftRecovery({
-    readCurrentText: () => document.text,
-    applyDraft: async () => true
+    readCurrentRevision: () => ({ version: document.version, text: document.text }),
+    applyDraft: async () => true,
+    preserveConflict: async () => false
   }),
   readDiskText: () => document.text,
   overrides: {
@@ -112,9 +114,9 @@ const controller = createPanelSessionController(createPanelSessionControllerPara
 }) as never);
 
 const readyMessages = [
-  controller.handleMessage({ type: 'ready' }),
-  controller.handleMessage({ type: 'ready' }),
-  controller.handleMessage({ type: 'ready' })
+  controller.handleMessage({ type: 'ready', pageId }),
+  controller.handleMessage({ type: 'ready', pageId }),
+  controller.handleMessage({ type: 'ready', pageId })
 ];
 assert.equal(messages.some(message => message.type === 'sidebarReadiness' && message.ready), false,
   'outline subscription remains gated while the real init is waiting on disk');
@@ -141,7 +143,7 @@ emitSave();
 await Bun.sleep(0);
 assert.equal(messages.filter(message => message.type === 'documentSaveStateChanged').at(-1)?.isDirty, false,
   'native saves must publish their actual dirty flag');
-await controller.handleMessage({ type: 'ready' });
+await controller.handleMessage({ type: 'ready', pageId });
 const initMessages = messages.filter((message) => message.type === 'init');
 assert.equal(initMessages.length, 2, 'a later ready must retry an init lost during Webview startup');
 assert.equal(initMessages[0]?.mode, 'preview');
@@ -201,8 +203,9 @@ const refreshedController = createPanelSessionController(createPanelSessionContr
   },
   document,
   pendingDraftRecovery: createPendingDraftRecovery({
-    readCurrentText: () => document.text,
-    applyDraft: async () => true
+    readCurrentRevision: () => ({ version: document.version, text: document.text }),
+    applyDraft: async () => true,
+    preserveConflict: async () => false
   }),
   readDiskText: () => document.text,
   overrides: {
@@ -215,7 +218,7 @@ const refreshedController = createPanelSessionController(createPanelSessionContr
 assert.ok(refresh, 'startup must schedule the disk refresh');
 refresh();
 await Bun.sleep(0);
-await refreshedController.handleMessage({ type: 'ready' });
+await refreshedController.handleMessage({ type: 'ready', pageId });
 assert.equal(diskReads, 1, 'refresh-first init must reuse the populated Saved Revision tracker');
 const refreshedInit = refreshedMessages.find(message => message.type === 'init');
 assert.ok(refreshedInit);
@@ -231,7 +234,11 @@ let unavailableReason: 'too-large' | null = 'too-large';
 const unavailablePublications: Array<{ kind: string }> = [];
 const unavailableController = createPanelSessionController(createPanelSessionControllerParams({
   panel, document,
-  pendingDraftRecovery: createPendingDraftRecovery({ readCurrentText: () => document.text, applyDraft: async () => true }),
+  pendingDraftRecovery: createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: document.version, text: document.text }),
+    applyDraft: async () => true,
+    preserveConflict: async () => false
+  }),
   readDiskText: () => document.text,
   overrides: {
     savedRevisionFile: { read: async () => {
@@ -249,7 +256,7 @@ const unavailableController = createPanelSessionController(createPanelSessionCon
   }
 }) as never);
 try {
-  await unavailableController.handleMessage({ type: 'ready' });
+  await unavailableController.handleMessage({ type: 'ready', pageId });
   unavailableController.session.refreshGitBaseline({ forcePost: true });
   for (let index = 0; index < 160; index++) await Promise.resolve();
   assert.ok(unavailableReads <= 2, 'an unavailable initial Saved Revision must not recursively refresh its own comparison');

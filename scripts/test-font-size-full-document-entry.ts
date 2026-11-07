@@ -1,4 +1,5 @@
 import { EditorView } from '@codemirror/view';
+import './browser-page-identity-test-helpers';
 import '../webview/src/index';
 import { getViewportController } from '../webview/src/helpers/viewportController';
 

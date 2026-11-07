@@ -17,6 +17,7 @@ group.tabs = [group.activeTab];
 const saved = new Set<(doc: unknown) => void>();
 const saving = new Set<(event: unknown) => void>();
 let targetFixture: ReturnType<typeof fixture> | undefined;
+let nextPageId = 0;
 let nativeMEO = true;
 let memoryEnabled = false;
 const handoff = createDocumentSaveAsViewStateHandoff();
@@ -34,14 +35,14 @@ base.commands.executeCommand = async (command: string) => {
     // Native replacement can initialize the new MEO before the command resolves.
     if (nativeMEO) {
       targetFixture = fixture(target);
-      await targetFixture.controller.handleMessage({ type: 'ready' });
+      await targetFixture.controller.handleMessage({ type: 'ready', pageId: targetFixture.pageId });
     }
     return;
   }
   assert.equal(command, 'vscode.openWith');
   if (!targetFixture) {
     targetFixture = fixture(target);
-    await targetFixture.controller.handleMessage({ type: 'ready' });
+    await targetFixture.controller.handleMessage({ type: 'ready', pageId: targetFixture.pageId });
   }
 };
 mock.module('vscode', () => base);
@@ -52,13 +53,18 @@ const [{ createPanelSessionController }, { createPendingDraftRecovery }, { creat
 const state = new Map<string, unknown>();
 const workspaceState = { get: (key: string) => state.get(key), update: async (key: string, value: unknown) => { state.set(key, value); } };
 function fixture(document: typeof source) {
+  const pageId = `save-as-page-${++nextPageId}`;
   const messages: any[] = [];
   const panel = { active: true, webview: {
     postMessage: async (message: unknown) => { messages.push(message); return true; },
     onDidReceiveMessage: () => panelSessionDisposable()
   }, onDidChangeViewState: () => panelSessionDisposable(), onDidDispose: () => panelSessionDisposable() };
   const params: any = createPanelSessionControllerParams({ panel, document,
-    pendingDraftRecovery: createPendingDraftRecovery({ readCurrentText: () => text, applyDraft: async () => true }),
+    pendingDraftRecovery: createPendingDraftRecovery({
+      readCurrentRevision: () => ({ version: document.version, text }),
+      applyDraft: async () => true,
+      preserveConflict: async () => false
+    }),
     readDiskText: () => text
   });
   params.context.workspaceState = workspaceState;
@@ -70,7 +76,7 @@ function fixture(document: typeof source) {
   });
   params.viewNavigation = { ...params.viewNavigation, ...navigation,
     revealCurrentEditorSelection: () => navigation.revealSelection({ anchor: 0, head: 0 }) };
-  return { messages, controller: createPanelSessionController(params) };
+  return { messages, pageId, controller: createPanelSessionController(params) };
 }
 const position = { line: 250, lineOffset: 17 };
 const viewState = { mode: 'source' as const, position, selection: { anchor: 1200, head: 1220 } };
@@ -79,7 +85,7 @@ for (nativeMEO of [true, false]) for (memoryEnabled of [true, false]) {
   group.activeTab = { input: new TabInputCustom(source.uri as never, 'meoEnhanced.editor'), group };
   group.tabs = [group.activeTab];
   const original = fixture(source);
-  await original.controller.handleMessage({ type: 'ready' });
+  await original.controller.handleMessage({ type: 'ready', pageId: original.pageId });
   await original.controller.handleMessage({ type: 'readingPositionChanged', position });
   await original.controller.handleMessage({ type: 'saveDocumentAs', requestId: 'save-as-position', text, viewState });
   assert.ok(targetFixture);

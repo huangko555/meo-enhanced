@@ -69,6 +69,7 @@ for (let index = 0; index < 250; index += 1) {
 }
 const messages: WebviewToHostMessage[] = [];
 const adapter = createDocumentSessionWebviewAdapter({
+  pageId: 'transfer-budget-page',
   postMessage: message => { messages.push(message); },
   presentText: () => true,
   restoreReloadedView: () => undefined,
@@ -76,7 +77,7 @@ const adapter = createDocumentSessionWebviewAdapter({
   reportUnexpectedError: (_context, error) => { throw error; }
 });
 adapter.start({
-  type: 'init', documentId: 'file:///transfer-budget.md', text: initial, version: 1,
+  type: 'init', pageId: 'transfer-budget-page', documentId: 'file:///transfer-budget.md', text: initial, version: 1,
   savedRevision: { version: 1, text: initial }
 } as InitMessage);
 let text = initial;
@@ -101,11 +102,12 @@ console.log(`Draft recovery transfer budget passed (${encodedCharacters} seriali
   let value = Text.of(initial.split('\n'));
   const emitted: WebviewToHostMessage[] = [];
   const session = createDocumentSessionWebviewAdapter({
+    pageId: 'transaction-budget-page',
     postMessage: message => { emitted.push(message); }, presentText: () => true,
     restoreReloadedView: () => undefined, showNotice: notice => { throw new Error(notice); },
     reportUnexpectedError: (_context, error) => { throw error; }
   });
-  session.start({ type: 'init', documentId: 'file:///transaction-budget.md', text: initial,
+  session.start({ type: 'init', pageId: 'transaction-budget-page', documentId: 'file:///transaction-budget.md', text: initial,
     version: 1, savedRevision: { version: 1, text: initial } } as InitMessage);
   let fullReads = 0;
   const edit = async (spec: Parameters<typeof ChangeSet.of>[0], allowCheckpoint = false) => {

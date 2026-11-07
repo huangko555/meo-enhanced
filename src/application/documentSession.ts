@@ -42,6 +42,10 @@ export type DocumentSessionAction =
   | {
       readonly type: 'rememberDraft';
       readonly text: DocumentText | null;
+      /** The Host revision the candidate must still be based on at recovery. */
+      readonly baseVersion?: number;
+      /** Terminal conflict context; sent only when normal merge is impossible. */
+      readonly conflictBaseText?: DocumentText;
       readonly receiptVersion: number;
       readonly edit?: DocumentTextEdit;
     }
@@ -194,6 +198,10 @@ function mapEffects(
       return {
         type: 'rememberDraft',
         text: effect.draft?.text ?? null,
+        ...(effect.draft === null ? {} : {
+          baseVersion: effect.draft.baseRevision,
+          ...(effect.draft.conflictBaseText !== undefined ? { conflictBaseText: effect.draft.conflictBaseText } : {})
+        }),
         receiptVersion: inputReceiptVersion,
         ...(localEdit && effect.draft?.text === localEdit.after ? { edit: localEdit } : {})
       };

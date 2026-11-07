@@ -3,7 +3,7 @@ import type { DraftRecoveryMessage } from '../protocol/documentSync';
 
 /** Reassembles ordered transport checkpoints before handing complete text to recovery. */
 export function createDraftRecoveryReceiver(
-  recovery: PendingDraftRecovery,
+  recovery: Pick<PendingDraftRecovery, 'remember'>,
   requestSnapshot: () => void | boolean | PromiseLike<void | boolean>
 ): { accept(message: DraftRecoveryMessage): number } {
   let checkpoint: { text: string; receiptVersion: number } | null = null;
@@ -13,8 +13,14 @@ export function createDraftRecoveryReceiver(
     accept(message) {
       if (message.receiptVersion <= receiptVersion) return receiptVersion;
       let text: string | null;
+      let candidate: Parameters<PendingDraftRecovery['remember']>[0] = null;
       if (message.type === 'draftChanged') {
         text = message.text;
+        if (message.text !== null) {
+          candidate = message.conflictBaseText === undefined
+            ? { type: 'draft', baseVersion: message.baseVersion, text: message.text }
+            : { type: 'conflict', baseVersion: message.baseVersion, baseText: message.conflictBaseText, text: message.text };
+        }
       } else {
         const changes = message.changes ?? [message.change];
         if (!checkpoint || message.baseReceiptVersion !== checkpoint.receiptVersion
@@ -38,8 +44,10 @@ export function createDraftRecoveryReceiver(
         }
         parts.push(checkpoint.text.slice(from));
         text = parts.join('');
+        candidate = { type: 'draft', baseVersion: message.baseVersion, text };
       }
-      receiptVersion = recovery.remember(text, message.receiptVersion);
+      recovery.remember(candidate, message.receiptVersion);
+      receiptVersion = message.receiptVersion;
       if (text !== null) checkpoint = { text, receiptVersion: message.receiptVersion };
       snapshotRequested = false;
       return receiptVersion;

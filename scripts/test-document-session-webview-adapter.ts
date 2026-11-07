@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
+import { createPendingDraftRecovery } from '../src/application/pendingDraftRecovery';
+import { createDraftRecoveryReceiver } from '../src/host/draftRecoveryReceiver';
 import type { HostToWebviewMessage, WebviewToHostMessage } from '../src/protocol/messages';
 import type { InitMessage } from '../src/protocol/readyInit';
 import { createDocumentSessionWebviewAdapter } from '../webview/src/adapters/documentSessionWebviewAdapter';
+import { documentSnapshotFromString } from '../webview/src/adapters/documentSnapshot';
+import type { DocumentTextEdit } from '../src/foundation/documentSnapshot';
 
+const pageId = 'page_webview_adapter';
 const init = {
   type: 'init',
+  pageId,
   documentId: 'file:///adapter.md',
   text: 'one',
   version: 1,
@@ -18,6 +24,7 @@ const notices: string[] = [];
 const unexpected: Array<{ context: string; error: unknown }> = [];
 
 const adapter = createDocumentSessionWebviewAdapter({
+  pageId,
   postMessage: (message) => { posted.push(message); },
   presentText: (text, source) => { presented.push({ text, source }); },
   restoreReloadedView: ({ topLine, topLineOffset }) => {
@@ -33,7 +40,7 @@ adapter.localDraftChanged('one local');
 await adapter.whenIdle();
 assert.equal(adapter.readCurrentText()?.toString(), 'one local', 'the immutable read surface follows the latest draft');
 assert.deepEqual(posted.slice(0, 2), [
-  { type: 'draftChanged', text: 'one local', receiptVersion: 1 },
+  { type: 'draftChanged', pageId, text: 'one local', baseVersion: 1, receiptVersion: 1 },
   {
     type: 'applyChanges',
     baseVersion: 1,
@@ -47,6 +54,29 @@ assert.equal(adapter.accept({ type: 'themeChanged' } as HostToWebviewMessage), f
 await adapter.whenIdle();
 assert.deepEqual(presented.at(-1), { text: 'remote', source: 'revision' });
 assert.equal(adapter.readCurrentText()?.toString(), 'remote', 'accepted Host revisions replace the shared read surface');
+
+// A delayed Init or recovery snapshot request from another iframe generation
+// must be inert; only the bootstrap page identity owns this adapter.
+{
+  const identityMessages: WebviewToHostMessage[] = [];
+  const identityAdapter = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => { identityMessages.push(message); }, presentText() {}, restoreReloadedView() {},
+    showNotice() {}, reportUnexpectedError: (_context, error) => { throw error; }
+  });
+  identityAdapter.start({ ...init, pageId: 'page_other_generation' });
+  assert.equal(identityAdapter.readCurrentText(), null, 'an Init targeted to another page must not initialize this page');
+  identityAdapter.start(init);
+  identityAdapter.localDraftChanged('page-owned draft');
+  await identityAdapter.whenIdle();
+  const beforeWrongRequest = identityMessages.length;
+  assert.equal(identityAdapter.accept({ type: 'requestDraftRecoverySnapshot', pageId: 'page_other_generation' }), true);
+  await identityAdapter.whenIdle();
+  assert.equal(identityMessages.length, beforeWrongRequest, 'wrong-page snapshot requests are ignored');
+  assert.equal(identityAdapter.accept({ type: 'requestDraftRecoverySnapshot', pageId }), true);
+  await identityAdapter.whenIdle();
+  assert.equal(identityMessages.at(-1)?.type, 'draftChanged', 'the active page may request its own full recovery snapshot');
+}
 
 adapter.requestReloadFromDisk({ topLine: 7, topLineOffset: 2 });
 await adapter.whenIdle();
@@ -122,6 +152,7 @@ assert.equal(unexpected.length, 1, 'the raw reload failure should only be logged
 
 const earlyErrors: string[] = [];
 const earlyAdapter = createDocumentSessionWebviewAdapter({
+  pageId,
   postMessage: () => undefined,
   presentText: () => undefined,
   restoreReloadedView: () => undefined,
@@ -148,6 +179,7 @@ const testAsyncReloadPresentation = async (
   });
   const asyncRestores: number[] = [];
   const asyncAdapter = createDocumentSessionWebviewAdapter({
+    pageId,
     postMessage: (message) => { asyncMessages.push(message); },
     presentText: () => presentation,
     restoreReloadedView: ({ topLine }) => { asyncRestores.push(topLine); },
@@ -188,6 +220,7 @@ await testAsyncReloadPresentation(true, 13, [13], 4);
 const retryPresentations: string[] = [];
 let failPresentation = true;
 const retryAdapter = createDocumentSessionWebviewAdapter({
+  pageId,
   postMessage: () => undefined,
   presentText: (text) => {
     retryPresentations.push(text);
@@ -224,6 +257,7 @@ for (const input of ['init', 'docChanged', 'reload', 'revision-response'] as con
   const failures: unknown[] = [];
   const presentations: string[] = [];
   const session = createDocumentSessionWebviewAdapter({
+    pageId,
     postMessage(message) {
       messages.push(message);
       if (message.type === 'requestDocumentRevision') {
@@ -272,6 +306,331 @@ for (const input of ['init', 'docChanged', 'reload', 'revision-response'] as con
   assert.equal(messages.length, beforeSavedEcho, `${input}: the saved Revision must remain clean`);
   assert.deepEqual(failures, [], `${input}: CRLF save confirmation must succeed`);
   session.dispose();
+}
+
+// Teardown cannot wait for the session's microtask/remote-operation queue.
+// Preserve the newest queued local input synchronously, without inventing a
+// draft for a clean editor or allowing older work to clear that final receipt.
+for (const pending of [false, true]) {
+  const messages: WebviewToHostMessage[] = [], failures: unknown[] = [];
+  const closing = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => { messages.push(message); }, presentText() {}, restoreReloadedView() {},
+    showNotice: notice => { failures.push(notice); }, reportUnexpectedError: (_, error) => { failures.push(error); }
+  });
+  closing.start(init); await closing.whenIdle();
+  if (pending) { closing.localDraftChanged('one intermediate'); closing.localDraftChanged('one final input'); }
+  closing.dispose();
+  const recovery = messages.filter(message => message.type === 'draftChanged');
+  assert.deepEqual(recovery.map(message => message.text), pending ? ['one final input'] : [], 'Close must preserve only the newest queued local input before returning');
+  const count = messages.length;
+  await closing.whenIdle();
+  assert.equal(messages.length, count, 'Older queued work must not publish after close');
+  assert.deepEqual(failures, []);
+}
+
+// Starting the adapter task only schedules runtime.handle. Close at every
+// small microtask boundary must retain each input until coordinator.handle has
+// accepted it. If ordinary recovery already posted, teardown sends one
+// full terminal retry with the same receipt rather than inventing a new edit.
+for (const microtasksBeforeClose of [0, 1, 2, 3, 4, 5, 6]) {
+  const messages: WebviewToHostMessage[] = [], failures: unknown[] = [];
+  const closing = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => { messages.push(message); }, presentText() {}, restoreReloadedView() {},
+    showNotice: notice => { failures.push(notice); }, reportUnexpectedError: (_, error) => { failures.push(error); }
+  });
+  closing.start(init); await closing.whenIdle();
+  closing.localDraftChanged('one final at a microtask boundary');
+  for (let index = 0; index < microtasksBeforeClose; index += 1) await Promise.resolve();
+  closing.dispose();
+  const recovery = messages.filter(message => message.type === 'draftChanged');
+  assert.ok(recovery.every(message => message.text === 'one final at a microtask boundary'),
+    `close after ${microtasksBeforeClose} microtasks must preserve only the latest local recovery text`);
+  assert.equal(recovery.filter(message => message.terminal === true).length, 1,
+    `close after ${microtasksBeforeClose} microtasks must emit exactly one terminal recovery snapshot`);
+  await closing.whenIdle();
+  assert.equal(messages.filter(message => message.type === 'draftChanged').length, recovery.length,
+    `close after ${microtasksBeforeClose} microtasks must not publish after terminal handoff`);
+  assert.deepEqual(failures, []);
+}
+
+// Init establishes the coordinator synchronously, so the documented
+// start -> local -> close order is recoverable even without a microtask turn.
+for (const closeImmediately of [false, true]) {
+  const messages: WebviewToHostMessage[] = [];
+  const sameStack = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => { messages.push(message); }, presentText() {}, restoreReloadedView() {}, showNotice() {},
+    reportUnexpectedError: (context, error) => { throw new Error(`${context}: ${String(error)}`); }
+  });
+  sameStack.start(init);
+  sameStack.localDraftChanged('same stack final input');
+  sameStack.dispose();
+  assert.deepEqual(messages.filter(message => message.type === 'draftChanged'), [{
+    type: 'draftChanged', pageId, text: 'same stack final input', baseVersion: 1, terminal: true, receiptVersion: 1
+  }]);
+}
+
+{
+  const messages: WebviewToHostMessage[] = [], failures: unknown[] = [];
+  const closing = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => { messages.push(message); }, presentText() {}, restoreReloadedView() {},
+    showNotice: notice => { failures.push(notice); }, reportUnexpectedError: (_, error) => { failures.push(error); }
+  });
+  closing.start(init); await closing.whenIdle();
+  closing.localDraftChanged('one earlier'); await closing.whenIdle();
+  closing.accept({ type: 'applied', version: 2 }); await closing.whenIdle();
+  closing.requestSave();
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  const save = messages.find(message => message.type === 'saveDocumentRevision');
+  assert.ok(save?.type === 'saveDocumentRevision', 'Establish an in-flight save before final input');
+  closing.localDraftChanged('one final input');
+  closing.dispose();
+  const recovery = messages.filter(message => message.type === 'draftChanged');
+  assert.equal(recovery.at(-1)?.text, 'one final input', 'Closing recovery must not wait for the earlier save response');
+  const count = messages.length;
+  closing.accept({ type: 'saveDocumentRevisionResult', requestId: save.requestId,
+    result: { ok: true, value: { revision: { version: 2, text: 'one earlier' } } } });
+  await closing.whenIdle();
+  assert.equal(messages.length, count, 'A late save response must not clear final recovery');
+  assert.deepEqual(failures, []);
+}
+
+// When a remote save holds the ordinary queue, closing still has to fold every
+// later accepted Session input in transport order.  Keeping only the newest
+// local string would overwrite the Host revision with stale text.
+for (const order of ['local-then-host', 'host-then-local'] as const) {
+  const messages: WebviewToHostMessage[] = [], failures: unknown[] = [];
+  const closing = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => { messages.push(message); }, presentText() {}, restoreReloadedView() {},
+    showNotice: notice => { failures.push(notice); }, reportUnexpectedError: (_, error) => { failures.push(error); }
+  });
+  closing.start(init); await closing.whenIdle();
+  closing.localDraftChanged('one earlier'); await closing.whenIdle();
+  closing.accept({ type: 'applied', version: 2 }); await closing.whenIdle();
+  closing.requestSave();
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  assert.ok(messages.some(message => message.type === 'saveDocumentRevision'),
+    `${order}: establish an in-flight save before queued state inputs`);
+
+  const host = () => closing.accept({ type: 'docChanged', version: 3, text: 'One earlier' });
+  const local = () => closing.localDraftChanged(
+    order === 'local-then-host' ? 'one earlier local' : 'One earlier local'
+  );
+  if (order === 'local-then-host') { local(); host(); }
+  else { host(); local(); }
+  closing.dispose();
+
+  const recovery = messages.filter(message => message.type === 'draftChanged');
+  assert.equal(recovery.at(-1)?.text, 'One earlier local',
+    `${order}: close recovery must match the ordered coordinator result`);
+  assert.equal(recovery.at(-1)?.receiptVersion, 4,
+    `${order}: Host and local receipts must both be consumed in order before recovery`);
+  assert.deepEqual(failures, [], `${order}: closing handoff must not report an error`);
+}
+
+// A Host revision may be accepted before it can be presented while a real
+// CodeMirror edit still describes the previous editor text. Both the normal
+// queue and close handoff must rebase that edit instead of replacing Host text.
+for (const closeImmediately of [false, true]) {
+  const messages: WebviewToHostMessage[] = [], failures: unknown[] = [];
+  const session = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => { messages.push(message); }, presentText() {}, restoreReloadedView() {},
+    showNotice: notice => { failures.push(notice); }, reportUnexpectedError: (_, error) => { failures.push(error); }
+  });
+  session.start({ ...init, text: 'abc', savedRevision: { version: 1, text: 'abc' } });
+  session.requestSave();
+  for (let index = 0; index < 12; index += 1) await Promise.resolve();
+  const save = messages.find(message => message.type === 'saveDocumentRevision');
+  assert.ok(save?.type === 'saveDocumentRevision');
+  const before = documentSnapshotFromString('abc');
+  const after = before.replace(3, 3, '!');
+  const edit: DocumentTextEdit = {
+    before, after, changes: [{ from: 3, to: 3, insert: '!' }],
+    compose: () => { throw new Error('not used'); }, invert: () => { throw new Error('not used'); }
+  };
+  session.accept({ type: 'docChanged', version: 2, text: 'Abc' });
+  session.localDraftChanged(edit);
+  if (closeImmediately) {
+    session.dispose();
+  } else {
+    session.accept({ type: 'saveDocumentRevisionResult', requestId: save.requestId,
+      result: { ok: true, value: { revision: { version: 1, text: 'abc' } } } });
+    await session.whenIdle();
+  }
+  const recovery = messages.filter(message => message.type === 'draftChanged').at(-1);
+  assert.deepEqual(recovery, {
+    type: 'draftChanged', pageId, text: 'Abc!', baseVersion: 2,
+    ...(closeImmediately ? { terminal: true } : {}), receiptVersion: 2
+  }, `Host-first stale edit must rebase in ${closeImmediately ? 'close' : 'normal'} queue`);
+  if (!closeImmediately) {
+    assert.ok(messages.some(message => message.type === 'applyChanges'
+      && message.baseVersion === 2 && message.changes[0]?.insert === '!'));
+  }
+  assert.deepEqual(failures, []);
+}
+
+// A true overlap is never recovered by replacing the newer Host document.
+// The final receipt carries terminal conflict context for the real Host
+// receiver, which preserves a conflict copy containing all three texts.
+for (const closeImmediately of [false, true]) {
+  const messages: WebviewToHostMessage[] = [], failures: unknown[] = [], copies: string[] = [];
+  let applied = false;
+  const recovery = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: 2, text: 'ayc' }),
+    applyDraft: async () => { applied = true; return true; },
+    preserveConflict: async copy => { copies.push(copy); return true; }
+  });
+  const receiver = createDraftRecoveryReceiver(recovery, () => { throw new Error('complete conflict receipt expected'); });
+  const session = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => {
+      messages.push(message);
+      if (message.type === 'draftChanged' || message.type === 'draftPatched') receiver.accept(message);
+    },
+    presentText() {}, restoreReloadedView() {}, showNotice: notice => { failures.push(notice); },
+    reportUnexpectedError: (_, error) => { failures.push(error); }
+  });
+  session.start({ ...init, text: 'abc', savedRevision: { version: 1, text: 'abc' } });
+  session.requestSave();
+  for (let index = 0; index < 12; index += 1) await Promise.resolve();
+  const save = messages.find(message => message.type === 'saveDocumentRevision');
+  assert.ok(save?.type === 'saveDocumentRevision');
+  const before = documentSnapshotFromString('abc');
+  const after = before.replace(1, 2, 'x');
+  const edit: DocumentTextEdit = {
+    before, after, changes: [{ from: 1, to: 2, insert: 'x' }],
+    compose: () => { throw new Error('not used'); }, invert: () => { throw new Error('not used'); }
+  };
+  session.localDraftChanged(edit);
+  session.accept({ type: 'docChanged', version: 2, text: 'ayc' });
+  if (closeImmediately) {
+    session.dispose();
+  } else {
+    session.accept({ type: 'saveDocumentRevisionResult', requestId: save.requestId,
+      result: { ok: true, value: { revision: { version: 1, text: 'abc' } } } });
+    await session.whenIdle();
+  }
+  const conflict = messages.filter(message => message.type === 'draftChanged').at(-1);
+  assert.deepEqual(conflict, {
+    type: 'draftChanged', pageId, text: 'axc', baseVersion: 1, conflictBaseText: 'abc',
+    ...(closeImmediately ? { terminal: true } : {}), receiptVersion: 2
+  }, `overlap must preserve terminal conflict context in ${closeImmediately ? 'close' : 'normal'} queue`);
+  assert.equal(await recovery.recover(), true);
+  assert.equal(applied, false, 'conflict recovery must not write over Host ayc');
+  assert.match(copies.at(-1) ?? '', /axc/);
+  assert.match(copies.at(-1) ?? '', /abc/);
+  assert.match(copies.at(-1) ?? '', /ayc/);
+  assert.deepEqual(failures, closeImmediately ? [] : ['external-conflict']);
+}
+
+// Normal recovery checkpoints remain compact, but the one beforeunload
+// handoff is deliberately a complete terminal snapshot so it can survive more
+// than one iframe replacement without an old patch checkpoint.
+{
+  const base = 'large close checkpoint\n'.repeat(14_000);
+  const checkpoint = base + 'saved checkpoint';
+  const finalText = checkpoint + '!';
+  let recovered = '';
+  let hostRevision = { version: 2, text: checkpoint };
+  const recovery = createPendingDraftRecovery({
+    readCurrentRevision: () => hostRevision,
+    applyDraft: async (_expected, text) => {
+      recovered = text;
+      hostRevision = { version: hostRevision.version + 1, text };
+      return true;
+    },
+    preserveConflict: async () => false
+  });
+  const receiver = createDraftRecoveryReceiver(recovery, () => {
+    throw new Error('The close handoff must have a usable checkpoint');
+  });
+  const messages: WebviewToHostMessage[] = [], failures: unknown[] = [];
+  const closing = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => {
+      messages.push(message);
+      if (message.type === 'draftChanged' || message.type === 'draftPatched') receiver.accept(message);
+    },
+    presentText() {}, restoreReloadedView() {}, showNotice: notice => { failures.push(notice); },
+    reportUnexpectedError: (_, error) => { failures.push(error); }
+  });
+  closing.start({ ...init, text: base, savedRevision: { version: 1, text: base } });
+  await closing.whenIdle();
+  closing.localDraftChanged(checkpoint); await closing.whenIdle();
+  closing.accept({ type: 'applied', version: 2 }); await closing.whenIdle();
+  closing.requestSave();
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  const save = messages.find(message => message.type === 'saveDocumentRevision');
+  assert.ok(save?.type === 'saveDocumentRevision', 'large close needs an in-flight save');
+  const before = documentSnapshotFromString(checkpoint);
+  const after = before.replace(before.length, before.length, '!');
+  const finalEdit: DocumentTextEdit = {
+    before,
+    after,
+    changes: [{ from: before.length, to: before.length, insert: '!' }],
+    compose: () => { throw new Error('not used by this adapter boundary test'); },
+    invert: () => { throw new Error('not used by this adapter boundary test'); }
+  };
+  closing.localDraftChanged(finalEdit);
+  closing.dispose();
+  const finalRecovery = messages.at(-1);
+  assert.equal(finalRecovery?.type, 'draftChanged',
+    'a large pending close edit must be independently recoverable after page replacement');
+  assert.equal(finalRecovery?.terminal, true);
+  assert.equal(finalRecovery?.text, finalText);
+  assert.ok(typeof finalRecovery?.text === 'string' && finalRecovery.text.length > 262_144,
+    'the one terminal close snapshot intentionally materializes the full pending document');
+  assert.equal(messages.filter(message => message.type === 'draftChanged' && message.terminal === true).length, 1,
+    'beforeunload materializes one full terminal transfer, not one per queued/late action');
+  const count = messages.length;
+  closing.accept({ type: 'saveDocumentRevisionResult', requestId: save.requestId,
+    result: { ok: true, value: { revision: { version: 2, text: checkpoint } } } });
+  await closing.whenIdle();
+  assert.equal(messages.length, count, 'late save completion must not clear terminal close recovery');
+  assert.equal(await recovery.recover(), true, 'the Host receiver must apply the terminal close snapshot');
+  assert.equal(recovered, finalText);
+  assert.deepEqual(failures, []);
+}
+
+{
+  const messages: WebviewToHostMessage[] = [], failures: string[] = [];
+  const closing = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => { messages.push(message); }, presentText() {}, restoreReloadedView() {}, showNotice() {},
+    reportUnexpectedError: context => { failures.push(context); }
+  });
+  closing.localDraftChanged('rejected before initialization'); await closing.whenIdle();
+  assert.deepEqual(failures, ['local draft']);
+  closing.start(init); await closing.whenIdle(); closing.dispose();
+  assert.deepEqual(messages, [], 'A rejected earlier input must not turn a newly initialized clean document into a recovery draft');
+}
+
+// Even when the latest ordinary recovery was already posted, beforeunload
+// emits one complete terminal retry for bridge-in-flight delivery. Repeated
+// disposal must not rematerialize it again.
+{
+  const messages: WebviewToHostMessage[] = [];
+  const closing = createDocumentSessionWebviewAdapter({
+    pageId,
+    postMessage: message => { messages.push(message); }, presentText() {}, restoreReloadedView() {},
+    showNotice() {}, reportUnexpectedError: (_context, error) => { throw error; }
+  });
+  closing.start(init);
+  closing.localDraftChanged('already posted local draft');
+  await closing.whenIdle();
+  const ordinary = messages.find(message => message.type === 'draftChanged' && message.text === 'already posted local draft');
+  assert.equal(ordinary?.terminal, undefined);
+  closing.dispose();
+  closing.dispose();
+  const terminal = messages.filter(message => message.type === 'draftChanged' && message.terminal === true);
+  assert.deepEqual(terminal, [{
+    type: 'draftChanged', pageId, text: 'already posted local draft', baseVersion: 1, terminal: true, receiptVersion: 1
+  }], 'teardown emits one full terminal retry and repeated dispose does not duplicate it');
 }
 
 console.log('Document Session Webview Adapter checks passed');

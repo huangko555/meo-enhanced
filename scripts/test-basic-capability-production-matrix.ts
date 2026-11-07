@@ -13,7 +13,7 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-basic-capability-index-'
 const target = 'format target';
 const actions = historyFormatCases(target);
 
-const init = (text: string, mode: 'live' | 'source' | 'preview', sourceLineNumbers: SourceLineNumberMode = 'on') => ({ type: 'init', documentId: `file:///basic-${mode}.md`, text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'en', sourceLineNumbers, previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null });
+const init = (pageId: string, text: string, mode: 'live' | 'source' | 'preview', sourceLineNumbers: SourceLineNumberMode = 'on') => ({ type: 'init', pageId, documentId: `file:///basic-${mode}.md`, text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'en', sourceLineNumbers, previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'light', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null });
 
 async function open(browser: Browser, text: string, mode: 'live' | 'source' | 'preview', sourceLineNumbers: SourceLineNumberMode = 'on', observeStartup = false, persistedMode?: 'live' | 'source' | 'preview', stallPreviewPaint = false): Promise<Page> {
   const page = await browser.newPage();
@@ -37,6 +37,7 @@ async function open(browser: Browser, text: string, mode: 'live' | 'source' | 'p
     window.acquireVsCodeApi=()=>({
       postMessage(m) {
         window.__hostMessages.push(m);
+        if (m.type === 'ready') window.__hostPageId = m.pageId;
         if(m.type !== 'requestPreviewRender') return;
         const html='<p>'+String(m.text).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</p>';
         queueMicrotask(()=>window.dispatchEvent(new MessageEvent('message',{data:{
@@ -48,6 +49,8 @@ async function open(browser: Browser, text: string, mode: 'live' | 'source' | 'p
     });
   ` });
   await page.addScriptTag({ path: path.join(temp, 'bundle.js') });
+  await page.waitForFunction(() => typeof (window as any).__hostPageId === 'string');
+  const pageId = await page.evaluate(() => (window as any).__hostPageId as string);
   if (observeStartup) {
     await page.evaluate(() => {
       (window as any).__startupFrames = [];
@@ -67,7 +70,7 @@ async function open(browser: Browser, text: string, mode: 'live' | 'source' | 'p
       requestAnimationFrame(sample);
     });
   }
-  await page.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), init(text, mode, sourceLineNumbers));
+  await page.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), init(pageId, text, mode, sourceLineNumbers));
   await page.waitForSelector('.editor-host > .cm-editor');
   await page.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell)');
   if (mode !== 'preview') {
@@ -635,5 +638,29 @@ async function reopenedPreviewMode(browser: Browser): Promise<void> {
     await page.close();
   }
 }
-async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { if (process.argv.includes('--history-only')) { await matrix(browser); } else { await startupModeVisibility(browser); await reopenedPreviewMode(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await resolveMergeConflicts(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await headingWeightPreference(browser); await largeDocumentStartupPreference(browser); } } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
+async function pendingTableUnload(browser: Browser): Promise<void> {
+  for (const large of [false, true]) for (const edited of [false, true]) {
+    const text = '# Unload fixture\n\n| Name | Value |\n| --- | --- |\n| Alpha | base |\n' + (large ? '\nPadding.\n'.repeat(8100) : '');
+    const page = await open(browser, text, 'live');
+    try {
+      const selector = 'tbody textarea[data-table-row="1"][data-table-col="1"]';
+      if (edited) {
+        await page.click(selector);
+        await page.keyboard.down('Control'); await page.keyboard.press('a'); await page.keyboard.up('Control');
+        await page.keyboard.sendCharacter('pending-cell-value');
+        assert.equal(await page.$eval(selector, input => (input as HTMLTextAreaElement).value), 'pending-cell-value');
+      }
+      assert.deepEqual(await drafts(page), [], 'The fixture must reach unload with unsubmitted native input');
+      await page.evaluate(() => window.dispatchEvent(new Event('beforeunload')));
+      const recovery = await page.evaluate(() => (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged'));
+      assert.deepEqual(recovery.map((message: any) => message.text), edited ? [text.replace('| Alpha | base |', '| Alpha | pending-cell-value |')] : [],
+        'Unload must synchronously preserve pending input and leave an unedited document clean');
+      await page.evaluate(() => window.dispatchEvent(new Event('beforeunload')));
+      assert.equal(await page.evaluate(() => (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').length), recovery.length,
+        'Repeated teardown must not publish another recovery receipt');
+    } finally { await page.close(); }
+  }
+}
+
+async function main() { const build = await Bun.build({ entrypoints: [path.join(root, 'scripts', 'test-basic-capability-index-entry.ts')], outdir: temp, target: 'browser', format: 'iife', naming: 'bundle.js' }); if (!build.success) throw new Error(build.logs.map(String).join('\n')); const browser = await launchTestBrowser(); try { if (process.argv.includes('--unload-only')) { await pendingTableUnload(browser); } else if (process.argv.includes('--history-only')) { await matrix(browser); } else { await pendingTableUnload(browser); await startupModeVisibility(browser); await reopenedPreviewMode(browser); await blockquotePressLayout(browser); await alertPressLayout(browser); await blockquoteEnterFirstFrame(browser); await matrix(browser); await resolveMergeConflicts(browser); await preview(browser); await alerts(browser); await sourceLineNumberPreference(browser); await headingWeightPreference(browser); await largeDocumentStartupPreference(browser); } } finally { await browser.close(); } console.log('Basic capability production matrix passed'); }
 main().finally(() => fs.rmSync(temp, { recursive: true, force: true })).catch((e) => { console.error(e instanceof Error ? e.stack : e); process.exitCode = 1; });

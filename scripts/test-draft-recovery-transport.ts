@@ -6,17 +6,21 @@ import { decodeHostToWebviewMessage, decodeWebviewToHostMessage } from '../src/p
 import type { InitMessage } from '../src/protocol/readyInit';
 import type { DraftRecoveryMessage } from '../src/protocol/documentSync';
 
+const pageId = 'page_draft_transport';
 const initial = 'base 😀\n'.repeat(40_000);
 let recovered = '';
+let recoveryVersion = 1;
 const recovery = createPendingDraftRecovery({
-  readCurrentText: () => initial,
-  applyDraft: async (_base, text) => { recovered = text; return true; }
+  readCurrentRevision: () => ({ version: recoveryVersion, text: initial }),
+  applyDraft: async (_base, text) => { recovered = text; return true; },
+  preserveConflict: async () => false
 });
 let requested = 0;
 const receiver = createDraftRecoveryReceiver(recovery, () => { requested += 1; });
 const messages: DraftRecoveryMessage[] = [];
 let dropPatch = false;
 const adapter = createDocumentSessionWebviewAdapter({
+  pageId,
   postMessage: raw => {
     const message = decodeWebviewToHostMessage(raw);
     assert.ok(message, 'production encoder output must pass the Protocol decoder');
@@ -30,7 +34,7 @@ const adapter = createDocumentSessionWebviewAdapter({
   showNotice: notice => { throw new Error(notice); },
   reportUnexpectedError: (_context, error) => { throw error; }
 });
-adapter.start({ type: 'init', documentId: 'file:///recovery.md', text: initial, version: 1,
+adapter.start({ type: 'init', pageId, documentId: 'file:///recovery.md', text: initial, version: 1,
   savedRevision: { version: 1, text: initial } } as InitMessage);
 let latest = initial + 'one';
 adapter.localDraftChanged(latest);
@@ -45,8 +49,13 @@ for (const suffix of ['😀', '😁', '\nsecond\n', '', 'replacement']) {
   if (latest !== initial) assert.equal(recovered, latest);
 }
 assert.ok(messages.some(message => message.type === 'draftPatched'));
+const normalCompactPatch = messages.find(message => message.type === 'draftPatched');
+assert.ok(normalCompactPatch && !('terminal' in normalCompactPatch), 'ordinary large recovery traffic is never terminal');
+assert.ok(JSON.stringify(normalCompactPatch).length < initial.length / 100,
+  'ordinary large recovery keeps its compact patch transfer budget; only beforeunload materializes a full terminal snapshot');
 adapter.accept({ type: 'applied', version: 2 });
 await adapter.whenIdle();
+recoveryVersion = 2;
 assert.equal(await recovery.recover(), true, 'an acknowledgement of an older edit must retain the newer pending draft');
 assert.equal(recovered, latest);
 
@@ -62,35 +71,36 @@ adapter.localDraftChanged(latest);
 await adapter.whenIdle();
 assert.equal(requested, 1);
 assert.equal(await recovery.recover(), false);
-const request = decodeHostToWebviewMessage({ type: 'requestDraftRecoverySnapshot' });
+const request = decodeHostToWebviewMessage({ type: 'requestDraftRecoverySnapshot', pageId });
 assert.ok(request);
 assert.equal(adapter.accept(request), true);
 await adapter.whenIdle();
 assert.equal(messages.at(-1)?.type, 'draftChanged');
 assert.equal(await recovery.recover(), true);
 assert.equal(recovered, latest);
+recoveryVersion = 1;
 const latestReceipt = messages.at(-1)!.receiptVersion;
 receiver.accept(messages[0]!);
 assert.equal(await recovery.recover(), false, 'stale snapshots must not revive a recovered draft');
 
-receiver.accept({ type: 'draftPatched', baseReceiptVersion: latestReceipt,
-  receiptVersion: latestReceipt + 1, change: { from: 0, to: latest.length + 1, insert: 'bad' } });
+receiver.accept({ type: 'draftPatched', pageId, baseReceiptVersion: latestReceipt,
+  baseVersion: 1, receiptVersion: latestReceipt + 1, change: { from: 0, to: latest.length + 1, insert: 'bad' } });
 await Promise.resolve();
 assert.equal(requested, 2);
 assert.equal(await recovery.recover(), false, 'out-of-bounds patches must never change recovery');
-receiver.accept({ type: 'draftChanged', text: latest, receiptVersion: latestReceipt + 1 });
+receiver.accept({ type: 'draftChanged', pageId, text: latest, baseVersion: 1, receiptVersion: latestReceipt + 1 });
 assert.equal(recovery.discardIfCurrent(latestReceipt), false);
 assert.equal(recovery.discardIfCurrent(latestReceipt + 1), true);
 assert.equal(await recovery.recover(), false);
-receiver.accept({ type: 'draftPatched', baseReceiptVersion: latestReceipt + 1,
-  receiptVersion: latestReceipt + 2, change: { from: latest.length, to: latest.length, insert: ' after discard' } });
+receiver.accept({ type: 'draftPatched', pageId, baseReceiptVersion: latestReceipt + 1,
+  baseVersion: 1, receiptVersion: latestReceipt + 2, change: { from: latest.length, to: latest.length, insert: ' after discard' } });
 assert.equal(await recovery.recover(), true, 'discarding recovery must not discard its transport checkpoint');
 assert.equal(recovered, latest + ' after discard');
 
-const valid = { type: 'draftPatched', baseReceiptVersion: 1, receiptVersion: 2,
+const valid = { type: 'draftPatched', pageId, baseVersion: 1, baseReceiptVersion: 1, receiptVersion: 2,
   change: { from: 0, to: 1, insert: '😁' } } as const;
 assert.deepEqual(decodeWebviewToHostMessage(valid), valid);
-const batch = { type: 'draftPatched', baseReceiptVersion: latestReceipt + 2, receiptVersion: latestReceipt + 3,
+const batch = { type: 'draftPatched', pageId, baseVersion: 1, baseReceiptVersion: latestReceipt + 2, receiptVersion: latestReceipt + 3,
   changes: [{ from: 0, to: 2, insert: '中文' }, { from: 10, to: 10, insert: '😀\n' }] } as const;
 assert.deepEqual(decodeWebviewToHostMessage(batch), batch);
 receiver.accept(batch);

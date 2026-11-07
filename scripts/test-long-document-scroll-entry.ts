@@ -1,3 +1,4 @@
+import './browser-page-identity-test-helpers';
 import '../webview/src/index';
 import { EditorView } from '@codemirror/view';
 import { isolateHistory, redo, undo } from '@codemirror/commands';

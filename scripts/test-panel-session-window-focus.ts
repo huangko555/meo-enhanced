@@ -40,13 +40,14 @@ const createController = () => createPanelSessionController(createPanelSessionCo
   panel,
   document,
   pendingDraftRecovery: createPendingDraftRecovery({
-    readCurrentText: () => document.text,
-    applyDraft: async () => true
+    readCurrentRevision: () => ({ version: document.version, text: document.text }),
+    applyDraft: async () => true,
+    preserveConflict: async () => false
   }),
   readDiskText: () => document.text
 }) as never);
 const controller = createController();
-await controller.handleMessage({ type: 'ready' });
+await controller.handleMessage({ type: 'ready', pageId: 'window-focus-page-1' });
 assert.ok(messages.some(message => message.type === 'hostWindowFocusChanged' && message.focused === true),
   'initial delivery must describe actual Host focus independently of frame focus');
 assert.ok(onWindowState, 'panel session did not subscribe to VS Code window focus changes');
@@ -86,7 +87,7 @@ controller.dispose();
 windowState.focused = false;
 messages.length = 0;
 const initiallyUnfocusedController = createController();
-await initiallyUnfocusedController.handleMessage({ type: 'ready' });
+await initiallyUnfocusedController.handleMessage({ type: 'ready', pageId: 'window-focus-page-2' });
 await emitWindowState(false, false);
 assert.equal(countFocusMessages(), 0);
 await emitWindowState(true, false);

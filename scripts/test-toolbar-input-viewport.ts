@@ -12,8 +12,9 @@ const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-toolbar-input-viewport-'));
 const text = Array.from({ length: 40 }, (_, index) => `line ${index + 1} ordinary content`).join('\n');
 
-const init = (mode: 'live' | 'source', documentText = text) => ({
+const init = (pageId: string, mode: 'live' | 'source', documentText = text) => ({
   type: 'init',
+  pageId,
   documentId: `file:///toolbar-input-${mode}.md`,
   text: documentText,
   version: 1,
@@ -49,7 +50,7 @@ async function open(browser: Browser, mode: 'live' | 'source', documentText = te
   await page.addScriptTag({ content: `
     window.__hostMessages=[];
     window.acquireVsCodeApi=()=>({
-      postMessage(message){window.__hostMessages.push(message)},
+      postMessage(message){window.__hostMessages.push(message);if(message.type==='ready')window.__hostPageId=message.pageId},
       getState(){return undefined},
       setState(){}
     });
@@ -60,9 +61,11 @@ async function open(browser: Browser, mode: 'live' | 'source', documentText = te
     } };
   });
   await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+  await page.waitForFunction(() => typeof (window as any).__hostPageId === 'string');
+  const pageId = await page.evaluate(() => (window as any).__hostPageId as string);
   await page.evaluate((message) => {
     window.dispatchEvent(new MessageEvent('message', { data: message }));
-  }, init(mode, documentText));
+  }, init(pageId, mode, documentText));
   await page.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell) .cm-content');
     await page.waitForFunction(() => !document.querySelector<HTMLElement>('.editor-host')!.inert
       && document.querySelector<HTMLElement>('.editor-loading')?.hidden !== false);
@@ -1018,7 +1021,7 @@ async function runWorkbenchMenuFocus(browser: Browser, mode: 'live' | 'source', 
     const content = page.frames().find((frame) => frame.parentFrame() === shell)!;
     await content.setContent('<style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"></div>');
     await content.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
-    await content.addScriptTag({ content: 'window.__hostMessages=[];window.acquireVsCodeApi=()=>({postMessage(message){window.__hostMessages.push(message)},getState(){},setState(){}})' });
+    await content.addScriptTag({ content: 'window.__hostMessages=[];window.acquireVsCodeApi=()=>({postMessage(message){window.__hostMessages.push(message);if(message.type===\'ready\')window.__hostPageId=message.pageId},getState(){},setState(){}})' });
     if (loading) await content.evaluate(() => {
       // Let the real editor mount, then hold its preparation frames until the
       // loading cover is visible and focus has moved to the Workbench menu.
@@ -1042,7 +1045,9 @@ async function runWorkbenchMenuFocus(browser: Browser, mode: 'live' | 'source', 
       };
     });
     await content.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
-    await content.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), init(mode, 'alpha\nbeta'));
+    await content.waitForFunction(() => typeof (window as any).__hostPageId === 'string');
+    const pageId = await content.evaluate(() => (window as any).__hostPageId as string);
+    await content.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), init(pageId, mode, 'alpha\nbeta'));
     await content.waitForSelector('.cm-content');
     await content.waitForFunction(loading => loading
       ? document.querySelector<HTMLElement>('.editor-loading')?.hidden === false && document.querySelector<HTMLElement>('.editor-host')?.inert

@@ -68,7 +68,7 @@ try {
         restoreReadingPositionOnOpen: false, vscodeTheme: null
       };
       await page.exposeFunction('__hostMessage', (message: any) => {
-        if (message.type === 'ready') return init;
+        if (message.type === 'ready') return { ...init, pageId: message.pageId };
         if (message.type !== 'requestPreviewRender') return null;
         return {
           type: 'previewRenderResult', requestId: message.requestId,

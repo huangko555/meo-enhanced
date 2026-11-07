@@ -15,9 +15,10 @@ try {
     await page.addStyleTag({ path: 'webview/src/styles.css' });
     await page.addStyleTag({ content: ':root{--vscode-editor-font-size:15px;--vscode-editor-font-family:monospace;--vscode-font-family:Arial}' });
     await page.evaluate(() => {
-      const state = (window as any).__localLinks = { exists: false, hold: false, pending: [] as any[], messages: [] as any[] };
+      const state = (window as any).__localLinks = { exists: false, hold: false, pending: [] as any[], messages: [] as any[], pageId: '' };
       (window as any).acquireVsCodeApi = () => ({ getState() {}, setState() {}, postMessage(message: any) {
         state.messages.push(message);
+        if (message.type === 'ready') state.pageId = message.pageId;
         if (message.type !== 'resolveLocalLinks') return;
         const response = { type: 'resolvedLocalLinks', requestId: message.requestId,
           result: { ok: true, value: { results: message.targets.map((target: string) => ({ target, exists: state.exists })) } } };
@@ -26,11 +27,12 @@ try {
       } });
     });
     await page.addScriptTag({ content: bundle });
+    await page.waitForFunction(() => typeof (window as any).__localLinks.pageId === 'string' && (window as any).__localLinks.pageId.length > 0);
     const target = '文件夹/文档 file.md';
     const text = `caret\n\n[正文](<${target}>)\n\n| title |\n| --- |\n| [表格](<${target}>) |\n`;
-    await page.evaluate(({ text, uiLanguage, appearance }) => {
+    await page.evaluate(({ text, uiLanguage, appearance, pageId }) => {
       window.dispatchEvent(new MessageEvent('message', { data: {
-        type: 'init', documentId: 'file:///local-links/current.md', text, version: 1, savedRevision: { version: 1, text },
+        type: 'init', pageId, documentId: 'file:///local-links/current.md', text, version: 1, savedRevision: { version: 1, text },
         diagnostics: [], mode: 'live', uiLanguage, sourceLineNumbers: 'on', previewAppearance: appearance,
         previewFontFamily: '', previewSourceColoring: true, editorAppearance: appearance,
         editorFontSizeMode: 'auto', editorFontSize: 15, gitChangesGutter: false, gitDiffLineHighlights: false,
@@ -38,7 +40,7 @@ try {
         contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false },
         outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null
       } }));
-    }, { text, uiLanguage, appearance });
+    }, { text, uiLanguage, appearance, pageId: await page.evaluate(() => (window as any).__localLinks.pageId as string) });
     await page.waitForFunction(() => document.querySelectorAll('.meo-md-local-link-missing-icon').length === 2);
     assert.deepEqual(await page.evaluate(() => (window as any).__localLinks.messages.find((message: any) => message.type === 'resolveLocalLinks').targets), [target],
       'angle brackets and spaces must produce one shared target for prose and tables');

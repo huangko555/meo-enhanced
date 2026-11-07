@@ -1,4 +1,5 @@
 import { EditorView } from '@codemirror/view';
+import './browser-page-identity-test-helpers';
 import '../webview/src/index';
 
 // Reach the real Source editor without adding test hooks to the product.

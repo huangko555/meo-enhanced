@@ -1,3 +1,4 @@
+import './browser-page-identity-test-helpers';
 import '../webview/src/index';
 import { createPreviewSearchController, previewSearchStyles } from '../webview/src/helpers/previewSearch';
 

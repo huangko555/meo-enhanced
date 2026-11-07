@@ -2493,6 +2493,11 @@ const scheduleEditorBundleWarmupAfterReady = () => {
 };
 
 const READY_RETRY_DELAYS_MS = [120, 300, 700, 1300] as const;
+// This value is created once per iframe evaluation. It distinguishes a ready
+// retransmission from Developer: Reload Webviews, whose Host panel survives.
+const webviewPageId = `page_${typeof globalThis.crypto?.randomUUID === 'function'
+  ? globalThis.crypto.randomUUID()
+  : `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`}`;
 let readyHandshakeAcknowledged = false;
 let initReceived = false;
 const readyRetryTimers = new Set<number>();
@@ -2508,7 +2513,7 @@ const postReadyMessage = () => {
   if (readyHandshakeAcknowledged) {
     return;
   }
-  vscode.postMessage({ type: 'ready' });
+  vscode.postMessage({ type: 'ready', pageId: webviewPageId });
 };
 
 const scheduleReadyHandshake = () => {
@@ -3039,6 +3044,7 @@ const saveCopyAction = (emphasis: 'primary' | 'secondary' = 'primary'): EditorNo
   }
 });
 const documentSessionAdapter = createDocumentSessionWebviewAdapter({
+  pageId: webviewPageId,
   postMessage: (message) => vscode.postMessage(message),
   presentText: presentDocumentText,
   restoreReloadedView: (message) => {
@@ -3862,6 +3868,7 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (message.type === 'init') {
+    if (message.pageId !== webviewPageId) return;
     // Host retries must not reset a mode change or an in-flight Preview render.
     if (initReceived) return;
     initReceived = true;
@@ -4246,6 +4253,9 @@ window.addEventListener('focus', () => {
 });
 
 window.addEventListener('beforeunload', () => {
+  // Accept confirmed native input while the document/recovery owners are
+  // still alive. Session disposal performs its final synchronous handoff.
+  commitEditorTransientEdits();
   readingLayout.dispose();
   previewFontsTransport.dispose();
   fontWheelAbort.abort();
@@ -4279,7 +4289,6 @@ window.addEventListener('beforeunload', () => {
     window.cancelAnimationFrame(pendingEditorSurfaceRecoveryRaf);
     pendingEditorSurfaceRecoveryRaf = null;
   }
-  commitEditorTransientEdits();
   editorModeRuntime.dispose();
   mermaidDiagramPresentationFactory.dispose();
   mermaidDiagramRenderPool.dispose();

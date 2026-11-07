@@ -27,9 +27,12 @@ export type DocumentSessionActionAdapter = {
   >;
   retryPresentation(): Promise<boolean>;
   resendDraftRecovery(): void;
+  preserveDraft(action: Extract<DocumentSessionAction, { readonly type: 'rememberDraft' }>): void;
+  preserveLatestDraft(): void;
 };
 
 export type DocumentSessionActionAdapterDependencies = {
+  readonly pageId: string;
   readonly postMessage: (message: ApplyChangesMessage | DraftRecoveryMessage) => void;
   readonly presentText: (
     text: string,
@@ -54,9 +57,15 @@ export function createDocumentSessionActionAdapter(
   // the coordinator; null recovery clears retain the last text checkpoint.
   let recoveryCheckpoint: { text: DocumentText; receiptVersion: number } | null = null;
   let latestRecovery: Extract<DocumentSessionAction, { readonly type: 'rememberDraft' }> | null = null;
-  const postRecovery = (action: NonNullable<typeof latestRecovery>, forceSnapshot = false): void => {
+  const postRecovery = (
+    action: NonNullable<typeof latestRecovery>, forceSnapshot = false, terminal = false
+  ): void => {
     let message: DraftRecoveryMessage | undefined;
-    if (!forceSnapshot && action.text !== null && action.text.length >= 262_144 && recoveryCheckpoint) {
+    if (action.text !== null && action.baseVersion === undefined) {
+      throw new Error('Draft recovery candidate is missing its Host base revision');
+    }
+    if (!forceSnapshot && !terminal && action.text !== null && action.conflictBaseText === undefined
+      && action.text.length >= 262_144 && recoveryCheckpoint) {
       const changes = action.edit && equalDocumentText(recoveryCheckpoint.text, action.edit.before)
         ? action.edit.changes
         : equalDocumentText(recoveryCheckpoint.text, action.text) ? []
@@ -64,19 +73,30 @@ export function createDocumentSessionActionAdapter(
       if (changes.reduce((size, change) => size + change.insert.length + 96, 128) < action.text.length) {
         message = {
           type: 'draftPatched',
+          pageId: dependencies.pageId,
+          baseVersion: action.baseVersion!,
           ...(changes.length <= 1 ? { change: changes[0] ?? { from: 0, to: 0, insert: '' } } : { changes }),
           baseReceiptVersion: recoveryCheckpoint.receiptVersion,
           receiptVersion: action.receiptVersion
         };
       }
     }
-    message ??= {
-      type: 'draftChanged', text: action.text === null ? null : readDocumentText(action.text),
-      receiptVersion: action.receiptVersion
-    };
-    dependencies.postMessage(message);
+    if (message === undefined) {
+      message = action.text === null
+        ? { type: 'draftChanged', pageId: dependencies.pageId, text: null, receiptVersion: action.receiptVersion }
+        : {
+            type: 'draftChanged',
+            pageId: dependencies.pageId,
+            text: readDocumentText(action.text),
+            baseVersion: action.baseVersion!,
+            ...(action.conflictBaseText !== undefined ? { conflictBaseText: readDocumentText(action.conflictBaseText) } : {}),
+            ...(terminal ? { terminal: true as const } : {}),
+            receiptVersion: action.receiptVersion
+          };
+    }
     if (action.text !== null) recoveryCheckpoint = { text: action.text, receiptVersion: action.receiptVersion };
     latestRecovery = action;
+    dependencies.postMessage(message);
   };
   const present = async (
     action: Extract<DocumentSessionAction, { readonly type: 'presentText' }>
@@ -87,6 +107,12 @@ export function createDocumentSessionActionAdapter(
     return succeeded;
   };
   return {
+    preserveDraft(action) {
+      postRecovery(action, true, true);
+    },
+    preserveLatestDraft() {
+      if (latestRecovery) postRecovery(latestRecovery, true, true);
+    },
     resendDraftRecovery() {
       if (latestRecovery) postRecovery(latestRecovery, true);
     },

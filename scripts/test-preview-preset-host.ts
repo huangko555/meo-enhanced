@@ -30,7 +30,11 @@ const params = createPanelSessionControllerParams({
     onDidChangeViewState: () => panelSessionDisposable(), onDidDispose: () => panelSessionDisposable()
   },
   document,
-  pendingDraftRecovery: createPendingDraftRecovery({ readCurrentText: () => document.text, applyDraft: async () => true }),
+  pendingDraftRecovery: createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: document.version, text: document.text }),
+    applyDraft: async () => true,
+    preserveConflict: async () => false
+  }),
   readDiskText: () => document.text,
   overrides: {
     getPreviewFonts: async (refresh: boolean) => { fontRequests.push(refresh); if (failFonts) throw new Error('unavailable'); return [{ family: 'Consolas', aliases: [] }]; },
@@ -69,7 +73,7 @@ try {
   receiveMessage!({ ...request, requestId: 'invalid', preset: 'invalid' });
   await Bun.sleep(0);
   assert.equal(messages.length, count);
-  await controller.handleMessage({ type: 'ready' });
+  await controller.handleMessage({ type: 'ready', pageId: 'preview-preset-page-1' });
   assert.equal(messages.findLast(message => message.type === 'init').previewPreset, undefined, 'An existing Webview can migrate its selection when Host memory is empty');
   assert.equal(messages.findLast(message => message.type === 'init').previewPresetPreferences, undefined);
   assert.equal(messages.findLast(message => message.type === 'init').previewCodeFontFamily, 'Georgia');
@@ -83,17 +87,17 @@ try {
   assert.equal(stored.get(PREVIEW_PRESET_STATE_KEY), 'newsprint', 'Unknown custom presets cannot become the startup default');
   const restarted = createPanelSessionController(params as never);
   try {
-    await restarted.handleMessage({ type: 'ready' });
+    await restarted.handleMessage({ type: 'ready', pageId: 'preview-preset-page-2' });
     assert.equal(messages.findLast(message => message.type === 'init').previewPreset, 'newsprint', 'A new Host session restores the last selection');
     assert.deepEqual(messages.findLast(message => message.type === 'init').previewPresetPreferences.whitey, { ...initialPreference, appearance: 'dark' }, 'Init transmits every preset preference to a new document');
     await restarted.handleMessage({ type: 'setPreviewPresetPreference', preset: 'whitey', preference: { showComments: false }, initialPreference });
-    await controller.handleMessage({ type: 'ready' });
+    await controller.handleMessage({ type: 'ready', pageId: 'preview-preset-page-1' });
     assert.equal(messages.findLast(message => message.type === 'init').previewPresetPreferences.whitey.showComments, false);
     stored.set(PREVIEW_PRESET_STATE_KEY, 'user:removed');
-    await restarted.handleMessage({ type: 'ready' });
+    await restarted.handleMessage({ type: 'ready', pageId: 'preview-preset-page-2' });
     assert.equal(messages.findLast(message => message.type === 'init').previewPreset, 'default', 'Removed presets fall back safely at startup');
     stored.set(PREVIEW_PRESET_STATE_KEY, 'whitey'); hiddenPresets = ['whitey'];
-    await restarted.handleMessage({ type: 'ready' });
+    await restarted.handleMessage({ type: 'ready', pageId: 'preview-preset-page-2' });
     assert.equal(messages.findLast(message => message.type === 'init').previewPreset, 'default', 'A hidden built-in falls back at startup');
     assert.deepEqual(messages.findLast(message => message.type === 'init').disabledPreviewPresets, ['whitey']);
     stored.set(PREVIEW_PRESET_STATE_KEY, 'default');

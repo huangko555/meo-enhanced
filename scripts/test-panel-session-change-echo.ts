@@ -48,13 +48,18 @@ for (const eol of ['\n', '\r\n']) {
   document.version = 1;
   posted.length = 0;
   let recovered = '';
-  const recovery = createPendingDraftRecovery({ readCurrentText: () => document.text,
-    applyDraft: async (_base, text) => { recovered = text; return true; } });
+  const recovery = createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: document.version, text: document.text }),
+    applyDraft: async (_base, text) => { recovered = text; return true; },
+    preserveConflict: async () => false
+  });
   const controller = createPanelSessionController(createPanelSessionControllerParams({
     panel, document, readDiskText: () => document.text,
     pendingDraftRecovery: recovery
   }) as never);
+  const pageId = `change-echo-page-${eol === '\n' ? 'lf' : 'crlf'}`;
   try {
+    await controller.handleMessage({ type: 'ready', pageId });
     for (let index = 0; index < 12; index += 1) {
       await controller.handleMessage({ type: 'applyChanges', baseVersion: document.version,
         changes: [{ from: 25, to: 25, insert: index % 2 ? '😁\n' : 'x' }] });
@@ -85,14 +90,15 @@ for (const eol of ['\n', '\r\n']) {
     assert.equal(posted.filter(message => message.type === 'applied').length, 0);
     assert.ok(posted.some(message => message.type === 'docChanged'), 'failed apply must restore a complete revision');
     failApply = false;
-    await controller.handleMessage({ type: 'draftChanged', receiptVersion: 1, text: 'full checkpoint 😀' });
-    await controller.handleMessage({ type: 'draftPatched', baseReceiptVersion: 1, receiptVersion: 2,
+    await controller.handleMessage({ type: 'draftChanged', pageId, receiptVersion: 1, baseVersion: document.version, text: 'full checkpoint 😀' });
+    await controller.handleMessage({ type: 'draftPatched', pageId, baseVersion: document.version, baseReceiptVersion: 1, receiptVersion: 2,
       change: { from: 0, to: 4, insert: 'latest' } });
     assert.equal(await recovery.recover(), true);
     assert.equal(recovered, 'latest checkpoint 😀', 'the production Host route must recover the reconstructed draft');
-    await controller.handleMessage({ type: 'draftPatched', baseReceiptVersion: 99, receiptVersion: 100,
+    await controller.handleMessage({ type: 'draftPatched', pageId, baseVersion: document.version, baseReceiptVersion: 99, receiptVersion: 100,
       change: { from: 0, to: 0, insert: 'bad' } });
     assert.equal(posted.at(-1)?.type, 'requestDraftRecoverySnapshot');
+    assert.equal(posted.at(-1)?.pageId, pageId, 'recovery requests must stay bound to the ready page');
   } finally { controller.dispose(); }
 }
 console.log('Panel local-echo budget, foreign edit, stale apply and failure checks passed (LF/CRLF)');

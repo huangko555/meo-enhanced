@@ -185,7 +185,11 @@ const panel = {
 };
 const controller = createPanelSessionController(createPanelSessionControllerParams({
   panel, document, readDiskText: () => document.text,
-  pendingDraftRecovery: createPendingDraftRecovery({ readCurrentText: () => document.text, applyDraft: async () => true }),
+  pendingDraftRecovery: createPendingDraftRecovery({
+    readCurrentRevision: () => ({ version: document.version, text: document.text }),
+    applyDraft: async () => true,
+    preserveConflict: async () => false
+  }),
   overrides: { viewNavigation }
 }) as never);
 try {

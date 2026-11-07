@@ -10,6 +10,8 @@ export type Draft = {
   readonly baseRevision: number;
   readonly text: DocumentText;
   readonly edit?: DocumentTextEdit;
+  /** A terminal external conflict keeps the original local base for recovery. */
+  readonly conflictBaseText?: DocumentText;
 };
 
 export type Change = {
@@ -94,11 +96,27 @@ export function transitionDocumentSession(
 ): DocumentSessionTransition {
   if (event.type === 'draftChanged') {
     const previousText = state.draft?.text ?? state.revision.text;
-    const localEdit = event.edit && equalDocumentText(event.edit.before, previousText)
-      && event.edit.after === event.text ? event.edit : undefined;
+    const suppliedEdit = event.edit && equalDocumentText(event.edit.after, event.text) ? event.edit : undefined;
+    const localEdit = suppliedEdit && equalDocumentText(suppliedEdit.before, previousText)
+      ? suppliedEdit : undefined;
+    const rebasedText = localEdit || suppliedEdit === undefined
+      ? null : reconcileDraft(suppliedEdit.before, suppliedEdit.after, previousText);
+    if (suppliedEdit && !localEdit && !equalDocumentText(suppliedEdit.before, previousText)
+      && rebasedText === null && !equalDocumentText(event.text, previousText)) {
+      const draft: Draft = {
+        baseRevision: state.revision.number,
+        text: event.text,
+        conflictBaseText: suppliedEdit.before
+      };
+      return {
+        state: { ...state, draft, lastRejectedExternalRevision: state.revision },
+        effects: [{ type: 'persistDraft', draft }, { type: 'reportExternalConflict' }]
+      };
+    }
+    const draftText = rebasedText ?? event.text;
     const edit = localEdit && (state.draft === null ? localEdit
       : state.draft.edit?.compose(localEdit));
-    if (state.pendingChange === null && (edit ? isEmptyDocumentEdit(edit) : equalDocumentText(event.text, state.revision.text))) {
+    if (state.pendingChange === null && (edit ? isEmptyDocumentEdit(edit) : equalDocumentText(draftText, state.revision.text))) {
       if (state.draft === null) {
         return state.lastRejectedExternalRevision === null
           ? { state, effects: [] }
@@ -112,10 +130,18 @@ export function transitionDocumentSession(
         effects: [{ type: 'persistDraft', draft: null }]
       };
     }
-    const draft = { baseRevision: state.revision.number, text: event.text, ...(edit ? { edit } : {}) };
+    const draft: Draft = {
+      baseRevision: state.revision.number,
+      text: draftText,
+      ...(edit ? { edit } : {}),
+      ...(state.draft?.conflictBaseText !== undefined ? { conflictBaseText: state.draft.conflictBaseText } : {})
+    };
     return {
       state: { ...state, draft, lastRejectedExternalRevision: null },
-      effects: [{ type: 'persistDraft', draft }]
+      effects: [
+        { type: 'persistDraft', draft },
+        ...(rebasedText === null ? [] : [{ type: 'presentText' as const, text: draft.text, source: 'rebased-draft' as const }])
+      ]
     };
   }
 
@@ -179,9 +205,10 @@ export function transitionDocumentSession(
         && equalDocumentText(state.lastRejectedExternalRevision.text, revision.text)) {
         return { state, effects: [] };
       }
+      const draft: Draft = { ...state.draft, conflictBaseText: state.revision.text };
       return {
-        state: { ...state, lastRejectedExternalRevision: revision },
-        effects: [{ type: 'reportExternalConflict' }]
+        state: { ...state, draft, lastRejectedExternalRevision: revision },
+        effects: [{ type: 'persistDraft', draft }, { type: 'reportExternalConflict' }]
       };
     }
     if (rebasedText === null) {
@@ -226,6 +253,7 @@ export function transitionDocumentSession(
 
   if (event.type === 'saveRequested') {
     if (state.savePhase !== 'idle') return { state, effects: [] };
+    if (state.draft?.conflictBaseText !== undefined) return { state, effects: [{ type: 'reportExternalConflict' }] };
     if (state.pendingChange !== null) {
       return { state: { ...state, savePhase: 'awaiting-change' }, effects: [] };
     }
@@ -296,7 +324,7 @@ export function transitionDocumentSession(
     };
   }
 
-  if (state.draft === null || state.pendingChange !== null) {
+  if (state.draft === null || state.pendingChange !== null || state.draft.conflictBaseText !== undefined) {
     return { state, effects: [] };
   }
   const pendingChange = { ...state.draft };

@@ -32,6 +32,7 @@ for (const timing of ['idle', 'snapshot', 'transport'] as const) {
     let requests = 0;
     let edited = false;
     const session = createDocumentSessionWebviewAdapter({
+      pageId: `auto-save-page-${timing}-${reason}`,
       postMessage(message) {
         if (message.type !== 'applyChanges') return;
         assert.equal(message.baseVersion, document.version);
@@ -77,7 +78,7 @@ for (const timing of ['idle', 'snapshot', 'transport'] as const) {
       showFailure(message) { failures.push(message); }
     });
     session.start({
-      type: 'init', documentId: document.uri.toString(), text: document.text,
+      type: 'init', pageId: `auto-save-page-${timing}-${reason}`, documentId: document.uri.toString(), text: document.text,
       version: document.version, savedRevision: { version: 1, text: diskText }
     } as InitMessage);
     await session.whenIdle();

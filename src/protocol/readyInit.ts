@@ -33,6 +33,8 @@ export type SourceLineNumberMode = 'on' | 'off' | 'relative' | 'interval';
 
 export type ReadyMessage = {
   readonly type: 'ready';
+  /** New per iframe/page evaluation identity; retries reuse the same value. */
+  readonly pageId: string;
 };
 
 export type SavedRevisionDto = {
@@ -47,6 +49,8 @@ export type InitMessage = {
   readonly previewPreset?: PreviewPresetId;
   readonly previewPresetPreferences?: PreviewPresetPreferences;
   readonly type: 'init';
+  /** Binds this Host initialization to exactly one Webview page evaluation. */
+  readonly pageId: string;
   readonly documentId: string;
   readonly imageIntrinsicSizes?: readonly ImageIntrinsicSize[];
   readonly text: string;
@@ -106,8 +110,14 @@ function isPreviewAppearance(value: unknown): value is PreviewAppearance {
   return value === 'auto' || value === 'dark' || value === 'light';
 }
 
+export function isWebviewPageId(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= 8 && value.length <= 128
+    && /^[A-Za-z0-9_-]+$/.test(value);
+}
+
 export function decodeReadyMessage(value: unknown): ReadyMessage | null {
-  return isRecord(value) && value.type === 'ready' ? { type: 'ready' } : null;
+  return isRecord(value) && value.type === 'ready' && isWebviewPageId(value.pageId)
+    ? { type: 'ready', pageId: value.pageId } : null;
 }
 
 export function decodeInitMessage(value: unknown): InitMessage | null {
@@ -167,6 +177,7 @@ export function decodeInitMessage(value: unknown): InitMessage | null {
     : isRecord(value) ? decodeReadingPosition(value.readingPositionRestore) : null;
   if (!isRecord(value)
     || value.type !== 'init'
+    || !isWebviewPageId(value.pageId)
     || 'theme' in value
     || 'shikiCodeBlocks' in value
     || 'codeTheme' in value

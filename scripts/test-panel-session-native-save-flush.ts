@@ -116,6 +116,7 @@ const postedToWebview: Message[] = [];
 let receiveMessage: ((message: unknown) => void) | null = null;
 let pendingTableCellText = 'outer Draft\n\n| pending cell |\n| --- |';
 let completedNativeSaveWaiters = 0;
+const pageId = 'native-save-flush-page';
 
 const panel = {
   active: true,
@@ -128,7 +129,9 @@ const panel = {
         queueMicrotask(() => {
           receiveMessage?.({
             type: 'draftChanged',
+            pageId,
             text: nextText,
+            baseVersion: document.version,
             receiptVersion: 1
           });
           receiveMessage?.({
@@ -155,13 +158,14 @@ const panel = {
 };
 
 const pendingDraftRecovery = createPendingDraftRecovery({
-  readCurrentText: () => document.text,
-  applyDraft: async (_expectedCurrentText, draftText) => {
+  readCurrentRevision: () => ({ version: document.version, text: document.text }),
+  applyDraft: async (_expected, draftText) => {
     document.text = draftText;
     document.version += 1;
     document.isDirty = true;
     return true;
-  }
+  },
+  preserveConflict: async () => false
 });
 
 async function nativeSave(reason = 2): Promise<boolean> {
@@ -189,6 +193,8 @@ const controller = createPanelSessionController(createPanelSessionControllerPara
   readDiskText: () => diskText,
   overrides: { saveDocument: () => nativeSave(1) }
 }) as never);
+
+await controller.handleMessage({ type: 'ready', pageId });
 
 const initialNativeSave = nativeSave();
 await delayedWorkspaceApplyStarted;

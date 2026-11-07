@@ -35,7 +35,7 @@ exports.run = async function () {
     await vscode.commands.executeCommand('vscode.openWith', uri, 'meoEnhanced.editor');
     browser = await puppeteer.connect({ browserURL: process.env.MEO_NATIVE_BROWSER_URL || 'http://127.0.0.1:9337', defaultViewport: null });
     let frame;
-    await waitFor(async () => {
+    const locateActiveFrame = async () => {
       const matches = [];
       for (const page of await browser.pages()) {
         for (const candidate of page.frames()) {
@@ -48,9 +48,16 @@ exports.run = async function () {
         }
       }
       assert.ok(matches.length <= 1, 'Only one active Webview may own the disposable document');
-      frame = matches[0];
-      return !!frame;
-    }, 'production editor');
+      return matches[0];
+    };
+    const waitForActiveFrame = async label => {
+      await waitFor(async () => {
+        frame = await locateActiveFrame();
+        return !!frame;
+      }, label);
+      return frame;
+    };
+    await waitForActiveFrame('production editor');
     // A selected mode button can precede the final interactive surface. Input
     // must reach that surface before automatic-save assertions have meaning.
     const waitModeReady = async mode => frame.waitForFunction(mode => {
@@ -74,7 +81,7 @@ exports.run = async function () {
       await frame.click(`button[data-mode="${mode}"]`);
       await waitModeReady(mode);
     };
-    const doc = await vscode.workspace.openTextDocument(uri);
+    let doc = await vscode.workspace.openTextDocument(uri);
     const saved = async expected => {
       await waitFor(() => !doc.isDirty && fs.readFileSync(file, 'utf8') === expected, 'automatic disk save');
       assert.equal(doc.getText(), expected, 'Host and disk must match the expected revision');
@@ -140,11 +147,115 @@ exports.run = async function () {
     }
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     await vscode.commands.executeCommand('vscode.openWith', uri, 'meoEnhanced.editor');
-    assert.equal((await vscode.workspace.openTextDocument(uri)).getText(), expected);
+    doc = await vscode.workspace.openTextDocument(uri);
+    assert.equal(doc.getText(), expected);
     assert.equal(fs.readFileSync(file, 'utf8'), expected);
+    await waitForActiveFrame('production editor after native close/reopen');
+    await waitModeReady(await frame.evaluate(() => document.querySelector('.editor-root').dataset.mode));
+
+    const commandIds = await vscode.commands.getCommands(true);
+    const commands = { reload: 'workbench.action.webview.reloadWebviewAction', close: 'workbench.action.closeActiveEditor' };
+    report.pendingCellHandoffs = [];
+    const filesConfiguration = vscode.workspace.getConfiguration('files');
+    const previousAutoSave = filesConfiguration.inspect('autoSave')?.workspaceValue;
+    await filesConfiguration.update('autoSave', 'off', vscode.ConfigurationTarget.Workspace);
+    try {
+    for (const [action, command] of Object.entries(commands)) {
+      assert.ok(commandIds.includes(command), `Required native command is unavailable: ${command}`);
+      await selectMode('live');
+      const selector = '.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody textarea[data-table-col="1"]';
+      await frame.click('.meo-md-html-table:not(.meo-md-html-table-sticky-table) tbody tr:first-child td:nth-child(2) .meo-md-html-table-cell-preview');
+      await frame.waitForSelector(selector, { visible: true });
+      await frame.$eval(selector, input => { input.focus(); input.select(); });
+      const value = `pending-${action}-${rounds}`;
+      const generationMarker = `${action}-${Date.now()}`;
+      await frame.evaluate(marker => { globalThis.__nativeDraftHandoffGeneration = marker; }, generationMarker);
+      await frame.page().keyboard.sendCharacter(value);
+      const before = await frame.evaluate(selector => ({
+        textareaValue: document.querySelector(selector)?.value,
+        editorText: document.querySelector('.editor-host .cm-content').cmTile.root.view.state.doc.toString()
+      }), selector);
+      const next = expected.replace(`| Alpha | ${cellValue} |`, `| Alpha | ${value} |`);
+      const receipt = { action, command, before, hostBefore: doc.getText(), diskBefore: fs.readFileSync(file, 'utf8'), passed: false };
+      report.pendingCellHandoffs.push(receipt);
+      assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.input?.uri?.toString(), uri.toString(), 'The real Workbench command must target the pending-cell document');
+      assert.equal(before.textareaValue, value, 'Real native input must reach the active cell');
+      assert.equal(before.editorText, expected, 'The native handoff must start with an uncommitted cell, not an already flushed edit');
+      assert.equal(receipt.hostBefore, expected, 'Host must not have accepted the pending cell before the handoff');
+      assert.equal(receipt.diskBefore, expected, 'Disk must still contain the previous revision before the handoff');
+      const handoffDocument = doc;
+      const previousDocuments = new Set(vscode.workspace.textDocuments.map(document => document.uri.toString()));
+      let timeout;
+      try {
+        await Promise.race([
+          vscode.commands.executeCommand(command),
+          new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error(`Native ${action} command did not complete`)), 8000); })
+        ]);
+      } finally { clearTimeout(timeout); }
+      if (action === 'close') {
+        await waitFor(() => vscode.window.tabGroups.activeTabGroup.activeTab?.input?.uri?.toString() !== uri.toString(), 'native editor close');
+        await vscode.commands.executeCommand('vscode.openWith', uri, 'meoEnhanced.editor');
+      }
+      await waitFor(async () => {
+        const candidate = await locateActiveFrame();
+        if (!candidate || await candidate.evaluate(marker => globalThis.__nativeDraftHandoffGeneration === marker, generationMarker).catch(() => true)) return false;
+        frame = candidate;
+        return true;
+      }, `new production Webview generation after ${action}`);
+      doc = await vscode.workspace.openTextDocument(uri);
+      await waitModeReady(await frame.evaluate(() => document.querySelector('.editor-root').dataset.mode));
+      let recoveryCopy;
+      await waitFor(() => {
+        recoveryCopy = vscode.workspace.textDocuments.find(document => document.uri.scheme === 'untitled'
+          && !previousDocuments.has(document.uri.toString())
+          && document.getText().startsWith('<<<<<<< MEO local recovery')
+          && document.getText().includes('\n' + next + '\n'));
+        return doc.getText() === next || !!recoveryCopy;
+      }, `Host or protected-copy pending-cell recovery after ${action}`);
+      if (recoveryCopy) {
+        assert.equal(action, 'close', 'An ordinary Webview reload must recover its still-open Host document');
+        assert.equal(doc.getText(), expected, 'A terminal recovery copy must leave the reopened original unchanged');
+        assert.equal(fs.readFileSync(file, 'utf8'), expected, 'Terminal recovery must not overwrite the saved original');
+        await waitFor(() => vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input?.uri?.toString() === recoveryCopy.uri.toString())), 'visible recovery-copy tab');
+        const copyFile = path.join(root, 'pending-cell-close-recovery.md');
+        fs.writeFileSync(copyFile, recoveryCopy.getText());
+        assert.ok(fs.readFileSync(copyFile, 'utf8').includes('\n' + next + '\n'), 'The independent recovery artifact must preserve every local character');
+        receipt.outcome = 'protected-copy';
+        receipt.originalDocumentClosed = handoffDocument.isClosed;
+        receipt.recoveryCopy = { file: copyFile, text: recoveryCopy.getText() };
+        receipt.hostAfter = doc.getText();
+        receipt.diskAfter = fs.readFileSync(file, 'utf8');
+        const discard = 'workbench.action.revertAndCloseActiveEditor';
+        assert.ok(commandIds.includes(discard), 'Owned untitled test-buffer cleanup command must exist');
+        await vscode.window.showTextDocument(recoveryCopy, { preview: false });
+        assert.equal(vscode.window.activeTextEditor?.document.uri.toString(), recoveryCopy.uri.toString());
+        await vscode.commands.executeCommand(discard);
+        await vscode.commands.executeCommand('vscode.openWith', uri, 'meoEnhanced.editor');
+        receipt.passed = true;
+        continue;
+      }
+      await frame.waitForFunction(text => document.querySelector('.editor-host .cm-content')?.cmTile?.root?.view?.state.doc.toString() === text, { timeout: 8000 }, next);
+      await vscode.commands.executeCommand('workbench.action.files.save');
+      await saved(next);
+      receipt.hostAfter = doc.getText();
+      receipt.diskAfter = fs.readFileSync(file, 'utf8');
+      receipt.outcome = 'original-document';
+      receipt.passed = true;
+      expected = next;
+      cellValue = value;
+    }
+    } finally {
+      await filesConfiguration.update('autoSave', previousAutoSave, vscode.ConfigurationTarget.Workspace);
+    }
     report.passed = true;
   } catch (error) {
     report.error = String(error.stack || error);
+    try {
+      report.failureDocuments = vscode.workspace.textDocuments.filter(document => document.uri.toString() === uri.toString()
+        || document.uri.scheme === 'untitled' && document.getText().startsWith('<<<<<<< MEO local recovery'))
+        .map(document => ({ uri: document.uri.toString(), isDirty: document.isDirty, text: document.getText() }));
+      report.diskAtFailure = fs.readFileSync(file, 'utf8');
+    } catch (observationError) { report.observationError = String(observationError); }
     throw error;
   } finally {
     subscription.dispose();

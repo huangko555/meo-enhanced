@@ -21,7 +21,7 @@ const localEdit = createCoordinator();
 assert.deepEqual(localEdit.handle({
   type: 'localDraftChanged', text: 'one\ntwo\nlocal'
 }), [
-  { type: 'rememberDraft', text: 'one\ntwo\nlocal', receiptVersion: 1 }
+  { type: 'rememberDraft', text: 'one\ntwo\nlocal', baseVersion: 3, receiptVersion: 1 }
 ]);
 assert.deepEqual(localEdit.handle({ type: 'submitPendingDraft' }), [
   {
@@ -71,7 +71,7 @@ orderedEdits.handle({ type: 'localDraftChanged', text: 'first edit' });
 orderedEdits.handle({ type: 'submitPendingDraft' });
 orderedEdits.handle({ type: 'localDraftChanged', text: 'second edit' });
 assert.deepEqual(orderedEdits.handle({ type: 'hostChangeApplied', version: 4 }), [
-  { type: 'rememberDraft', text: 'second edit', receiptVersion: 3 },
+  { type: 'rememberDraft', text: 'second edit', baseVersion: 4, receiptVersion: 3 },
   {
     type: 'applyTextChange',
     baseVersion: 4,
@@ -105,7 +105,7 @@ assert.deepEqual(disjoint.handle({
   version: 4,
   text: 'remote\none\ntwo'
 }), [
-  { type: 'rememberDraft', text: 'remote\none\ntwo\nlocal', receiptVersion: 2 },
+  { type: 'rememberDraft', text: 'remote\none\ntwo\nlocal', baseVersion: 4, receiptVersion: 2 },
   { type: 'presentText', text: 'remote\none\ntwo\nlocal', source: 'rebased-draft' },
   {
     type: 'applyTextChange',
@@ -120,7 +120,33 @@ assert.deepEqual(overlap.handle({
   type: 'hostRevisionChanged',
   version: 4,
   text: 'one\nremote'
-}), [{ type: 'showExternalConflict' }]);
+}), [
+  { type: 'rememberDraft', text: 'one\nlocal', baseVersion: 3, conflictBaseText: 'one\ntwo', receiptVersion: 2 },
+  { type: 'showExternalConflict' }
+]);
+
+// The editor can accept a local transaction while a newer Host revision waits
+// behind an in-flight save. Its real before/after edit must be rebased onto
+// that revision, not treated as a stale whole-document replacement.
+{
+  const coordinator = createDocumentSessionCoordinator({
+    documentId: 'file:///stale-local-edit.md',
+    revision: { number: 1, text: 'abc' },
+    savedRevision: { revisionNumber: 1, text: 'abc' }
+  });
+  const before = Text.of(['abc']);
+  const changes = ChangeSet.of({ from: 3, to: 3, insert: '!' }, before.length);
+  const after = changes.apply(before);
+  const edit = documentEdit(changes, before, after);
+  coordinator.handle({ type: 'hostRevisionChanged', version: 2, text: 'Abc' });
+  assert.deepEqual(coordinator.handle({
+    type: 'localDraftChanged', text: edit.after,
+    edit
+  }).map(action => action.type === 'rememberDraft' ? { ...action, text: readDocumentText(action.text!) } : action), [
+    { type: 'rememberDraft', text: 'Abc!', baseVersion: 2, receiptVersion: 2 },
+    { type: 'presentText', text: 'Abc!', source: 'rebased-draft' }
+  ]);
+}
 
 const saveAfterEdit = createCoordinator();
 saveAfterEdit.handle({ type: 'localDraftChanged', text: 'one\ntwo\nlocal' });
@@ -175,7 +201,10 @@ assert.deepEqual(saveAfterConflict.handle({
   type: 'hostRevisionChanged',
   version: 4,
   text: 'one\nremote'
-}), [{ type: 'showExternalConflict' }]);
+}), [
+  { type: 'rememberDraft', text: 'one\nlocal', baseVersion: 3, conflictBaseText: 'one\ntwo', receiptVersion: 2 },
+  { type: 'showExternalConflict' }
+]);
 
 const discarded = createCoordinator();
 discarded.handle({ type: 'localDraftChanged', text: 'one\nlocal' });

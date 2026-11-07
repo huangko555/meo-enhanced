@@ -7,11 +7,13 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   revision: { number: 3, text: 'accepted' },
   savedRevision: { revisionNumber: 3, text: 'accepted' }
 });
+const pageId = 'page_actions';
 
 {
   const messages: unknown[] = [];
   const presentations: Array<{ text: string; source: string }> = [];
   const adapter = createDocumentSessionActionAdapter({
+    pageId,
     postMessage: (message) => messages.push(message),
     presentText: (text, source) => {
       presentations.push({ text, source });
@@ -25,7 +27,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   });
 
   await adapter.execute([
-    { type: 'rememberDraft', text: 'local draft', receiptVersion: 1 },
+    { type: 'rememberDraft', text: 'local draft', baseVersion: 3, receiptVersion: 1 },
     {
       type: 'applyTextChange',
       baseVersion: 3,
@@ -35,7 +37,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   ]);
 
   assert.deepEqual(messages, [
-    { type: 'draftChanged', text: 'local draft', receiptVersion: 1 },
+    { type: 'draftChanged', pageId, text: 'local draft', baseVersion: 3, receiptVersion: 1 },
     {
       type: 'applyChanges',
       baseVersion: 3,
@@ -55,6 +57,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const presentations: string[] = [];
   const notices: string[] = [];
   const adapter = createDocumentSessionActionAdapter({
+    pageId,
     postMessage: (message) => messages.push(message),
     presentText: (text) => {
       presentations.push(text);
@@ -82,11 +85,33 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   }));
 
   assert.deepEqual(presentations, [], 'dirty Draft must remain presented after an overlapping external update');
-  assert.equal(messages.length, messagesBeforeExternal, 'external conflict must not discard or resubmit the dirty Draft');
-  assert.equal(coordinator.draftRecoveryReceiptVersion(), 1, 'external conflict must not advance the Draft Recovery Receipt');
+  assert.deepEqual(messages.slice(messagesBeforeExternal), [{
+    type: 'draftChanged', pageId, text: 'one\nlocal', baseVersion: 3, conflictBaseText: 'one\ntwo', receiptVersion: 2
+  }], 'external conflict must retain a terminal recovery candidate without resubmitting');
+  assert.equal(coordinator.draftRecoveryReceiptVersion(), 2, 'terminal conflict must advance the Draft Recovery Receipt');
   assert.deepEqual(notices, [
     'external-conflict'
   ]);
+}
+
+{
+  const messages: unknown[] = [];
+  const adapter = createDocumentSessionActionAdapter({
+    pageId,
+    postMessage: message => messages.push(message),
+    presentText: () => true,
+    executeRemote: async () => { throw new Error('Unexpected remote action'); },
+    handleInput: () => [],
+    showNotice: () => undefined
+  });
+  adapter.preserveDraft({
+    type: 'rememberDraft', text: 'local insertion', baseVersion: 7,
+    conflictBaseText: '', receiptVersion: 1
+  });
+  assert.deepEqual(messages, [{
+    type: 'draftChanged', pageId, text: 'local insertion', baseVersion: 7,
+    conflictBaseText: '', terminal: true, receiptVersion: 1
+  }], 'an empty original document remains explicit terminal conflict context');
 }
 
 {
@@ -95,6 +120,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const notices: string[] = [];
   let revisionRequests = 0;
   const adapter = createDocumentSessionActionAdapter({
+    pageId,
     postMessage: (message) => messages.push(message),
     presentText: () => true,
     executeRemote: async (action) => {
@@ -119,7 +145,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   }));
 
   assert.equal(revisionRequests, 2);
-  assert.deepEqual(messages, [{ type: 'draftChanged', text: 'newer draft', receiptVersion: 1 }]);
+  assert.deepEqual(messages, [{ type: 'draftChanged', pageId, text: 'newer draft', baseVersion: 3, receiptVersion: 1 }]);
   assert.deepEqual(notices, ['resync-failed']);
 }
 
@@ -128,6 +154,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const presentations: string[] = [];
   let revisionRequests = 0;
   const adapter = createDocumentSessionActionAdapter({
+    pageId,
     postMessage: () => undefined,
     presentText: (text) => {
       presentations.push(text);
@@ -155,6 +182,7 @@ const createCoordinator = () => createDocumentSessionCoordinator({
   const notices: string[] = [];
   let revisionRequests = 0;
   const adapter = createDocumentSessionActionAdapter({
+    pageId,
     postMessage: () => undefined,
     presentText: () => true,
     executeRemote: async () => {

@@ -39,7 +39,7 @@ try {
   await page.exposeFunction('__budgetHost', async (message: any) => {
     messages.push(message.type);
     if (message.type === 'ready') return {
-      type: 'init', documentId: 'file:///large-document-budget.md', text, version: 1,
+      type: 'init', pageId: message.pageId, documentId: 'file:///large-document-budget.md', text, version: 1,
       savedRevision: { version: 1, text }, diagnostics: [], mode: 'source', uiLanguage: 'en',
       sourceLineNumbers: 'on', previewAppearance: 'dark', previewFontFamily: '', previewSourceColoring: true,
       editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,

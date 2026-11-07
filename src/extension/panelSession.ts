@@ -9,7 +9,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { normalizeDocumentText } from '../foundation/documentText';
 import type { AgentReviewHandoffController } from '../agents/reviewHandoff';
-import type { PendingDraftRecovery } from '../application/pendingDraftRecovery';
+import type { DraftRecoveryCandidate, PendingDraftRecovery } from '../application/pendingDraftRecovery';
 import { createDraftRecoveryReceiver } from '../host/draftRecoveryReceiver';
 import { createDocumentEditEchoFilter } from '../host/documentEditEcho';
 import {
@@ -82,6 +82,7 @@ import type { InitMessage, SavedRevisionDto, SourceLineNumberMode } from '../pro
 import type {
   AppliedMessage,
   ApplyChangesMessage,
+  DraftRecoveryMessage,
   DocumentChangedMessage,
   DocumentReloadFromDiskFailedMessage,
   DocumentReloadedFromDiskMessage
@@ -286,7 +287,10 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   let latestDocumentApplyCompletion: Promise<void> = Promise.resolve();
   let webviewReady = false;
   let initDelivered = false;
-  let initDelivery: Promise<void> | null = null;
+  let initDelivery: { readonly pageId: string; readonly promise: Promise<void> } | null = null;
+  let activePageId: string | null = null;
+  let activePageEpoch = 0;
+  let pageActivation: { readonly pageId: string; readonly promise: Promise<void> } | null = null;
   let disposed = false;
   const workspaceRoot = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath;
   const gitDocumentState = new GitDocumentState(documentUri.fsPath, workspaceRoot);
@@ -296,9 +300,14 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   });
   let nextDiskReloadId = 1;
   let draftRecoveryReceiptVersion = 0;
+  let activeRecoveryOwnerReceiptVersion = 0;
+  let nextRecoveryOwnerReceiptVersion = 1;
+  const retiredTerminalReceiptKeys: string[] = [];
   const documentEditEcho = createDocumentEditEchoFilter();
   const pendingDiskReloadPresentations = new Map<number, {
+    readonly pageId: string;
     readonly receiptVersion: number;
+    readonly ownerReceiptVersion: number;
     readonly text: string;
   }>();
   const enqueue = (task: () => Promise<void>): Promise<void> => {
@@ -329,8 +338,77 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       return false;
     }
   };
-  const draftRecoveryReceiver = createDraftRecoveryReceiver(pendingDraftRecovery,
-    () => postToWebview({ type: 'requestDraftRecoverySnapshot' }));
+  type DraftRecoveryReceiver = ReturnType<typeof createDraftRecoveryReceiver>;
+  type PageRecoveryChannel = {
+    readonly pageId: string;
+    readonly receiver: DraftRecoveryReceiver;
+    candidate: DraftRecoveryCandidate | null;
+    settling: boolean;
+    retired: boolean;
+  };
+  let activePageRecovery: PageRecoveryChannel | null = null;
+  let retiredPageRecovery: PageRecoveryChannel | null = null;
+  const createPageRecoveryChannel = (pageId: string): PageRecoveryChannel => {
+    let record: PageRecoveryChannel;
+    const receiver = createDraftRecoveryReceiver({
+      remember(candidate, receiptVersion) {
+        if (!record.retired) {
+          activeRecoveryOwnerReceiptVersion = nextRecoveryOwnerReceiptVersion;
+          nextRecoveryOwnerReceiptVersion += 1;
+          return pendingDraftRecovery.remember(candidate, activeRecoveryOwnerReceiptVersion);
+        }
+        if (candidate !== null) {
+          record.candidate = candidate;
+          if (!record.settling) {
+            record.settling = true;
+            runBackground((async () => {
+              try {
+                await Promise.resolve();
+                while (record.candidate !== null) {
+                  const pending = record.candidate;
+                  const preserved = await pendingDraftRecovery.preserveRetired(pending);
+                  if (record.candidate !== pending) continue;
+                  if (!preserved) return;
+                  record.candidate = null;
+                }
+              } finally {
+                record.settling = false;
+              }
+            })(), 'retiredPageDraftRecovery');
+          }
+        }
+        return receiptVersion;
+      }
+    }, () => !record.retired && activePageId === pageId
+      ? postToWebview({ type: 'requestDraftRecoverySnapshot', pageId })
+      : false);
+    record = { pageId, receiver, candidate: null, settling: false, retired: false };
+    return record;
+  };
+  const preserveOrphanedTerminalRecovery = (message: Extract<DraftRecoveryMessage, {
+    readonly type: 'draftChanged'; readonly text: string;
+  }>): void => {
+    if (message.terminal !== true) return;
+    const key = `${message.pageId}:${message.receiptVersion}`;
+    if (retiredTerminalReceiptKeys.includes(key)) return;
+    retiredTerminalReceiptKeys.push(key);
+    if (retiredTerminalReceiptKeys.length > 16) retiredTerminalReceiptKeys.shift();
+    const candidate: DraftRecoveryCandidate = message.conflictBaseText === undefined
+      ? { type: 'draft', baseVersion: message.baseVersion, text: message.text }
+      : { type: 'conflict', baseVersion: message.baseVersion, baseText: message.conflictBaseText, text: message.text };
+    runBackground(pendingDraftRecovery.preserveRetired(candidate).then(
+      preserved => {
+        if (preserved) return;
+        const index = retiredTerminalReceiptKeys.indexOf(key);
+        if (index >= 0) retiredTerminalReceiptKeys.splice(index, 1);
+      },
+      error => {
+        const index = retiredTerminalReceiptKeys.indexOf(key);
+        if (index >= 0) retiredTerminalReceiptKeys.splice(index, 1);
+        throw error;
+      }
+    ), 'orphanedTerminalDraftRecovery');
+  };
 
   type ExternalFileStatus = Extract<HostEditorEvent, { type: 'externalFileStatusChanged' }>['status'];
   let externalFileStatus: ExternalFileStatus = 'current';
@@ -482,7 +560,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     };
   };
 
-  const sendInit = async (): Promise<boolean> => {
+  const sendInit = async (pageId: string): Promise<boolean> => {
     const savedRevision = await readInitialSavedRevision();
     const diffBaselineState = diffBaselineSelection.getState();
     const editorFontSizePreference = getEditorFontSizePreference();
@@ -500,6 +578,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       : null;
     const message: InitMessage = {
       type: 'init',
+      pageId,
       previewPreset: (() => {
         const stored = context.globalState.get(PREVIEW_PRESET_STATE_KEY);
         return isPreviewPresetId(stored)
@@ -558,11 +637,16 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       outlineWidth: getOutlineWidth(context),
       vscodeTheme: getCurrentVscodeCodeTheme(),
     };
+    if (disposed || activePageId !== pageId) return false;
     const posted = await postToWebview(message);
-    if (posted) await postToWebview({ type: 'hostWindowFocusChanged', focused: vscode.window.state.focused } satisfies HostEditorEvent);
-    if (posted && params.imageDimensions) {
+    if (posted && activePageId === pageId) {
+      await postToWebview({ type: 'hostWindowFocusChanged', focused: vscode.window.state.focused } satisfies HostEditorEvent);
+    }
+    if (posted && activePageId === pageId && params.imageDimensions) {
       void params.imageDimensions.ready.then(() => {
-        if (!disposed) return postToWebview({ type: 'imageIntrinsicSizes', documentId: documentKey, entries: params.imageDimensions!.snapshot() });
+        if (!disposed && activePageId === pageId) {
+          return postToWebview({ type: 'imageIntrinsicSizes', documentId: documentKey, entries: params.imageDimensions!.snapshot() });
+        }
       });
     }
     return posted;
@@ -643,14 +727,19 @@ export function createPanelSessionController(params: PanelSessionControllerParam
   };
 
   // A later ready may mean the previous post was lost during Webview startup.
-  const ensureInitDelivered = (retry = false): Promise<void> => {
-    if (disposed || !webviewReady) return Promise.resolve();
-    if (initDelivery) return initDelivery;
+  const ensureInitDelivered = (pageId = activePageId, retry = false): Promise<void> => {
+    if (disposed || !webviewReady || pageId === null || activePageId !== pageId) return Promise.resolve();
+    if (initDelivery) {
+      return initDelivery.pageId === pageId
+        ? initDelivery.promise
+        : initDelivery.promise.then(() => ensureInitDelivered(pageId, retry));
+    }
     if (initDelivered && !retry) return Promise.resolve();
-    initDelivery = (async () => {
+    const delivery: { pageId: string; promise: Promise<void> } = { pageId, promise: Promise.resolve() };
+    const work = (async () => {
       try {
-        const posted = await sendInit();
-        if (!posted || disposed) return;
+        const posted = await sendInit(pageId);
+        if (!posted || disposed || activePageId !== pageId) return;
         if (!initDelivered) {
           initDelivered = true;
           if (externalFileStatus !== 'current') {
@@ -661,10 +750,52 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         publishSaveState(true);
         sidebarOutline?.setReady(true);
       } finally {
-        initDelivery = null;
+        if (initDelivery === delivery) initDelivery = null;
       }
     })();
-    return initDelivery;
+    delivery.promise = work;
+    initDelivery = delivery;
+    return work;
+  };
+
+  const activateWebviewPage = (pageId: string): Promise<void> => {
+    const switchingPage = activePageId !== pageId;
+    if (!switchingPage && activePageRecovery !== null) {
+      return pageActivation?.pageId === pageId
+        ? pageActivation.promise
+        : ensureInitDelivered(pageId, true);
+    }
+    if (pageActivation?.pageId === pageId) return pageActivation.promise;
+    if (switchingPage) {
+      const previous = activePageRecovery;
+      if (previous) {
+        previous.retired = true;
+        retiredPageRecovery = previous;
+      }
+      activePageRecovery = null;
+      activePageId = pageId;
+      activePageEpoch += 1;
+      initDelivered = false;
+    }
+    const epoch = activePageEpoch;
+    const activation: { pageId: string; promise: Promise<void> } = { pageId, promise: Promise.resolve() };
+    const work = enqueue(async () => {
+      // A replacement iframe may arrive while its predecessor's beforeunload
+      // message is still in transport. Settle the prior candidate first; a
+      // late predecessor message goes through its bounded retired copy path.
+      await pendingDraftRecovery.settleForTermination();
+      if (disposed || activePageId !== pageId || activePageEpoch !== epoch) return;
+      if (pendingDraftRecovery.hasPending()) return;
+      draftRecoveryReceiptVersion = 0;
+      activeRecoveryOwnerReceiptVersion = 0;
+      activePageRecovery = createPageRecoveryChannel(pageId);
+      await ensureInitDelivered(pageId, true);
+    });
+    activation.promise = work.finally(() => {
+      if (pageActivation === activation) pageActivation = null;
+    });
+    pageActivation = activation;
+    return activation.promise;
   };
 
   const requestExportSnapshot = async (): Promise<ReadingSnapshot> => {
@@ -786,8 +917,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
       }
       case 'ready':
         sidebarOutline?.setReady(false);
+        if (raw.pageId === retiredPageRecovery?.pageId) return;
         webviewReady = true;
-        await ensureInitDelivered(true);
+        await activateWebviewPage(raw.pageId);
         refreshGitBaseline({ forcePost: true, delayMs: GIT_BASELINE_STARTUP_DELAY_MS });
         return;
       case 'setMode':
@@ -1130,20 +1262,28 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         return;
       case 'draftChanged':
       case 'draftPatched':
-        draftRecoveryReceiptVersion = draftRecoveryReceiver.accept(raw);
+        if (raw.pageId === activePageId && activePageRecovery !== null) {
+          draftRecoveryReceiptVersion = activePageRecovery.receiver.accept(raw);
+        } else if (raw.pageId === retiredPageRecovery?.pageId) {
+          retiredPageRecovery.receiver.accept(raw);
+        } else if (raw.type === 'draftChanged' && raw.text !== null) {
+          preserveOrphanedTerminalRecovery(raw);
+        }
         return;
       case 'documentReloadPresentationCompleted': {
         const pendingReload = pendingDiskReloadPresentations.get(raw.reloadId);
         if (!pendingReload) return;
         pendingDiskReloadPresentations.delete(raw.reloadId);
-        if (raw.presented) {
+        if (raw.presented && pendingReload.pageId === activePageId) {
           savedRevisionTracker.acceptDiskReload(pendingReload.text);
           retryDiffComparison();
         }
         if (raw.presented
+          && pendingReload.pageId === activePageId
           && raw.receiptVersion === draftRecoveryReceiptVersion
-          && pendingReload.receiptVersion === raw.receiptVersion) {
-          pendingDraftRecovery.discardIfCurrent(pendingReload.receiptVersion);
+          && pendingReload.receiptVersion === raw.receiptVersion
+          && pendingReload.ownerReceiptVersion === activeRecoveryOwnerReceiptVersion) {
+          pendingDraftRecovery.discardIfCurrent(pendingReload.ownerReceiptVersion);
         }
         return;
       }
@@ -1162,6 +1302,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
         documentSaveLifecycle.accept(raw);
         return;
       case 'reloadDocumentFromDisk':
+        if (activePageId === null) return;
+        {
+          const requestedPageId = activePageId;
         await enqueue(async () => {
           try {
             const revision = await documentReload.reloadFromDisk();
@@ -1169,7 +1312,9 @@ export function createPanelSessionController(params: PanelSessionControllerParam
             const reloadId = nextDiskReloadId;
             nextDiskReloadId += 1;
             pendingDiskReloadPresentations.set(reloadId, {
+              pageId: requestedPageId,
               receiptVersion: draftRecoveryReceiptVersion,
+              ownerReceiptVersion: activeRecoveryOwnerReceiptVersion,
               text: revision.text
             });
             const message: DocumentReloadedFromDiskMessage = {
@@ -1190,6 +1335,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
           }
         });
         return;
+        }
       case 'saveDocumentCopy': {
         const response = await documentCopyAdapter.handle(raw);
         await postToWebview(response);
@@ -1361,7 +1507,7 @@ export function createPanelSessionController(params: PanelSessionControllerParam
     runBackground(enqueue(async () => {
       try {
         // Best-effort recovery for edits that never made it through the debounce/apply round-trip.
-        await pendingDraftRecovery.recover();
+        await pendingDraftRecovery.settleForTermination();
       } catch {
         // Ignore dispose-time recovery failures to avoid surfacing noisy teardown errors.
       }

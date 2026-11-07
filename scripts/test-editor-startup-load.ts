@@ -31,7 +31,7 @@ async function checkEditorModulePreload(browser: Awaited<ReturnType<typeof launc
   try {
     await page.setCacheEnabled(false);
     await page.exposeFunction('__preloadHost', (message: any) => message.type === 'ready'
-      ? { ...init, mode: 'source' }
+      ? { ...init, pageId: message.pageId, mode: 'source' }
       : message.type === 'requestPreviewRender' ? {
         type: 'previewRenderResult', requestId: message.requestId,
         result: { ok: true, value: exportRuntime.renderPreviewDocument({ markdownText: message.text,

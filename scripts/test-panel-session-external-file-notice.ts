@@ -59,8 +59,9 @@ const panel = {
   onDidDispose: () => panelSessionDisposable()
 };
 const pendingDraftRecovery = createPendingDraftRecovery({
-  readCurrentText: () => document.text,
-  applyDraft: async () => true
+  readCurrentRevision: () => ({ version: document.version, text: document.text }),
+  applyDraft: async () => true,
+  preserveConflict: async () => false
 });
 const immediateTimer = {
   schedule(_delayMs: number, run: () => void) {
@@ -83,6 +84,7 @@ const makeController = () => createPanelSessionController(createPanelSessionCont
   }
 }) as never);
 const controller = makeController();
+const firstPageId = 'external-file-page-1';
 
 const flushMicrotasks = async (): Promise<void> => {
   for (let index = 0; index < 20; index += 1) await Promise.resolve();
@@ -91,7 +93,7 @@ const statuses = (): string[] => posted
   .filter((message) => message.type === 'externalFileStatusChanged')
   .map((message) => String(message.status));
 
-await controller.handleMessage({ type: 'ready' });
+await controller.handleMessage({ type: 'ready', pageId: firstPageId });
 posted.length = 0;
 
 document.text = 'local edit';
@@ -167,7 +169,7 @@ document.isDirty = true;
 document.version += 1;
 diskText = 'original unchecked task';
 const reopened = makeController();
-await reopened.handleMessage({ type: 'ready' });
+await reopened.handleMessage({ type: 'ready', pageId: 'external-file-page-2' });
 await flushMicrotasks();
 assert(!statuses().includes('modified-while-dirty'), 'Opening an already dirty document must not report an unchanged disk as modified');
 diskText = 'a genuinely newer disk revision';

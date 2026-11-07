@@ -66,7 +66,7 @@ try {
   });
   let initialMode: 'live' | 'source' = 'source';
   await page.exposeFunction('__modeHost', (message: any) => message.type === 'ready' ? {
-    type: 'init', documentId: 'file:///mode-preparation.md', text, version: 1,
+    type: 'init', pageId: message.pageId, documentId: 'file:///mode-preparation.md', text, version: 1,
     savedRevision: { version: 1, text }, diagnostics: [], mode: initialMode, uiLanguage: 'en',
     sourceLineNumbers: 'on', previewAppearance: 'dark', previewFontFamily: '', previewSourceColoring: true,
     editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,

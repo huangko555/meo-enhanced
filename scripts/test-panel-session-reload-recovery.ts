@@ -10,19 +10,24 @@ import {
 } from './panel-session-test-helper';
 
 const documentUri = createPanelSessionTestUri('C:/reload-recovery.md');
+const pageId = 'page_panel_reload';
 const document = createPanelSessionTestDocument(documentUri, 'accepted');
 
 let diskText = 'disk version';
 
+class FakeRange {
+  constructor(readonly start: { offset: number }, readonly end: { offset: number }) {}
+}
 class FakeWorkspaceEdit {
-  replace(_uri: PanelSessionTestUri, _range: unknown, text: string): void {
-    document.text = text;
+  replace(_uri: PanelSessionTestUri, range: { start: { offset: number }; end: { offset: number } }, text: string): void {
+    document.text = document.text.slice(0, range.start.offset) + text + document.text.slice(range.end.offset);
     document.version += 1;
     document.isDirty = true;
   }
 }
 
 mock.module('vscode', () => createPanelSessionVscodeMock(document, {
+  Range: FakeRange as never,
   WorkspaceEdit: FakeWorkspaceEdit,
   executeCommand: async (command) => {
     if (command === 'workbench.action.files.revert') {
@@ -52,6 +57,7 @@ const createHostFixture = (initialText = 'accepted', nextDiskText = 'disk versio
   document.isDirty = true;
   diskText = nextDiskText;
   const postedToWebview: Array<Record<string, unknown>> = [];
+  const recoveryCopies: string[] = [];
   let receiveMessage: ((message: unknown) => void) | null = null;
   const panel = {
     active: true,
@@ -69,11 +75,15 @@ const createHostFixture = (initialText = 'accepted', nextDiskText = 'disk versio
     onDidDispose: () => panelSessionDisposable()
   };
   const pendingDraftRecovery = createPendingDraftRecovery({
-    readCurrentText: () => document.text,
-    applyDraft: async (_expectedCurrentText, draftText) => {
+    readCurrentRevision: () => ({ version: document.version, text: document.text }),
+    applyDraft: async (_expected, draftText) => {
       document.text = draftText;
       document.version += 1;
       document.isDirty = true;
+      return true;
+    },
+    preserveConflict: async (copyText) => {
+      recoveryCopies.push(copyText);
       return true;
     }
   });
@@ -98,7 +108,8 @@ const createHostFixture = (initialText = 'accepted', nextDiskText = 'disk versio
     controller,
     postedToWebview,
     getReceiveMessage: () => receiveMessage,
-    getBaselinePublishCount: () => baselinePublishCount
+    getBaselinePublishCount: () => baselinePublishCount,
+    getRecoveryCopies: () => recoveryCopies
   };
 };
 
@@ -119,12 +130,14 @@ const closeAndReadRecoveredText = async (
 
 const immediateCloseFixture = createHostFixture();
 const { controller, postedToWebview } = immediateCloseFixture;
+await controller.handleMessage({ type: 'ready', pageId });
 
 let finishPresentation!: (presented: boolean) => void;
 const presentation = new Promise<boolean>((resolve) => { finishPresentation = resolve; });
 let webviewDisposed = false;
 const hostMessages: unknown[] = [];
 const webview = createDocumentSessionWebviewAdapter({
+  pageId,
   postMessage: (message) => {
     hostMessages.push(message);
     void controller.handleMessage(message);
@@ -142,7 +155,7 @@ const webview = createDocumentSessionWebviewAdapter({
 });
 
 webview.start({
-  type: 'init',
+  type: 'init', pageId,
   documentId: documentUri.toString(),
   text: 'accepted',
   version: 1,
@@ -174,12 +187,18 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
 
 {
   const fixture = createHostFixture();
-  const recoveryEffects: Array<{ text: string | null; receiptVersion: number }> = [];
+  await fixture.controller.handleMessage({ type: 'ready', pageId });
+  const recoveryEffects: Array<{ text: string | null; receiptVersion: number; terminal?: true }> = [];
   let closed = false;
   const appliedBeforeEdit = createDocumentSessionWebviewAdapter({
+    pageId,
     postMessage: (message) => {
       if (message.type === 'draftChanged') {
-        recoveryEffects.push({ text: message.text, receiptVersion: message.receiptVersion });
+        recoveryEffects.push({
+          text: message.text,
+          receiptVersion: message.receiptVersion,
+          ...(message.terminal === true ? { terminal: true as const } : {})
+        });
       }
       void fixture.controller.handleMessage(message);
       if (message.type === 'draftChanged' && message.text === 'Draft after Host ack') {
@@ -197,7 +216,7 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
   });
 
   appliedBeforeEdit.start({
-    type: 'init',
+    type: 'init', pageId,
     documentId: documentUri.toString(),
     text: 'accepted',
     version: 1,
@@ -223,7 +242,8 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
     recoveryEffects: [
       { text: 'Draft before Host ack', receiptVersion: 1 },
       { text: null, receiptVersion: 2 },
-      { text: 'Draft after Host ack', receiptVersion: 3 }
+      { text: 'Draft after Host ack', receiptVersion: 3 },
+      { text: 'Draft after Host ack', receiptVersion: 3, terminal: true }
     ],
     recoveredText: 'Draft after Host ack'
   }, 'one ordered receipt owner must preserve a Draft queued after a Host acknowledgement');
@@ -231,7 +251,8 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
 
 {
   const fixture = createHostFixture();
-  await fixture.controller.handleMessage({ type: 'draftChanged', text: 'discard after success', receiptVersion: 1 });
+  await fixture.controller.handleMessage({ type: 'ready', pageId });
+  await fixture.controller.handleMessage({ type: 'draftChanged', pageId, text: 'discard after success', baseVersion: document.version, receiptVersion: 1 });
   await fixture.controller.handleMessage({ type: 'reloadDocumentFromDisk', topLine: 1, topLineOffset: 0 });
   await fixture.controller.handleMessage({
     type: 'documentReloadPresentationCompleted',
@@ -244,7 +265,7 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
 
 {
   const fixture = createHostFixture('disk version', 'disk version');
-  await fixture.controller.handleMessage({ type: 'ready' });
+  await fixture.controller.handleMessage({ type: 'ready', pageId });
   await flushMicrotasks();
   const baselinePostsBeforeReload = fixture.getBaselinePublishCount();
   await fixture.controller.handleMessage({ type: 'reloadDocumentFromDisk', topLine: 1, topLineOffset: 0 });
@@ -264,7 +285,7 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
 
 {
   const fixture = createHostFixture('disk version', 'disk version');
-  await fixture.controller.handleMessage({ type: 'ready' });
+  await fixture.controller.handleMessage({ type: 'ready', pageId });
   await flushMicrotasks();
   await fixture.controller.handleMessage({
     type: 'saveDocumentRevision',
@@ -288,7 +309,8 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
 
 {
   const fixture = createHostFixture();
-  await fixture.controller.handleMessage({ type: 'draftChanged', text: 'retain after failure', receiptVersion: 1 });
+  await fixture.controller.handleMessage({ type: 'ready', pageId });
+  await fixture.controller.handleMessage({ type: 'draftChanged', pageId, text: 'retain after failure', baseVersion: document.version, receiptVersion: 1 });
   await fixture.controller.handleMessage({ type: 'reloadDocumentFromDisk', topLine: 1, topLineOffset: 0 });
   await fixture.controller.handleMessage({
     type: 'documentReloadPresentationCompleted',
@@ -296,12 +318,14 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
     presented: false,
     receiptVersion: 1
   });
-  assert.equal(await closeAndReadRecoveredText(fixture.controller), 'retain after failure', 'failure retains recovery');
+  assert.equal(await closeAndReadRecoveredText(fixture.controller), 'disk version', 'a failed presentation acknowledgement must not overwrite the disk revision');
+  assert.match(fixture.getRecoveryCopies()[0] ?? '', /retain after failure/, 'failure retains local recovery in an untitled conflict copy');
 }
 
 {
   const fixture = createHostFixture();
-  await fixture.controller.handleMessage({ type: 'draftChanged', text: 'retain after stale receipt', receiptVersion: 1 });
+  await fixture.controller.handleMessage({ type: 'ready', pageId });
+  await fixture.controller.handleMessage({ type: 'draftChanged', pageId, text: 'retain after stale receipt', baseVersion: document.version, receiptVersion: 1 });
   await fixture.controller.handleMessage({ type: 'reloadDocumentFromDisk', topLine: 1, topLineOffset: 0 });
   await fixture.controller.handleMessage({
     type: 'documentReloadPresentationCompleted',
@@ -309,18 +333,20 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
     presented: true,
     receiptVersion: 1
   });
-  assert.equal(await closeAndReadRecoveredText(fixture.controller), 'retain after stale receipt', 'stale receipt retains recovery');
+  assert.equal(await closeAndReadRecoveredText(fixture.controller), 'disk version', 'a stale acknowledgement must not overwrite the disk revision');
+  assert.match(fixture.getRecoveryCopies()[0] ?? '', /retain after stale receipt/, 'stale receipt retains local recovery in an untitled conflict copy');
 }
 
 {
   const fixture = createHostFixture();
-  await fixture.controller.handleMessage({ type: 'draftChanged', text: 'first Draft', receiptVersion: 1 });
+  await fixture.controller.handleMessage({ type: 'ready', pageId });
+  await fixture.controller.handleMessage({ type: 'draftChanged', pageId, text: 'first Draft', baseVersion: document.version, receiptVersion: 1 });
   await fixture.controller.handleMessage({ type: 'reloadDocumentFromDisk', topLine: 1, topLineOffset: 0 });
   const reloadId = reloadIdFrom(fixture.postedToWebview);
   await fixture.controller.handleMessage({
     type: 'documentReloadPresentationCompleted', reloadId, presented: true, receiptVersion: 1
   });
-  await fixture.controller.handleMessage({ type: 'draftChanged', text: 'Draft after first receipt', receiptVersion: 2 });
+  await fixture.controller.handleMessage({ type: 'draftChanged', pageId, text: 'Draft after first receipt', baseVersion: document.version, receiptVersion: 2 });
   await fixture.controller.handleMessage({
     type: 'documentReloadPresentationCompleted', reloadId, presented: true, receiptVersion: 1
   });
@@ -333,10 +359,11 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
 
 {
   const fixture = createHostFixture();
-  await fixture.controller.handleMessage({ type: 'draftChanged', text: 'older Draft', receiptVersion: 1 });
+  await fixture.controller.handleMessage({ type: 'ready', pageId });
+  await fixture.controller.handleMessage({ type: 'draftChanged', pageId, text: 'older Draft', baseVersion: document.version, receiptVersion: 1 });
   await fixture.controller.handleMessage({ type: 'reloadDocumentFromDisk', topLine: 1, topLineOffset: 0 });
   const reloadId = reloadIdFrom(fixture.postedToWebview);
-  await fixture.controller.handleMessage({ type: 'draftChanged', text: 'newer Draft', receiptVersion: 2 });
+  await fixture.controller.handleMessage({ type: 'draftChanged', pageId, text: 'newer Draft', baseVersion: document.version, receiptVersion: 2 });
   await fixture.controller.handleMessage({
     type: 'documentReloadPresentationCompleted', reloadId, presented: true, receiptVersion: 2
   });
@@ -345,19 +372,96 @@ assert.equal(typeof immediateCloseFixture.getReceiveMessage(), 'function');
 
 {
   const closing = createHostFixture();
-  await closing.controller.handleMessage({ type: 'draftChanged', text: 'Draft recovered on reopen', receiptVersion: 1 });
+  await closing.controller.handleMessage({ type: 'ready', pageId });
+  await closing.controller.handleMessage({ type: 'draftChanged', pageId, text: 'Draft recovered on reopen', baseVersion: document.version, receiptVersion: 1 });
   assert.equal(
     await closeAndReadRecoveredText(closing.controller),
     'Draft recovered on reopen',
     'panel close retains and applies recovery'
   );
   const reopened = createHostFixture(document.text);
-  await reopened.controller.handleMessage({ type: 'ready' });
+  await reopened.controller.handleMessage({ type: 'ready', pageId });
   const init = reopened.postedToWebview.find((message) => message.type === 'init');
   assert.equal(init?.text, 'Draft recovered on reopen', 'reopened panel presents the recovered Draft');
   assert.equal(init?.uiLanguage, 'en', 'new panels receive one resolved UI language value');
   reopened.controller.dispose();
   await flushMicrotasks();
+}
+
+// Developer: Reload Webviews replaces only the iframe. The prior page's
+// recovery must be settled before the new Init, then the new page is allowed
+// to restart receipts at one. A late unseen prior-page final receipt is kept
+// as an untitled copy and never overwrites the new page's current Host text.
+{
+  const firstPageId = 'page_generation_first';
+  const secondPageId = 'page_generation_second';
+  const thirdPageId = 'page_generation_third';
+  const fixture = createHostFixture('Host text', 'Host text');
+  await fixture.controller.handleMessage({ type: 'ready', pageId: firstPageId });
+  await fixture.controller.handleMessage({
+    type: 'draftChanged', pageId: firstPageId, text: 'pending reload page one',
+    baseVersion: document.version, receiptVersion: 1
+  });
+  await fixture.controller.handleMessage({ type: 'ready', pageId: secondPageId });
+  const secondInit = fixture.postedToWebview.filter(message => message.type === 'init').at(-1);
+  assert.deepEqual({ pageId: secondInit?.pageId, text: secondInit?.text }, {
+    pageId: secondPageId, text: 'pending reload page one'
+  }, 'a new page initializes from safely settled predecessor recovery, not stale native text');
+  await fixture.controller.handleMessage({
+    type: 'draftChanged', pageId: secondPageId, text: 'pending close page two',
+    baseVersion: document.version, receiptVersion: 1
+  });
+  await fixture.controller.handleMessage({ type: 'ready', pageId: thirdPageId });
+  const thirdInit = fixture.postedToWebview.filter(message => message.type === 'init').at(-1);
+  assert.deepEqual({ pageId: thirdInit?.pageId, text: thirdInit?.text }, {
+    pageId: thirdPageId, text: 'pending close page two'
+  }, 'the next replacement also settles the page-two receipt-one candidate');
+  await fixture.controller.handleMessage({
+    type: 'draftChanged', pageId: firstPageId, text: 'late page one final',
+    baseVersion: 1, terminal: true, receiptVersion: 3
+  });
+  await fixture.controller.handleMessage({
+    type: 'draftChanged', pageId: firstPageId, text: 'late page one final',
+    baseVersion: 1, terminal: true, receiptVersion: 3
+  });
+  await fixture.controller.handleMessage({
+    type: 'draftChanged', pageId: thirdPageId, text: 'pending close page three',
+    baseVersion: document.version, receiptVersion: 1
+  });
+  await flushMicrotasks();
+  fixture.controller.dispose();
+  await flushMicrotasks();
+  assert.equal(document.text, 'pending close page three',
+    'each new-page receipt one survives to the next real close and is not rejected by prior high-water marks');
+  assert.match(fixture.getRecoveryCopies().at(-1) ?? '', /late page one final/,
+    'a late unseen predecessor receipt is retained non-destructively rather than dropped or applied');
+  assert.equal(fixture.getRecoveryCopies().filter(copy => copy.includes('late page one final')).length, 1,
+    'a duplicate terminal packet is bounded by page/receipt de-duplication');
+}
+
+{
+  const firstPageId = 'page_reload_ack_first';
+  const secondPageId = 'page_reload_ack_second';
+  const fixture = createHostFixture('Host text', 'disk text');
+  await fixture.controller.handleMessage({ type: 'ready', pageId: firstPageId });
+  await fixture.controller.handleMessage({
+    type: 'draftChanged', pageId: firstPageId, text: 'first page pending',
+    baseVersion: document.version, receiptVersion: 1
+  });
+  await fixture.controller.handleMessage({ type: 'reloadDocumentFromDisk', topLine: 1, topLineOffset: 0 });
+  const oldReloadId = reloadIdFrom(fixture.postedToWebview);
+  await fixture.controller.handleMessage({ type: 'ready', pageId: secondPageId });
+  await fixture.controller.handleMessage({
+    type: 'draftChanged', pageId: secondPageId, text: 'second page pending',
+    baseVersion: document.version, receiptVersion: 1
+  });
+  await fixture.controller.handleMessage({
+    type: 'documentReloadPresentationCompleted', reloadId: oldReloadId, presented: true, receiptVersion: 1
+  });
+  fixture.controller.dispose();
+  await flushMicrotasks();
+  assert.equal(document.text, 'second page pending',
+    'a late old-page disk-reload acknowledgement cannot discard a same-number new-page receipt');
 }
 
 console.log('Panel Session reload recovery checks passed');

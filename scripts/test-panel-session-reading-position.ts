@@ -19,7 +19,7 @@ const [{ createPanelSessionController }, { createPendingDraftRecovery }] = await
   import('../src/application/pendingDraftRecovery')
 ]);
 
-const createFixture = (hasExplicitNavigation: boolean) => {
+const createFixture = (hasExplicitNavigation: boolean, pageId: string) => {
   const messages: Array<Record<string, unknown>> = [];
   const remembered: Array<{ line: number; lineOffset: number }> = [];
   const panel = {
@@ -35,8 +35,9 @@ const createFixture = (hasExplicitNavigation: boolean) => {
     onDidDispose: () => panelSessionDisposable()
   };
   const pendingDraftRecovery = createPendingDraftRecovery({
-    readCurrentText: () => document.text,
-    applyDraft: async () => true
+    readCurrentRevision: () => ({ version: document.version, text: document.text }),
+    applyDraft: async () => true,
+    preserveConflict: async () => false
   });
   const controller = createPanelSessionController(createPanelSessionControllerParams({
     panel,
@@ -64,8 +65,8 @@ const createFixture = (hasExplicitNavigation: boolean) => {
   return { controller, messages, remembered };
 };
 
-const ordinary = createFixture(false);
-await ordinary.controller.handleMessage({ type: 'ready' });
+const ordinary = createFixture(false, 'reading-position-page-1');
+await ordinary.controller.handleMessage({ type: 'ready', pageId: 'reading-position-page-1' });
 const ordinaryInit = ordinary.messages.find((message) => message.type === 'init');
 assert.deepEqual(ordinaryInit?.readingPositionRestore, { line: 12, lineOffset: 3.5 });
 assert.equal(ordinaryInit?.restoreReadingPositionOnOpen, true);
@@ -76,8 +77,8 @@ await ordinary.controller.handleMessage({
 assert.deepEqual(ordinary.remembered, [{ line: 18, lineOffset: 2 }]);
 ordinary.controller.dispose();
 
-const explicit = createFixture(true);
-await explicit.controller.handleMessage({ type: 'ready' });
+const explicit = createFixture(true, 'reading-position-page-2');
+await explicit.controller.handleMessage({ type: 'ready', pageId: 'reading-position-page-2' });
 const explicitInit = explicit.messages.find((message) => message.type === 'init');
 assert.equal(explicitInit?.readingPositionRestore, null, 'explicit navigation must win before Webview mount');
 explicit.controller.dispose();

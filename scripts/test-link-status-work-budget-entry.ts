@@ -1,3 +1,4 @@
+import './browser-page-identity-test-helpers';
 import '../webview/src/index';
 import * as local from '../webview/src/helpers/localLinks';
 import * as wiki from '../webview/src/helpers/wikiLinks';

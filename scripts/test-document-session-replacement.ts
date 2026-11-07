@@ -60,8 +60,9 @@ for (const eol of ['\n', '\r\n']) {
     const controller = createPanelSessionController(createPanelSessionControllerParams({
       panel, document,
       pendingDraftRecovery: createPendingDraftRecovery({
-        readCurrentText: () => document.text,
-        applyDraft: async () => true
+        readCurrentRevision: () => ({ version: document.version, text: document.text }),
+        applyDraft: async () => true,
+        preserveConflict: async () => false
       }),
       readDiskText: () => document.text
     }) as never);

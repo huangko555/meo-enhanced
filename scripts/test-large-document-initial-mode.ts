@@ -28,6 +28,7 @@ mock.module('vscode', () => vscodeMock);
 const { createPanelSessionController } = await import('../src/extension/panelSession');
 const persisted = new Map<string, unknown>();
 const persistedKeys: string[] = [];
+let pageSequence = 0;
 const context = {
   globalState: {
     get: <T>(key: string, fallback?: T): T | undefined => persisted.has(key)
@@ -38,6 +39,7 @@ const context = {
 };
 
 const openPanel = async (text: string, targetDocument = document) => {
+  const pageId = `large-document-page-${++pageSequence}`;
   targetDocument.text = text;
   targetDocument.version += 1;
   const messages: Array<Record<string, unknown>> = [];
@@ -60,11 +62,14 @@ const openPanel = async (text: string, targetDocument = document) => {
     pendingDraftRecovery: {
       remember: (_text: string | null, version: number) => version,
       discardIfCurrent: () => true,
-      recover: async () => false
+      recover: async () => false,
+      settleForTermination: async () => false,
+      preserveRetired: async () => false,
+      hasPending: () => false
     },
     overrides: { context }
   }) as never);
-  await controller.handleMessage({ type: 'ready' });
+  await controller.handleMessage({ type: 'ready', pageId });
   const init = messages.find((message) => message.type === 'init');
   assert.ok(init, 'the Host must deliver one Init snapshot');
   assert.equal(init.text, text, 'the policy and Init must use the same frozen text');

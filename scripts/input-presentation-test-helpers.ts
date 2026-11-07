@@ -166,7 +166,7 @@ async function open(page: Page, text: string, coldPreview = false, initialMode: 
   await page.exposeFunction('__presentationHost', async (message: any) => {
     if (message.type === 'ready') {
       ready = true;
-      return { type: 'init', documentId: 'file:///presentation.md', text, version, savedRevision: { version, text },
+      return { type: 'init', pageId: message.pageId, documentId: 'file:///presentation.md', text, version, savedRevision: { version, text },
         diagnostics: [], mode: initialMode, uiLanguage: testOptions.uiLanguage ?? 'en', sourceLineNumbers: 'on', previewAppearance: 'dark',
         previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,
         gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit',
