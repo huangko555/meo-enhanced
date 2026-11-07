@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
+import { ChangeSet, Text } from '@codemirror/state';
 import { createPendingDraftRecovery } from '../src/application/pendingDraftRecovery';
 import { createDraftRecoveryReceiver } from '../src/host/draftRecoveryReceiver';
 import type { HostToWebviewMessage, WebviewToHostMessage } from '../src/protocol/messages';
 import type { InitMessage } from '../src/protocol/readyInit';
 import { createDocumentSessionWebviewAdapter } from '../webview/src/adapters/documentSessionWebviewAdapter';
-import { documentSnapshotFromString } from '../webview/src/adapters/documentSnapshot';
-import type { DocumentTextEdit } from '../src/foundation/documentSnapshot';
+import { documentEdit, documentSnapshotFromString } from '../webview/src/adapters/documentSnapshot';
 
 const pageId = 'page_webview_adapter';
 const init = {
@@ -447,12 +447,9 @@ for (const closeImmediately of [false, true]) {
   for (let index = 0; index < 12; index += 1) await Promise.resolve();
   const save = messages.find(message => message.type === 'saveDocumentRevision');
   assert.ok(save?.type === 'saveDocumentRevision');
-  const before = documentSnapshotFromString('abc');
-  const after = before.replace(3, 3, '!');
-  const edit: DocumentTextEdit = {
-    before, after, changes: [{ from: 3, to: 3, insert: '!' }],
-    compose: () => { throw new Error('not used'); }, invert: () => { throw new Error('not used'); }
-  };
+  const before = Text.of(['abc']);
+  const changes = ChangeSet.of([{ from: 3, to: 3, insert: '!' }], before.length);
+  const edit = documentEdit(changes, before, changes.apply(before));
   session.accept({ type: 'docChanged', version: 2, text: 'Abc' });
   session.localDraftChanged(edit);
   if (closeImmediately) {
@@ -503,12 +500,9 @@ for (const closeImmediately of [false, true]) {
   for (let index = 0; index < 12; index += 1) await Promise.resolve();
   const save = messages.find(message => message.type === 'saveDocumentRevision');
   assert.ok(save?.type === 'saveDocumentRevision');
-  const before = documentSnapshotFromString('abc');
-  const after = before.replace(1, 2, 'x');
-  const edit: DocumentTextEdit = {
-    before, after, changes: [{ from: 1, to: 2, insert: 'x' }],
-    compose: () => { throw new Error('not used'); }, invert: () => { throw new Error('not used'); }
-  };
+  const before = Text.of(['abc']);
+  const changes = ChangeSet.of([{ from: 1, to: 2, insert: 'x' }], before.length);
+  const edit = documentEdit(changes, before, changes.apply(before));
   session.localDraftChanged(edit);
   session.accept({ type: 'docChanged', version: 2, text: 'ayc' });
   if (closeImmediately) {
@@ -570,15 +564,9 @@ for (const closeImmediately of [false, true]) {
   for (let i = 0; i < 12; i++) await Promise.resolve();
   const save = messages.find(message => message.type === 'saveDocumentRevision');
   assert.ok(save?.type === 'saveDocumentRevision', 'large close needs an in-flight save');
-  const before = documentSnapshotFromString(checkpoint);
-  const after = before.replace(before.length, before.length, '!');
-  const finalEdit: DocumentTextEdit = {
-    before,
-    after,
-    changes: [{ from: before.length, to: before.length, insert: '!' }],
-    compose: () => { throw new Error('not used by this adapter boundary test'); },
-    invert: () => { throw new Error('not used by this adapter boundary test'); }
-  };
+  const before = Text.of(checkpoint.split('\n'));
+  const changes = ChangeSet.of([{ from: before.length, to: before.length, insert: '!' }], before.length);
+  const finalEdit = documentEdit(changes, before, changes.apply(before));
   closing.localDraftChanged(finalEdit);
   closing.dispose();
   const finalRecovery = messages.at(-1);

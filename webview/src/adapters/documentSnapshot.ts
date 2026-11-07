@@ -1,7 +1,7 @@
 import { ChangeSet, Text } from '@codemirror/state';
 import { readDocumentTextProjection, rememberDocumentTextProjection } from '../application/documentTextProjection';
 import { normalizeDocumentText } from '../../../src/foundation/documentText';
-import type { DocumentText, DocumentTextEdit, DocumentTextSnapshot } from '../../../src/foundation/documentSnapshot';
+import type { DocumentText, DocumentTextChange, DocumentTextEdit, DocumentTextSnapshot } from '../../../src/foundation/documentSnapshot';
 
 const snapshots = new WeakMap<Text, CodeMirrorDocumentSnapshot>();
 
@@ -65,6 +65,12 @@ class CodeMirrorDocumentEdit implements DocumentTextEdit {
         insert: after.sliceString(range.fromB, range.toB) }));
     }
     return this.cachedChanges;
+  }
+  rebuild(before: DocumentText, changes: readonly DocumentTextChange[]): DocumentTextEdit {
+    const base = before instanceof CodeMirrorDocumentSnapshot ? before.value
+      : Text.of(before.toString().split('\n'));
+    const changeSet = ChangeSet.of(changes, base.length);
+    return new CodeMirrorDocumentEdit(changeSet, base, changeSet.apply(base));
   }
   compose(next: DocumentTextEdit): DocumentTextEdit {
     if (!(next instanceof CodeMirrorDocumentEdit) || !this.after.equals(next.before)) {

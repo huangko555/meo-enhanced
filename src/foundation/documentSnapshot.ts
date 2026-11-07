@@ -15,6 +15,8 @@ export interface DocumentTextEdit {
   readonly before: DocumentTextSnapshot;
   readonly after: DocumentTextSnapshot;
   readonly changes: readonly DocumentTextChange[];
+  /** Rebuild this edit kind against a new base and translated before-ranges. */
+  rebuild(before: DocumentText, changes: readonly DocumentTextChange[]): DocumentTextEdit;
   compose(next: DocumentTextEdit): DocumentTextEdit;
   invert(): DocumentTextEdit;
 }

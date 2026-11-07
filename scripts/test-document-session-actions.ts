@@ -97,8 +97,8 @@ const pageId = 'page_actions';
 }
 
 // Both the ordinary checkpoint and the terminal close handoff must carry the
-// same fully rebased candidate. The adapter merely transports the coordinator
-// result; it must not collapse the original multi-range transaction again.
+// same fully rebased candidate. A second Host revision must rebase the retained
+// edit lineage again before close; the adapter merely transports that result.
 {
   const base = 'abcdef';
   const before = Text.of([base]);
@@ -129,11 +129,22 @@ const pageId = 'page_actions';
   await adapter.execute(actions);
   const rebasedDraft = actions.find(action => action.type === 'rememberDraft');
   if (rebasedDraft?.type !== 'rememberDraft') throw new Error('Expected rebased draft recovery action');
-  adapter.preserveDraft(rebasedDraft);
+  const secondActions = coordinator.handle({
+    type: 'hostRevisionChanged', version: 3, text: 'abCDef'
+  });
+  await adapter.execute(secondActions);
+  const latestRebasedDraft = secondActions.find(action => action.type === 'rememberDraft');
+  if (latestRebasedDraft?.type !== 'rememberDraft') throw new Error('Expected second rebased draft recovery action');
+  adapter.preserveDraft(latestRebasedDraft);
 
   assert.deepEqual(messages, [
     { type: 'draftChanged', pageId, text: 'XbCdeY', baseVersion: 2, receiptVersion: 2 },
-    { type: 'draftChanged', pageId, text: 'XbCdeY', baseVersion: 2, terminal: true, receiptVersion: 2 }
+    { type: 'draftChanged', pageId, text: 'XbCDeY', baseVersion: 3, receiptVersion: 3 },
+    {
+      type: 'applyChanges', baseVersion: 3,
+      changes: [{ from: 0, to: 1, insert: 'X' }, { from: 5, to: 6, insert: 'Y' }]
+    },
+    { type: 'draftChanged', pageId, text: 'XbCDeY', baseVersion: 3, terminal: true, receiptVersion: 3 }
   ]);
 }
 

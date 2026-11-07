@@ -118,8 +118,9 @@ export function transitionDocumentSession(
       };
     }
     const draftText = rebasedText ?? event.text;
-    const edit = localEdit && (state.draft === null ? localEdit
-      : state.draft.edit?.compose(localEdit));
+    const nextEdit = localEdit ?? (editRebase?.kind === 'merged' ? editRebase.edit : undefined);
+    const edit = nextEdit && (state.draft === null ? nextEdit
+      : state.draft.edit?.compose(nextEdit));
     if (state.pendingChange === null && (edit ? isEmptyDocumentEdit(edit) : equalDocumentText(draftText, state.revision.text))) {
       if (state.draft === null) {
         return state.lastRejectedExternalRevision === null
@@ -162,6 +163,24 @@ export function transitionDocumentSession(
       return equalDocumentText(revision.text, state.revision.text)
         ? { state, effects: [] }
         : { state, effects: [{ type: 'requestResync' }] };
+    }
+    if (state.draft !== null && equalDocumentText(revision.text, state.draft.text)) {
+      const isAwaitingChange = state.savePhase === 'awaiting-change';
+      return {
+        state: {
+          ...state,
+          revision,
+          draft: null,
+          pendingChange: null,
+          lastRejectedExternalRevision: null,
+          savePhase: isAwaitingChange ? 'saving' : state.savePhase,
+          savingRevision: isAwaitingChange ? revision : state.savingRevision
+        },
+        effects: [
+          { type: 'persistDraft', draft: null },
+          ...(isAwaitingChange ? [{ type: 'saveRevision' as const, revision }] : [])
+        ]
+      };
     }
     if (state.pendingChange !== null && equalDocumentText(revision.text, state.pendingChange.text)) {
       if (state.draft !== null && !equalDocumentText(state.draft.text, state.pendingChange.text)) {
@@ -241,7 +260,11 @@ export function transitionDocumentSession(
         effects
       };
     }
-    const draft = { baseRevision: revision.number, text: rebasedText };
+    const draft = {
+      baseRevision: revision.number,
+      text: rebasedText,
+      ...(editRebase?.kind === 'merged' ? { edit: editRebase.edit } : {})
+    };
     const pendingChange = { ...draft };
     return {
       state: {
@@ -349,7 +372,7 @@ type TextChange = {
 };
 
 type EditRebase =
-  | { readonly kind: 'merged'; readonly text: DocumentText }
+  | { readonly kind: 'merged'; readonly text: DocumentText; readonly edit: DocumentTextEdit }
   | { readonly kind: 'conflict' }
   | { readonly kind: 'unavailable' };
 
@@ -359,11 +382,14 @@ type EditRebase =
  */
 function rebaseDocumentEdit(edit: DocumentTextEdit, incomingText: DocumentText): EditRebase {
   if (!isReplayableDocumentEdit(edit)) return { kind: 'unavailable' };
-  if (equalDocumentText(edit.after, incomingText)) return { kind: 'merged', text: incomingText };
+  if (equalDocumentText(edit.after, incomingText)) {
+    return { kind: 'merged', text: incomingText, edit: edit.rebuild(incomingText, []) };
+  }
 
   const incomingChange = findTextChange(readDocumentText(edit.before), readDocumentText(incomingText));
   if (incomingChange === null) {
-    return { kind: 'merged', text: applyTextChanges(incomingText, edit.changes) };
+    const rebasedEdit = edit.rebuild(incomingText, edit.changes);
+    return { kind: 'merged', text: rebasedEdit.after, edit: rebasedEdit };
   }
 
   const delta = incomingChange.insert.length - (incomingChange.to - incomingChange.from);
@@ -377,7 +403,8 @@ function rebaseDocumentEdit(edit: DocumentTextEdit, incomingText: DocumentText):
       insert: change.insert
     });
   }
-  return { kind: 'merged', text: applyTextChanges(incomingText, rebasedChanges) };
+  const rebasedEdit = edit.rebuild(incomingText, rebasedChanges);
+  return { kind: 'merged', text: rebasedEdit.after, edit: rebasedEdit };
 }
 
 /** Real edit ranges must describe their recorded before/after transaction. */

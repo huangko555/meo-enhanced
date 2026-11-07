@@ -62,6 +62,128 @@ function assertMultiRangeRebase(input: {
   }
 }
 
+// Rebased multi-range transactions must remain a real edit lineage. A second
+// Host revision and a following local transaction both operate on that lineage,
+// rather than falling back to a one-span draft comparison.
+for (const [representation, initialText, hostV2, hostV3] of [
+  ['string', 'abcdef', 'abCdef', 'abCDef'],
+  ['snapshot', documentSnapshotFromString('abcdef'), documentSnapshotFromString('abCdef'), documentSnapshotFromString('abCDef')]
+] as const) {
+  const local = createTransactionEdit('abcdef', [
+    { from: 0, to: 1, insert: 'X' },
+    { from: 5, to: 6, insert: 'Y' }
+  ]);
+  const createState = () => createDocumentSession({
+    documentId: `file:///lineage-${representation}.md`,
+    revision: { number: 1, text: initialText },
+    savedRevision: { revisionNumber: 1, text: initialText }
+  });
+
+  let localThenHost = transitionDocumentSession(createState(), {
+    type: 'draftChanged', text: local.after, edit: local
+  });
+  localThenHost = transitionDocumentSession(localThenHost.state, {
+    type: 'revisionReceived', revision: { number: 2, text: hostV2 }
+  });
+  assert.equal(readDocumentText(localThenHost.state.draft?.text ?? ''), 'XbCdeY');
+  assert.equal(readDocumentText(localThenHost.state.draft?.edit?.before ?? ''), 'abCdef');
+  assert.equal(readDocumentText(localThenHost.state.draft?.edit?.after ?? ''), 'XbCdeY');
+  const afterSecondHost = transitionDocumentSession(localThenHost.state, {
+    type: 'revisionReceived', revision: { number: 3, text: hostV3 }
+  });
+  assert.equal(readDocumentText(afterSecondHost.state.draft?.text ?? ''), 'XbCDeY',
+    `local -> Host v2 -> Host v3 keeps multi-range lineage for ${representation}`);
+  assert.equal(afterSecondHost.state.draft?.conflictBaseText, undefined);
+
+  const hostFirst = transitionDocumentSession(createState(), {
+    type: 'revisionReceived', revision: { number: 2, text: hostV2 }
+  });
+  const hostThenLocal = transitionDocumentSession(hostFirst.state, {
+    type: 'draftChanged', text: local.after, edit: local
+  });
+  const hostLocalHost = transitionDocumentSession(hostThenLocal.state, {
+    type: 'revisionReceived', revision: { number: 3, text: hostV3 }
+  });
+  assert.equal(readDocumentText(hostLocalHost.state.draft?.text ?? ''), 'XbCDeY',
+    `Host v2 -> local -> Host v3 keeps multi-range lineage for ${representation}`);
+
+  const followUp = createTransactionEdit('XbCdeY', [{ from: 4, to: 5, insert: 'E' }]);
+  const localFollowUp = transitionDocumentSession(localThenHost.state, {
+    type: 'draftChanged', text: followUp.after, edit: followUp
+  });
+  const localHostLocalHost = transitionDocumentSession(localFollowUp.state, {
+    type: 'revisionReceived', revision: { number: 3, text: hostV3 }
+  });
+  assert.equal(readDocumentText(localHostLocalHost.state.draft?.text ?? ''), 'XbCDEY',
+    `local -> Host v2 -> local -> Host v3 composes rebased lineage for ${representation}`);
+}
+
+// A Host revision equal to the current draft is acceptance, not a request to
+// resubmit. This does not match a later draft and therefore cannot clear it.
+{
+  const local = createTransactionEdit('abcdef', [{ from: 0, to: 1, insert: 'X' }]);
+  const drafted = transitionDocumentSession(createDocumentSession({
+    documentId: 'file:///accepted-local-draft.md',
+    revision: { number: 1, text: 'abcdef' },
+    savedRevision: { revisionNumber: 1, text: 'abcdef' }
+  }), { type: 'draftChanged', text: local.after, edit: local });
+  const accepted = transitionDocumentSession(drafted.state, {
+    type: 'revisionReceived', revision: { number: 2, text: local.after }
+  });
+  assert.equal(accepted.state.draft, null);
+  assert.equal(accepted.state.pendingChange, null);
+  assert.deepEqual(accepted.effects, [{ type: 'persistDraft', draft: null }]);
+
+  const later = transitionDocumentSession(drafted.state, {
+    type: 'draftChanged', text: 'Xbcdef!'
+  });
+  const olderAck = transitionDocumentSession(later.state, {
+    type: 'revisionReceived', revision: { number: 2, text: local.after }
+  });
+  assert.equal(readDocumentText(olderAck.state.draft?.text ?? ''), 'Xbcdef!');
+  assert.notEqual(olderAck.state.draft, null);
+}
+
+// Pending acknowledgement is narrower than a later local draft. In particular,
+// an awaiting save must keep and rebase the later lineage instead of treating
+// the acknowledged older text as the current draft.
+{
+  const first = createTransactionEdit('abcdef', [{ from: 0, to: 1, insert: 'X' }]);
+  const second = createTransactionEdit('Xbcdef', [{ from: 6, to: 6, insert: '!' }]);
+  const initialLineage = createDocumentSession({
+    documentId: 'file:///pending-lineage.md',
+    revision: { number: 1, text: 'abcdef' },
+    savedRevision: { revisionNumber: 1, text: 'abcdef' }
+  });
+  const firstDraft = transitionDocumentSession(initialLineage, {
+    type: 'draftChanged', text: first.after, edit: first
+  });
+  const submitted = transitionDocumentSession(firstDraft.state, { type: 'submitDraft' });
+  const laterDraft = transitionDocumentSession(submitted.state, {
+    type: 'draftChanged', text: second.after, edit: second
+  });
+  const awaitingSave = transitionDocumentSession(laterDraft.state, { type: 'saveRequested' });
+  const olderAcknowledged = transitionDocumentSession(awaitingSave.state, {
+    type: 'revisionReceived', revision: { number: 2, text: first.after }
+  });
+  assert.equal(readDocumentText(olderAcknowledged.state.draft?.text ?? ''), 'Xbcdef!');
+  assert.equal(readDocumentText(olderAcknowledged.state.draft?.edit?.before ?? ''), 'Xbcdef');
+  assert.equal(readDocumentText(olderAcknowledged.state.draft?.edit?.after ?? ''), 'Xbcdef!');
+  assert.equal(readDocumentText(olderAcknowledged.state.pendingChange?.text ?? ''), 'Xbcdef!');
+  assert.equal(olderAcknowledged.state.savePhase, 'awaiting-change');
+  assert.deepEqual(olderAcknowledged.effects.map(effect => effect.type), ['persistDraft', 'submitChange']);
+
+  const acceptedWhileAwaiting = transitionDocumentSession(firstDraft.state, { type: 'submitDraft' });
+  const saving = transitionDocumentSession(acceptedWhileAwaiting.state, { type: 'saveRequested' });
+  const accepted = transitionDocumentSession(saving.state, {
+    type: 'revisionReceived', revision: { number: 2, text: first.after }
+  });
+  assert.equal(accepted.state.draft, null);
+  assert.equal(accepted.state.pendingChange, null);
+  assert.equal(accepted.state.savePhase, 'saving');
+  assert.deepEqual(accepted.effects.map(effect => effect.type), ['persistDraft', 'saveRevision']);
+}
+
 const initial = createDocumentSession({
   documentId: 'file:///notes.md',
   revision: { number: 3, text: 'accepted' },
