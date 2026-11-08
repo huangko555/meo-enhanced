@@ -92,6 +92,8 @@ export type RenderMarkdownOptions = {
   deferDisplayMath?: boolean;
   /** Prepared Preview contexts defer inline roots and expose individual endnotes. */
   windowedPresentation?: boolean;
+  /** Interactive Preview projects large code syntax only around the viewport. */
+  deferCodeHighlight?: boolean;
   /** Permit local file destinations alongside the preset's safe URL schemes. */
   allowLocalLinks?: boolean;
   showComments?: boolean;
@@ -262,12 +264,14 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
       ].join('');
     }
 
-    // Windowed Preview owns viewport Shiki projection. Building a second,
-    // whole-fence fallback token tree first defeats that bounded presentation.
+    // Interactive Preview owns viewport Shiki projection, including its full
+    // screen-reader route. A whole-fence fallback tree duplicates that work.
     // Standalone HTML/PDF/Word continue to render their complete token HTML.
-    const highlighted = band || options.windowedPresentation && source.length >= 64_000 && viewportCodeLanguages.has(language) && !options.highlightCode
+    const deferred = (options.windowedPresentation || options.deferCodeHighlight) && source.length >= 64_000 && viewportCodeLanguages.has(language) && !options.highlightCode;
+    const highlighted = band || deferred
       ? escapeHtml(source)
       : options.highlightCode?.(source, language) ?? highlightFence(source, language);
+    const compact = options.deferCodeHighlight === true && source.length >= 64_000 && !band && !github && !options.presetDefinition?.custom;
     const className = language ? ` class="hljs language-${escapeHtmlAttr(language)}"` : ' class="hljs"';
     const languageLabel = language && (!band || band.first)
       ? `<div class="meo-export-code-language-label">${escapeHtml(language)}</div>`
@@ -282,7 +286,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
     return [
       `<div class="meo-export-code-block-wrap"${sourceAttrs}${exportAttributes}${fenceStart ? ' data-meo-code-fence-start="true"' : ''}${fenceEnd ? ' data-meo-code-fence-end="true"' : ''}${band ? ` data-meo-code-id="${band.id}" data-meo-code-offset="${band.offset}" data-meo-code-digits="${band.digits}" data-meo-code-part="${band.first ? 'start' : band.last ? 'end' : 'middle'}"` : ''}>`,
       languageLabel,
-      `<pre class="meo-export-code-block"><code${className}>${renderHighlightedCodeLines(highlighted, source, options.target, band, codeBlock.meta?.meoSourceLines)}</code></pre>`,
+      `<pre class="meo-export-code-block"><code${className}${compact ? ` style="--meo-preview-code-digits:${Math.max(3, String(contentLines).length)}"` : ''}>${renderHighlightedCodeLines(highlighted, source, options.target, band, codeBlock.meta?.meoSourceLines, compact)}</code></pre>`,
       '</div>'
     ].join('');
   };
@@ -573,7 +577,7 @@ export function prepareMarkdownPresentation(options: RenderMarkdownOptions): Mar
   };
 }
 
-function renderHighlightedCodeLines(highlighted: string, source: string, target: RenderMarkdownOptions['target'], band?: CodeBand, mappedSourceLines?: readonly number[]): string {
+function renderHighlightedCodeLines(highlighted: string, source: string, target: RenderMarkdownOptions['target'], band?: CodeBand, mappedSourceLines?: readonly number[], compact = false): string {
   const rows: string[] = [];
   const openSpans: string[] = [];
   let rowHtml = '';
@@ -617,7 +621,9 @@ function renderHighlightedCodeLines(highlighted: string, source: string, target:
 
   // Browser grid rows need selectable breaks; Word normalization supplies its own.
   const sourceLines = source.split('\n');
-  return rows.map((row, index) => [
+  return rows.map((row, index) => compact
+    ? `<span class="meo-export-code-line meo-export-code-line-source meo-preview-code-line" data-line-number="${index + 1}"${mappedSourceLines?.[index] ? ` data-source-line="${mappedSourceLines[index]}"` : ''}>${row}${source.length > 0 && sourceLines[index] === '' ? '<br>' : ''}</span>`
+    : [
     '<span class="meo-export-code-line">',
     `<span class="meo-export-code-line-number" aria-hidden="true" data-line-number="${(band?.offset ?? 0) + index + 1}"></span>`,
     `<span class="meo-export-code-line-source"${(band?.lines ?? mappedSourceLines)?.[index] ? ` data-source-line="${(band?.lines ?? mappedSourceLines)![index]}"` : ''}>${row}${target !== 'docx' && source.length > 0 && sourceLines[index] === '' ? '<br>' : ''}</span>`,

@@ -668,6 +668,7 @@
       "scripts/test-pdf-mermaid-layout.ts",
       "scripts/test-pdf-page-background.ts",
       "scripts/test-preview-code-bands-production.ts",
+      "scripts/test-preview-code-accessibility.ts",
       "scripts/test-preview-code-copy.ts",
       "scripts/test-preview-code-highlight-layout.ts",
       "scripts/test-preview-code-update.ts",

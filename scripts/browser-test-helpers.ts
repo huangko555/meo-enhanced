@@ -46,6 +46,7 @@ export async function launchTestBrowser(
 
     executablePath = findBrowserExecutable();
     const args = ['--no-sandbox'];
+    if (process.env.MEO_TEST_FORCE_RENDERER_ACCESSIBILITY === '1') args.push('--force-renderer-accessibility');
     // Native smooth-scroll fixtures need real intermediate frames even when
     // the host OS disables animation. Other browser fixtures keep OS policy.
     if (process.env.MEO_TEST_NATIVE_SMOOTH_SCROLLING === '1') args.push('--enable-smooth-scrolling');

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createPreviewDocument } from '../src/export/previewDocument';
 import { preparePreviewDocument } from '../src/export/runtime';
+import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { decodePreviewDocumentManifest } from '../src/protocol/previewDocument';
 import { DomUtils, parseDocument } from 'htmlparser2';
 
@@ -25,7 +26,19 @@ if (copy.kind === 'copy') {
 }
 const full = preparePreviewDocument(options, true).renderAll().html;
 assert.equal((full.match(/class="meo-export-code-block-wrap"/g) ?? []).length, 1);
-assert.equal((full.match(/class="meo-export-code-line"/g) ?? []).length, 18000);
+assert.equal((full.match(/class="meo-export-code-line meo-export-code-line-source meo-preview-code-line"/g) ?? []).length, 18000);
+const accessible = preparePreviewDocument(options).renderAll().html;
+assert.equal((accessible.match(/data-line-number=/g) ?? []).length, 18000);
+assert.ok(!accessible.includes('hljs-number'), 'Complete interactive Preview must defer large-fence token DOM too');
+const standalone = renderMarkdownToHtml({ markdownText: options.markdownText, markdownFilePath: options.sourceDocumentPath, target: 'html' }).html;
+assert.equal((standalone.match(/class="meo-export-code-line"/g) ?? []).length, 18000);
+assert.ok(standalone.includes('hljs-number'), 'Standalone exports retain their complete syntax tree');
+assert.ok(!standalone.includes('meo-preview-code-line'));
+for (const language of ['', 'unsupported-code-language']) {
+  const plain = preparePreviewDocument({ ...options, markdownText: '```' + language + '\n' + source + '\n```' }).renderAll().html;
+  assert.equal((plain.match(/class="meo-export-code-line meo-export-code-line-source meo-preview-code-line"/g) ?? []).length, 18000,
+    'Plain and unknown-language code also avoid decorative row DOM in full Preview');
+}
 for (const closed of [true, false]) {
   const prepared = preparePreviewDocument({ ...options, markdownText: '```javascript\n' + source + (closed ? '\n```' : '') }, true);
   const first = prepared.renderBlock(0).html, middle = prepared.renderBlock(1).html;
