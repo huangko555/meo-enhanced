@@ -30,7 +30,31 @@ const fixture = async (language = 'zh-CN', appearance = 'light', mac = false) =>
   await page.addStyleTag({ content: ':root{--vscode-editor-font-size:15px;--vscode-editor-font-family:monospace;--vscode-font-family:Arial}' });
   await page.evaluate(isMac => Object.defineProperty(navigator, 'platform', { configurable: true, value: isMac ? 'MacIntel' : 'Win32' }), mac);
   await page.addScriptTag({ content: `
-    window.__hostMessages=[];window.__completed=[];
+    window.__hostMessages=[];window.__completed=[];window.__fontWheelStage='fixture-bootstrap';window.__fontWheelTrace=[];
+    window.__visibleEditorHit = content => {
+      const scroller = content?.closest('.cm-scroller'); if (!content || !scroller) return null;
+      const contentRect = content.getBoundingClientRect(), viewport = scroller.getBoundingClientRect();
+      const left = Math.max(Math.ceil(contentRect.left), Math.ceil(viewport.left), 0), top = Math.max(Math.ceil(contentRect.top), Math.ceil(viewport.top), 0);
+      const right = Math.min(Math.floor(contentRect.right), Math.floor(viewport.right), window.innerWidth), bottom = Math.min(Math.floor(contentRect.bottom), Math.floor(viewport.bottom), window.innerHeight);
+      if (left >= right || top >= bottom) return null;
+      return document.elementFromPoint(left + Math.min(8, right - left - 1), top + Math.min(8, bottom - top - 1));
+    };
+    if (!window.__fontWheelTraceInstalled) {
+      window.__fontWheelTraceInstalled=true;
+      document.addEventListener('wheel', event => {
+        const target = event.target;
+        const describe = element => element instanceof Element
+          ? { tag: element.tagName, className: element.className, inEditor: Boolean(element.closest('.editor-host')), inPreview: Boolean(element.closest('.preview-host')) }
+          : { tag: target?.nodeName ?? null };
+        const record = phase => window.__fontWheelTrace.push({
+          phase, stage: window.__fontWheelStage, deltaX: event.deltaX, deltaY: event.deltaY,
+          ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey, altKey: event.altKey,
+          defaultPrevented: event.defaultPrevented, target: describe(target),
+          activeElement: describe(document.activeElement)
+        });
+        record('capture'); queueMicrotask(() => record('after-dispatch'));
+      }, { capture: true });
+    }
     window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){
       window.__hostMessages.push(message);
       if(message.type==='setEditorFontSize'||message.type==='setEditorMouseWheelZoom') {
@@ -60,12 +84,56 @@ const fixture = async (language = 'zh-CN', appearance = 'light', mac = false) =>
   }, { preference: owner.getEditorFontSizePreference(), enabled: owner.getEditorMouseWheelZoom(), language, appearance });
   await page.waitForSelector('.editor-host > .cm-editor');
   await page.waitForFunction(() => !document.querySelector('.mode-toolbar')?.classList.contains('meo-preload-toolbar'));
+  await page.evaluate(() => {
+    const host = document.querySelector<HTMLElement>('.editor-host');
+    const loading = document.querySelector<HTMLElement>('.editor-loading');
+    const content = document.querySelector<HTMLElement>('.cm-content');
+    const hit = (window as any).__visibleEditorHit(content);
+    (window as any).__fontAdmissionTrace = {
+      startedAt: performance.now(), initial: {
+        loadingHidden: loading?.hidden ?? null, hostInert: host?.inert ?? null,
+        documentHasFocus: document.hasFocus(),
+        activeElement: document.activeElement?.className ?? document.activeElement?.tagName ?? null,
+        contentConnected: content?.isConnected ?? false,
+        hitElement: hit instanceof HTMLElement ? `${hit.tagName}.${hit.className}` : hit?.nodeName ?? null,
+        hitContent: Boolean(hit && content && (hit === content || content.contains(hit)))
+      }
+    };
+  });
+  await page.waitForFunction(() => {
+    const host = document.querySelector<HTMLElement>('.editor-host');
+    const loading = document.querySelector<HTMLElement>('.editor-loading');
+    const content = document.querySelector<HTMLElement>('.cm-content');
+    if (!host || !loading || !content || host.inert || !loading.hidden) return false;
+    const hit = (window as any).__visibleEditorHit(content);
+    return Boolean(hit && (hit === content || content.contains(hit)));
+  });
+  await page.evaluate(() => {
+    const trace = (window as any).__fontAdmissionTrace;
+    const host = document.querySelector<HTMLElement>('.editor-host');
+    const loading = document.querySelector<HTMLElement>('.editor-loading');
+    const content = document.querySelector<HTMLElement>('.cm-content');
+    const hit = (window as any).__visibleEditorHit(content);
+    trace.ready = {
+      elapsedMs: Math.round(performance.now() - trace.startedAt),
+      loadingHidden: loading?.hidden ?? null, hostInert: host?.inert ?? null,
+      documentHasFocus: document.hasFocus(),
+      activeElement: document.activeElement?.className ?? document.activeElement?.tagName ?? null,
+      contentConnected: content?.isConnected ?? false,
+      hitElement: hit instanceof HTMLElement ? `${hit.tagName}.${hit.className}` : hit?.nodeName ?? null,
+      hitContent: Boolean(hit && content && (hit === content || content.contains(hit)))
+    };
+    (window as any).__fontWheelStage = 'fixture-ready';
+  });
+  console.log('[input-admission:font-wheel]', JSON.stringify(await page.evaluate(() => (window as any).__fontAdmissionTrace)));
 };
 const size = () => page.$eval('.editor-host > .cm-editor', element => Number.parseFloat(getComputedStyle(element).fontSize));
 const waitSize = async (expected: number) => page.waitForFunction(value =>
   Number.parseFloat(getComputedStyle(document.querySelector('.editor-host > .cm-editor')!).fontSize) === value, {}, expected);
 const frames = () => page.evaluate(async () => { for (let i = 0; i < 3; i++) await new Promise(requestAnimationFrame); });
-const wheel = async (deltaY: number, modifier: 'Control' | 'Meta' | null = 'Control', selector = '.editor-host > .cm-editor') => {
+let wheelSequence = 0;
+const wheel = async (deltaY: number, modifier: 'Control' | 'Meta' | null = 'Control', selector = '.editor-host > .cm-editor', label?: string) => {
+  await page.evaluate((stage) => { (window as any).__fontWheelStage = stage; }, label ?? `wheel-${++wheelSequence}`);
   const box = await page.$eval(selector, element => element.getBoundingClientRect().toJSON());
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   if (modifier) await page.keyboard.down(modifier);
@@ -84,7 +152,13 @@ const switchSelector = '[data-setting="mouseWheelZoom"] [role="switch"]';
 try {
   await fixture();
   assert.equal(await size(), 15);
-  await wheel(-100); await waitSize(16); await waitSaved(16);
+  await wheel(-100, 'Control', '.editor-host > .cm-editor', 'auto-15-initial'); await waitSize(16); await waitSaved(16);
+  console.log('[wheel-receipt:auto-15-initial]', JSON.stringify(await page.evaluate(() => ({
+    stage: (window as any).__fontWheelStage,
+    wheelTrace: ((window as any).__fontWheelTrace ?? []).filter((entry: any) => entry.stage === 'auto-15-initial'),
+    messages: ((window as any).__hostMessages ?? []).filter((message: any) => message.type === 'setEditorFontSize')
+      .map((message: any) => ({ type: message.type, mode: message.mode, value: message.value }))
+  }))));
   assert.deepEqual(owner.getEditorFontSizePreference(), { mode: 'custom', value: 16 }, 'Auto 15 must ignore the old Custom 20');
   await wheel(100); await waitSize(15);
   await waitSaved(15);
@@ -187,7 +261,26 @@ try {
 } catch (error) {
   await fs.mkdir('.local/font-wheel-acceptance', { recursive: true });
   await page.screenshot({ path: '.local/font-wheel-acceptance/failure.png' });
-  console.error(await page.evaluate(() => ({ errors: (window as any).__hostMessages?.slice(-5), menu: document.querySelector('.more-tools-wrapper')?.outerHTML.slice(-2500) })));
+  console.error('[input-admission:font-wheel]', await page.evaluate(() => {
+    const host = document.querySelector<HTMLElement>('.editor-host');
+    const loading = document.querySelector<HTMLElement>('.editor-loading');
+    const content = document.querySelector<HTMLElement>('.cm-content');
+    const hit = (window as any).__visibleEditorHit(content);
+    return {
+      loadingHidden: loading?.hidden ?? null,
+      hostInert: host?.inert ?? null,
+      documentHasFocus: document.hasFocus(),
+      activeElement: document.activeElement?.className ?? document.activeElement?.tagName ?? null,
+      contentConnected: content?.isConnected ?? false,
+      hitElement: hit instanceof HTMLElement ? `${hit.tagName}.${hit.className}` : hit?.nodeName ?? null,
+      stage: (window as any).__fontWheelStage,
+      admission: (window as any).__fontAdmissionTrace ?? null,
+      wheelTrace: ((window as any).__fontWheelTrace ?? []).slice(-20),
+      messages: ((window as any).__hostMessages ?? []).slice(-10).map((message: any) => ({
+        type: message.type, value: message.value, mode: message.mode, enabled: message.enabled
+      }))
+    };
+  }));
   throw error;
 } finally { await closeTestBrowser(browser); }
 console.log('Editor font wheel production checks passed');

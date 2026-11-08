@@ -89,6 +89,7 @@ async function main(): Promise<void> {
       if (index === 220) return '| --- | --- |';
       if (index === 221) return '| rendered table target | value |';
       if (index === 222) return '| rendered table next | value |';
+      if (index === 223) return '';
       return index === 279
         ? `line ${index + 1} unique-navigation-target`
         : `line ${index + 1} ordinary content`;
@@ -102,7 +103,29 @@ async function main(): Promise<void> {
         onApplyChanges() {}
       });
       (window as any).__inputCursorEditor = editor;
+      const focusSnapshot = () => {
+        const view = editor.view;
+        const content = view.contentDOM as HTMLElement | undefined;
+        const active = document.activeElement;
+        const selection = document.getSelection();
+        return {
+          documentHasFocus: document.hasFocus(),
+          frameHasFocus: document.hasFocus(),
+          activeElement: active instanceof HTMLElement ? `${active.tagName}.${active.className}` : active?.nodeName ?? null,
+          viewHasFocus: view.hasFocus,
+          editorHasFocus: editor.hasFocus(),
+          contentConnected: content?.isConnected ?? false,
+          viewConnected: view.dom.isConnected,
+          contentTabIndex: content?.tabIndex ?? null,
+          contentRect: content ? { width: Math.round(content.getBoundingClientRect().width), height: Math.round(content.getBoundingClientRect().height) } : null,
+          activeInsideContent: Boolean(active && content?.contains(active)),
+          selectionText: selection?.toString() ?? '',
+          selectionAnchor: selection?.anchorNode?.parentElement?.closest('.cm-line')?.textContent ?? null
+        };
+      };
+      const beforeFind = focusSnapshot();
       const result = editor.findNext('unique-navigation-target', { focusEditor: true });
+      const afterFind = focusSnapshot();
       const scroller = editor.getScrollElement();
       scroller.dispatchEvent(new WheelEvent('wheel', {
         bubbles: true,
@@ -111,11 +134,17 @@ async function main(): Promise<void> {
         deltaMode: WheelEvent.DOM_DELTA_PIXEL
       }));
       scroller.scrollTop = 0;
+      const afterWheel = focusSnapshot();
       const frames: Array<{
         frame: number;
         scrollTop: number;
         focused: boolean;
         selectionText: string;
+        documentHasFocus: boolean;
+        frameHasFocus: boolean;
+        activeElement: string | null;
+        activeInsideContent: boolean;
+        contentConnected: boolean;
       }> = [];
       for (let frame = 0; frame < 12; frame += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -123,14 +152,32 @@ async function main(): Promise<void> {
           frame,
           scrollTop: scroller.scrollTop,
           focused: editor.hasFocus(),
-          selectionText: document.getSelection()?.toString() ?? ''
+          selectionText: document.getSelection()?.toString() ?? '',
+          documentHasFocus: document.hasFocus(),
+          frameHasFocus: document.hasFocus(),
+          activeElement: document.activeElement instanceof HTMLElement
+            ? `${document.activeElement.tagName}.${document.activeElement.className}`
+            : document.activeElement?.nodeName ?? null,
+          activeInsideContent: Boolean(document.activeElement && editor.view.contentDOM.contains(document.activeElement)),
+          contentConnected: editor.view.contentDOM.isConnected
         });
+      }
+      const ordinaryPosition = documentText.indexOf('unique-navigation-target');
+      const tablePosition = documentText.indexOf('rendered table target');
+      const syntaxScope = {
+        ordinary: (window as any).__getInputCursorSyntaxAncestors(editor, ordinaryPosition),
+        table: (window as any).__getInputCursorSyntaxAncestors(editor, tablePosition)
+      };
+      if (syntaxScope.ordinary.includes('Table') || !syntaxScope.table.includes('Table')) {
+        throw new Error(`Search fixture lost its syntax scopes after the existing reveal frames: ${JSON.stringify(syntaxScope)}`);
       }
       return {
         found: result?.found ?? false,
         scrollTop: scroller.scrollTop,
         text: editor.getText(),
         focused: editor.hasFocus(),
+        syntaxScope,
+        focusTrace: { beforeFind, afterFind, afterWheel },
         frames
       };
     }, text);

@@ -20,6 +20,7 @@ import { refreshLiveDecorationsAfterSearchEffect } from '../webview/src/liveMode
 
 (window as typeof window & {
   __createInputCursorEditor?: typeof createEditor;
+  __getInputCursorSyntaxAncestors?: (editor: ReturnType<typeof createEditor>, position: number) => readonly string[];
   __dispatchProductionInput?: (editor: ReturnType<typeof createEditor>, from: number, insert: string, to?: number) => void;
   __toggleFirstDetails?: (editor: ReturnType<typeof createEditor>) => boolean;
   __createDetailsOperationProbe?: (parent: HTMLElement, text: string) => {
@@ -31,6 +32,20 @@ import { refreshLiveDecorationsAfterSearchEffect } from '../webview/src/liveMode
     destroy(): void;
   };
 }).__createInputCursorEditor = createEditor;
+
+(window as typeof window & {
+  __getInputCursorSyntaxAncestors?: (editor: ReturnType<typeof createEditor>, position: number) => readonly string[];
+}).__getInputCursorSyntaxAncestors = (editor, position) => {
+  const names: string[] = [];
+  let node = syntaxTree(editor.view.state).resolveInner(position, 1);
+  for (;;) {
+    names.push(node.name);
+    const parent = node.parent;
+    if (!parent) break;
+    node = parent;
+  }
+  return names;
+};
 
 (window as any).__observeLiveSearchRefresh = (editor: ReturnType<typeof createEditor>) => {
   const compartment = new Compartment();

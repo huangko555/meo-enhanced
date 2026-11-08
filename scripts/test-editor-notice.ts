@@ -329,7 +329,11 @@ async function main() {
       throw new Error(`notice chrome did not relocalize: ${JSON.stringify(result.localizedChrome)}`);
     }
     const productionSource = fs.readFileSync(path.join(repoRoot, 'webview', 'src', 'index.ts'), 'utf8');
-    if (!productionSource.includes('root.replaceChildren(toolbar, editorNoticeBanner, editorWrapper, previewOptionsPanel)') ||
+    const rootMount = productionSource.match(/root\.replaceChildren\(([^;]+)\);/);
+    const rootChildren = rootMount?.[1].split(',').map(child => child.trim()) ?? [];
+    if (rootChildren[0] !== 'toolbar' || rootChildren[1] !== 'editorNoticeBanner' ||
+      rootChildren[2] !== 'editorWrapper' || rootChildren[3] !== 'previewOptionsPanel' ||
+      rootChildren.indexOf('editorNoticeBanner') !== 1 ||
       productionSource.includes('toolbar.replaceChildren(formatGroup, previewFormatGroup, toolbarOverflowIndicator, toolbarOverflowSection, toolbarRight, findPanelElements.panel, editorNoticeBanner)')) {
       throw new Error('production editor notice was not mounted as a root document-status layer');
     }

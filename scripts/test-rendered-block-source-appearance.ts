@@ -15,12 +15,63 @@ try {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.setContent('<!doctype html><meta charset="UTF-8"><style>html,body,#app{height:100%;margin:0}</style><div id="app" class="editor-host"></div>');
+  const mermaidLoadEvidence: { readonly helper: any[]; readonly requests: any[]; readonly failures: any[]; readonly responses: any[]; readonly console: any[] } = {
+    helper: [], requests: [], failures: [], responses: [], console: []
+  };
+  const isPackagedMermaidAsset = (url: string) => {
+    try {
+      const parsed = new URL(url);
+      return parsed.hostname === '127.0.0.1' && (parsed.pathname === '/mermaid.min.js' || parsed.pathname.startsWith('/mermaid/'));
+    } catch { return false; }
+  };
+  page.on('request', request => {
+    if (isPackagedMermaidAsset(request.url()) && mermaidLoadEvidence.requests.length < 16) {
+      mermaidLoadEvidence.requests.push({ url: request.url(), resourceType: request.resourceType() });
+    }
+  });
+  page.on('requestfailed', request => {
+    if (isPackagedMermaidAsset(request.url()) && mermaidLoadEvidence.failures.length < 16) {
+      mermaidLoadEvidence.failures.push({ url: request.url(), failure: request.failure()?.errorText ?? null });
+    }
+  });
+  page.on('response', response => {
+    if (isPackagedMermaidAsset(response.url()) && mermaidLoadEvidence.responses.length < 16) {
+      mermaidLoadEvidence.responses.push({ url: response.url(), status: response.status(), contentType: response.headers()['content-type'] ?? null });
+    }
+  });
+  page.on('console', message => {
+    const text = message.text();
+    if ((message.type() === 'error' || /mermaid|script|content security policy|csp/i.test(text)) && mermaidLoadEvidence.console.length < 16) {
+      mermaidLoadEvidence.console.push({ type: message.type(), text: text.slice(0, 360) });
+    }
+  });
+  await page.evaluate(() => {
+    const state = (window as any).__mermaidLoadEvidence = { csp: [] as any[], scriptErrors: [] as any[] };
+    window.addEventListener('securitypolicyviolation', event => {
+      if (state.csp.length < 16) state.csp.push({ blockedURI: event.blockedURI, violatedDirective: event.violatedDirective });
+    });
+    window.addEventListener('error', event => {
+      if (state.scriptErrors.length < 16) state.scriptErrors.push({ message: event.message, filename: event.filename, lineno: event.lineno });
+    }, true);
+  });
   await page.addStyleTag({ path: 'webview/src/styles.css' });
   const katexDirectory = 'node_modules/katex/dist';
   await page.addStyleTag({ content: fs.readFileSync(path.join(katexDirectory, 'katex.min.css'), 'utf8').replace(/url\((fonts\/[^)]+)\)/g, (_match, file) =>
     `url(data:font/${path.extname(file).slice(1)};base64,${fs.readFileSync(path.join(katexDirectory, file)).toString('base64')})`) });
   await page.addStyleTag({ content: ':root{--meo-font-live:Arial;--meo-font-live-size:16px;--meo-font-source:monospace;--meo-font-source-size:16px;--meo-semantic-codeCopyBackground:transparent;--meo-semantic-codeCopyHoverBackground:rgba(127,127,127,.2)}' });
-  await installPackagedMermaid(page);
+  try {
+    await installPackagedMermaid(page, { observe: observation => {
+      if (mermaidLoadEvidence.helper.length < 16) mermaidLoadEvidence.helper.push(observation);
+    } });
+  } catch (error) {
+    const pageContext = await page.evaluate(() => ({
+      url: location.href,
+      origin: location.origin,
+      csp: (window as any).__mermaidLoadEvidence?.csp ?? [],
+      scriptErrors: (window as any).__mermaidLoadEvidence?.scriptErrors ?? []
+    })).catch(() => null);
+    throw new Error(`Packaged Mermaid runtime load failed with bounded evidence: ${JSON.stringify({ pageContext, ...mermaidLoadEvidence })}\n${String(error)}`);
+  }
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
   const settle = (count = 8) => page.evaluate(async count => {
     for (let i = 0; i < count; i++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));

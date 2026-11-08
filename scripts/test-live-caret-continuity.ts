@@ -18,6 +18,13 @@ type CaretGeometry = {
   readonly visible: boolean;
 };
 
+// CodeMirror event names are hierarchical. The fixture models ordinary text
+// input (`input.type`), which matches the `input` owner but not checkbox/task
+// input (`input.task`). Returning true for every query would cancel the
+// physical input anchor as if a task control had been edited.
+const isOrdinaryInputEvent = (query: string): boolean =>
+  query === 'input' || query === 'input.type' || 'input.type'.startsWith(`${query}.`);
+
 function checkPendingInputLayoutOwnership(): void {
   const originalRequest = globalThis.requestAnimationFrame;
   const originalCancel = globalThis.cancelAnimationFrame;
@@ -72,7 +79,7 @@ function checkPendingInputLayoutOwnership(): void {
       pendingCorrection = true;
       view.state.selection.main.head += 1;
       continuity.observe({
-        transactions: [{ docChanged: true, isUserEvent: () => true }], changes: { iterChanges() {} }, selectionSet: true
+        transactions: [{ docChanged: true, isUserEvent: isOrdinaryInputEvent }], changes: { iterChanges() {} }, selectionSet: true
       } as any);
       if (reveals !== 0 || caretTop !== 350 || scroller.scrollTop !== 600) {
         throw new Error(`Virtual height correction must retain the physical input anchor: ${JSON.stringify({
@@ -134,7 +141,7 @@ function checkPendingInputLayoutOwnership(): void {
       if (reflowed) lineHeight = 48;
       view.state.selection.main.head += 1;
       continuity.observe({
-        transactions: [{ docChanged: true, isUserEvent: () => true }],
+        transactions: [{ docChanged: true, isUserEvent: isOrdinaryInputEvent }],
         changes: { iterChanges() {} },
         selectionSet: true
       } as any);
@@ -144,7 +151,7 @@ function checkPendingInputLayoutOwnership(): void {
         dom.dispatchEvent(new Event('beforeinput'));
         view.state.selection.main.head += 1;
         continuity.observe({
-          transactions: [{ docChanged: true, isUserEvent: () => true }], changes: { iterChanges() {} }, selectionSet: true
+          transactions: [{ docChanged: true, isUserEvent: isOrdinaryInputEvent }], changes: { iterChanges() {} }, selectionSet: true
         } as any);
         continuity.observe({ transactions: [{ docChanged: false, effects: [{ is: () => true }] }], selectionSet: false } as any);
         // Two post-refresh geometry receipts can arrive before any queued RAF.
@@ -205,7 +212,7 @@ function checkPendingInputLayoutOwnership(): void {
       }
     };
     nestedDom.dispatchEvent(new Event('beforeinput'));
-    nested.observe({ transactions: [{ docChanged: true, isUserEvent: () => true }], selectionSet: true } as any);
+    nested.observe({ transactions: [{ docChanged: true, isUserEvent: isOrdinaryInputEvent }], selectionSet: true } as any);
     flush();
     nestedTop = 700;
     nested.observe({ transactions: [], selectionSet: false, geometryChanged: true } as any);
@@ -229,7 +236,7 @@ function checkPendingInputLayoutOwnership(): void {
     outerScroller.dispatchEvent(new Event('meo-viewport-layout-change'));
     outerScroller.dispatchEvent(new Event('scroll'));
     flush();
-    nested.observe({ transactions: [{ docChanged: true, isUserEvent: () => true }], selectionSet: true } as any);
+    nested.observe({ transactions: [{ docChanged: true, isUserEvent: isOrdinaryInputEvent }], selectionSet: true } as any);
     nestedTop = 100;
     flush();
     outerScroller.dispatchEvent(new Event('wheel'));
@@ -905,4 +912,6 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+// Keep the deterministic ownership contract runnable without contending for
+// the serialized browser lease. The default entry remains unchanged.
+if (!process.argv.includes('--pure')) await main();

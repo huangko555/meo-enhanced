@@ -191,7 +191,11 @@ async function richTaskBackspaceCase(large: boolean, action: 'Backspace' | 'Ente
       // Keep the pixel witness on one compositing layer. Editing can switch
       // LCD/grayscale glyph rasterization despite identical geometry and color.
       // Identity/classes/geometry below still detect a replaced or raw heading.
-      heading.style.willChange = 'transform';
+      // CodeMirror owns the line's attributes and may remove an inline style
+      // during sync. Keep fixture instrumentation outside those attributes.
+      const layerStyle = document.createElement('style');
+      layerStyle.textContent = '.editor-host .cm-line.meo-md-h2 { will-change: transform; }';
+      document.head.append(layerStyle);
       const rect = heading.getBoundingClientRect(), bounds = view.scrollDOM.getBoundingClientRect();
       if (rect.top < bounds.top || rect.bottom > bounds.bottom) throw new Error('Rich heading witness must be visible');
       scope.__taskFrames = [];
@@ -199,7 +203,10 @@ async function richTaskBackspaceCase(large: boolean, action: 'Backspace' | 'Ente
       const sample = () => {
         const rect = heading.getBoundingClientRect(), style = getComputedStyle(heading);
         scope.__taskFrames.push({ scroll: view.scrollDOM.scrollTop, sameHeading: heading.isConnected && heading.classList.contains('meo-md-h2'),
-          top: rect.top, left: rect.left, color: style.color, font: style.font, transform: style.transform });
+          top: rect.top, left: rect.left, color: style.color, font: style.font, transform: style.transform,
+          inlineStyle: heading.getAttribute('style'), inlineWillChange: heading.style.willChange,
+          computedWillChange: style.willChange,
+          sameNode: [...view.contentDOM.querySelectorAll('.cm-line')].find((line: any) => line.textContent.includes('Unchanged heading')) === heading });
         scope.__taskFrame = requestAnimationFrame(sample);
       }; sample();
       return { left: Math.ceil(rect.left), top: Math.ceil(rect.top), width: Math.floor(rect.width), height: Math.floor(rect.height) };
@@ -216,9 +223,11 @@ async function richTaskBackspaceCase(large: boolean, action: 'Backspace' | 'Ente
     else await assertStablePaint(page, clip, act, label);
     const result = await page.evaluate(() => {
       const scope = window as any, view = scope.__taskView; cancelAnimationFrame(scope.__taskFrame);
-      return { frames: scope.__taskFrames as Array<{ scroll: number; sameHeading: boolean; top: number; left: number; color: string; font: string }>,
+      return { frames: scope.__taskFrames as Array<{ scroll: number; sameHeading: boolean; top: number; left: number; color: string; font: string; inlineStyle: string | null; inlineWillChange: string; computedWillChange: string; sameNode: boolean }>,
         head: view.state.selection.main.head, text: view.state.doc.toString() };
     });
+    assert.ok(result.frames.every(frame => frame.sameNode && frame.computedWillChange === 'transform'),
+      label + ': fixture must retain its isolated paint layer without changing editor-owned attributes');
     const end = text.indexOf('\n', body);
     const expected = action === 'Enter' ? text.slice(0, end) + '\n- [ ] ' + text.slice(end)
       : action === 'StartEnter' ? prefix + '- [ ] \n' + text.slice(prefix.length)

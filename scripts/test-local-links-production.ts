@@ -50,12 +50,63 @@ try {
     }, exists);
     await refresh(true);
     await page.waitForFunction(() => document.querySelectorAll('.meo-md-local-link-missing-icon').length === 0);
+    await page.waitForFunction(() => {
+      const host = document.querySelector<HTMLElement>('.editor-host');
+      const loading = document.querySelector<HTMLElement>('.editor-loading');
+      const link = document.querySelector<HTMLElement>('.cm-line .meo-md-link[data-meo-link-href]');
+      if (!host || !link || host.inert || loading?.hidden === false) return false;
+      const rect = link.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return rect.width > 0 && rect.height > 0 && link.contains(hit);
+    });
     const point = await page.$eval('.cm-line .meo-md-link[data-meo-link-href]', node => {
       const rect = node.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
     });
+    const hitEvidence = await page.evaluate(({ point, target }) => {
+      const linkSelector = '[data-meo-link-href]';
+      const link = document.querySelector<HTMLElement>(`.cm-line .meo-md-link${linkSelector}`)!;
+      const hit = document.elementFromPoint(point.x, point.y);
+      const closestHref = (event: Event) => event.composedPath().find((entry): entry is HTMLElement =>
+        entry instanceof HTMLElement && entry.matches(linkSelector))?.dataset.meoLinkHref ?? null;
+      const state = (window as any).__localLinks;
+      state.clickReceipts = [];
+      const record = (event: Event) => {
+        if (state.clickReceipts.length >= 16) return;
+        const pointer = event as PointerEvent;
+        const keyboard = event as KeyboardEvent;
+        state.clickReceipts.push({ type: event.type, trusted: event.isTrusted, targetHref: closestHref(event),
+          ctrlKey: 'ctrlKey' in event ? pointer.ctrlKey : null, metaKey: 'metaKey' in event ? pointer.metaKey : null,
+          key: 'key' in event ? keyboard.key : null });
+      };
+      for (const type of ['keydown', 'keyup', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+        document.addEventListener(type, record, true);
+      }
+      return {
+        expectedHref: target,
+        targetHref: link.dataset.meoLinkHref ?? null,
+        hitHref: hit?.closest<HTMLElement>(linkSelector)?.dataset.meoLinkHref ?? null,
+        targetHit: Boolean(hit && link.contains(hit)),
+        hostInert: (document.querySelector('.editor-host') as HTMLElement | null)?.inert ?? false,
+        activeTag: document.activeElement?.tagName ?? null
+      };
+    }, { point, target });
+    assert.deepEqual({
+      expectedHref: hitEvidence.expectedHref, targetHref: hitEvidence.targetHref, hitHref: hitEvidence.hitHref,
+      targetHit: hitEvidence.targetHit, hostInert: hitEvidence.hostInert
+    }, {
+      expectedHref: target, targetHref: target, hitHref: target, targetHit: true, hostInert: false
+    }, 'the Ctrl-click fixture must expose the live link at the actual pointer hit before delivery: ' + JSON.stringify(hitEvidence));
     await page.keyboard.down('Control');
     await page.mouse.click(point.x, point.y);
     await page.keyboard.up('Control');
+    const clickReceipts = await page.evaluate(() => (window as any).__localLinks.clickReceipts);
+    const clickEvents = clickReceipts.filter((receipt: any) => ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].includes(receipt.type));
+    assert.deepEqual(clickEvents.map((receipt: any) => receipt.type), ['pointerdown', 'pointerup', 'click'],
+      'the production link route must receive the complete trusted pointer/click sequence');
+    assert.ok(clickEvents.every((receipt: any) => receipt.trusted && receipt.targetHref === target && receipt.ctrlKey === true && receipt.metaKey === false),
+      'the production link route must receive Ctrl on the actual href target: ' + JSON.stringify(clickReceipts));
+    assert.ok(clickReceipts.some((receipt: any) => receipt.type === 'keydown' && receipt.key === 'Control' && receipt.ctrlKey === true),
+      'the fixture must deliver the Control press before the pointer sequence: ' + JSON.stringify(clickReceipts));
     assert.equal(await page.evaluate(() => (window as any).__localLinks.messages.find((message: any) => message.type === 'openLink')?.href), target,
       'a real Live Ctrl click must send the same angle-wrapped target as the existence check');
 

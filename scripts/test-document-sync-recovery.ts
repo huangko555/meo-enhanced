@@ -18,14 +18,27 @@ async function main(): Promise<void> {
   if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 
   const browser = await launchTestBrowser();
+  const page = await browser.newPage();
   try {
-    const page = await browser.newPage();
     await page.setContent(`<!doctype html><body><div id="app" class="editor-root">
       <div class="mode-toolbar meo-preload-toolbar"></div>
       <div class="editor-wrapper meo-preload-editor-shell"><div class="editor-host"></div></div>
     </div></body>`);
     await page.addStyleTag({ content: 'html,body,#app{height:100%;margin:0} #app{display:flex;flex-direction:column}' });
     await page.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
+    await page.evaluate(() => {
+      (window as any).__visibleEditorHit = (content: HTMLElement | null) => {
+        const scroller = content?.closest<HTMLElement>('.cm-scroller');
+        if (!content || !scroller) return null;
+        const contentRect = content.getBoundingClientRect(), viewport = scroller.getBoundingClientRect();
+        const left = Math.max(Math.ceil(contentRect.left), Math.ceil(viewport.left), 0);
+        const top = Math.max(Math.ceil(contentRect.top), Math.ceil(viewport.top), 0);
+        const right = Math.min(Math.floor(contentRect.right), Math.floor(viewport.right), window.innerWidth);
+        const bottom = Math.min(Math.floor(contentRect.bottom), Math.floor(viewport.bottom), window.innerHeight);
+        if (left >= right || top >= bottom) return null;
+        return document.elementFromPoint(left + Math.min(8, right - left - 1), top + Math.min(8, bottom - top - 1));
+      };
+    });
     await page.addScriptTag({ content: `
       window.__hostMessages = [];
       window.acquireVsCodeApi = () => ({
@@ -49,7 +62,52 @@ async function main(): Promise<void> {
       }}));
     }, darkBuiltInVisuals);
     await page.waitForSelector('.editor-host > .cm-editor');
+    await page.evaluate(() => {
+      const host = document.querySelector<HTMLElement>('.editor-host');
+      const loading = document.querySelector<HTMLElement>('.editor-loading');
+      const content = document.querySelector<HTMLElement>('.cm-content');
+      const hit = (window as any).__visibleEditorHit(content);
+      (window as any).__inputAdmissionTrace = {
+        startedAt: performance.now(), initial: {
+          loadingHidden: loading?.hidden ?? null, hostInert: host?.inert ?? null,
+          documentHasFocus: document.hasFocus(),
+          activeElement: document.activeElement?.className ?? document.activeElement?.tagName ?? null,
+          contentConnected: content?.isConnected ?? false,
+          hitElement: hit instanceof HTMLElement ? `${hit.tagName}.${hit.className}` : hit?.nodeName ?? null,
+          hitContent: Boolean(hit && content && (hit === content || content.contains(hit)))
+        }
+      };
+    });
+    await page.waitForFunction(() => {
+      const host = document.querySelector<HTMLElement>('.editor-host');
+      const loading = document.querySelector<HTMLElement>('.editor-loading');
+      const content = document.querySelector<HTMLElement>('.cm-content');
+      if (!host || !loading || !content || host.inert || !loading.hidden) return false;
+      const hit = (window as any).__visibleEditorHit(content);
+      return Boolean(hit && (hit === content || content.contains(hit)));
+    });
+    await page.evaluate(() => {
+      const trace = (window as any).__inputAdmissionTrace;
+      const host = document.querySelector<HTMLElement>('.editor-host');
+      const loading = document.querySelector<HTMLElement>('.editor-loading');
+      const content = document.querySelector<HTMLElement>('.cm-content');
+      const hit = (window as any).__visibleEditorHit(content);
+      trace.ready = {
+        elapsedMs: Math.round(performance.now() - trace.startedAt),
+        loadingHidden: loading?.hidden ?? null, hostInert: host?.inert ?? null,
+        documentHasFocus: document.hasFocus(),
+        activeElement: document.activeElement?.className ?? document.activeElement?.tagName ?? null,
+        contentConnected: content?.isConnected ?? false,
+        hitElement: hit instanceof HTMLElement ? `${hit.tagName}.${hit.className}` : hit?.nodeName ?? null,
+        hitContent: Boolean(hit && content && (hit === content || content.contains(hit)))
+      };
+    });
+    console.log('[input-admission:document-sync-recovery]', JSON.stringify(await page.evaluate(() => (window as any).__inputAdmissionTrace)));
     await page.click('.cm-line');
+    await page.waitForFunction(() => {
+      const content = document.querySelector<HTMLElement>('.cm-content');
+      return Boolean(content && document.activeElement === content && content.closest('.cm-focused'));
+    });
     await page.keyboard.press('End');
     await page.keyboard.press('Enter');
     await page.keyboard.type('beta');
@@ -161,6 +219,28 @@ async function main(): Promise<void> {
     }
 
     console.log('document sync recovery checks passed');
+  } catch (error) {
+    console.error('[input-admission:document-sync-recovery]', await page.evaluate(() => {
+      const host = document.querySelector<HTMLElement>('.editor-host');
+      const loading = document.querySelector<HTMLElement>('.editor-loading');
+      const content = document.querySelector<HTMLElement>('.cm-content');
+      const hit = (window as any).__visibleEditorHit(content);
+      return {
+        loadingHidden: loading?.hidden ?? null,
+        hostInert: host?.inert ?? null,
+        documentHasFocus: document.hasFocus(),
+        activeElement: document.activeElement?.className ?? document.activeElement?.tagName ?? null,
+        contentConnected: content?.isConnected ?? false,
+        contentFocused: document.activeElement === content,
+        hitElement: hit instanceof HTMLElement ? `${hit.tagName}.${hit.className}` : hit?.nodeName ?? null,
+        admission: (window as any).__inputAdmissionTrace ?? null,
+        messages: ((window as any).__hostMessages ?? []).slice(-8).map((message: any) => ({
+          type: message.type,
+          textLength: typeof message.text === 'string' ? message.text.length : undefined
+        }))
+      };
+    }));
+    throw error;
   } finally {
     await browser.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
