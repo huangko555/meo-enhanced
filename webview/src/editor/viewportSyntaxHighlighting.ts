@@ -67,6 +67,8 @@ export function viewportSyntaxHighlighting(style: HighlightStyle, unhighlighted?
     private repaintQueued = false;
     private excluded: DecorationSet | undefined;
     private publishedEmpty = false;
+    private palette: { doc: Text; tree: Tree; excluded: DecorationSet | undefined;
+      ranges: Array<{ from: number; to: number }> } | null = null;
 
     constructor(view: EditorView) {
       this.tree = syntaxTree(view.state);
@@ -144,14 +146,35 @@ export function viewportSyntaxHighlighting(style: HighlightStyle, unhighlighted?
 
     onScroll(_event: Event, view: EditorView) { this.measureBand(view); }
     readDecorations() { this.publishedEmpty = this.decorations.size === 0; return this.decorations; }
-    destroy() { this.destroyed = true; }
+    destroy() { this.destroyed = true; this.palette = null; }
 
     private build(view: EditorView): DecorationSet {
+      const ranges = view.visibleRanges.map(range => ({
+        from: Math.max(range.from, this.band?.from ?? range.from),
+        to: Math.min(range.to, this.band?.to ?? range.to)
+      })).filter(range => range.from < range.to);
+      // A scroll changes coverage, not syntax. Reuse only the overlap proven by
+      // the exact document, accepted tree and Live exclusions of the last build.
+      // Keep just this reading band; edits and syntax/reveal changes invalidate it.
+      const previous = this.palette;
+      const reusable = previous?.doc === view.state.doc && previous.tree === this.tree
+        && previous.excluded === this.excluded ? previous.ranges : [];
+      if (previous && reusable === previous.ranges && ranges.length === reusable.length
+        && ranges.every((range, index) => range.from === reusable[index]!.from && range.to === reusable[index]!.to)) {
+        return this.decorations;
+      }
       const builder = new RangeSetBuilder<Decoration>();
-      for (const range of view.visibleRanges) {
-        const from = Math.max(range.from, this.band?.from ?? range.from);
-        const to = Math.min(range.to, this.band?.to ?? range.to);
-        if (from >= to) continue;
+      let pendingSpan: { from: number; to: number; mark: Decoration } | undefined;
+      // Join tokens split by the old band edge, keeping the same ordered
+      // decoration shape and DOM as a full highlight of the new reading band.
+      const append = (from: number, to: number, mark: Decoration) => {
+        if (pendingSpan && pendingSpan.to === from && pendingSpan.mark === mark) pendingSpan.to = to;
+        else {
+          if (pendingSpan) builder.add(pendingSpan.from, pendingSpan.to, pendingSpan.mark);
+          pendingSpan = { from, to, mark };
+        }
+      };
+      const highlight = (from: number, to: number) => {
         const excluded: Array<{ from: number; to: number }> = [];
         this.excluded?.between(from, to, (start, end, decoration) => {
           if (start < end && decoration.spec.class?.split(/\s+/).some((name: string) => excludedClasses.has(name))) {
@@ -164,7 +187,7 @@ export function viewportSyntaxHighlighting(style: HighlightStyle, unhighlighted?
           if (start >= end) return;
           let mark = this.marks.get(classes);
           if (!mark) { mark = Decoration.mark({ class: classes }); this.marks.set(classes, mark); }
-          builder.add(start, end, mark);
+          append(start, end, mark);
         };
         highlightTree(syntaxHighlightWindow(this.tree, from, to), style, (start, end, classes) => {
           while (cursor < excluded.length && excluded[cursor]!.to <= start) cursor++;
@@ -177,7 +200,22 @@ export function viewportSyntaxHighlighting(style: HighlightStyle, unhighlighted?
           }
           add(position, end, classes);
         }, from, to);
+      };
+      for (const range of ranges) {
+        let cursor = range.from;
+        for (const cached of reusable) {
+          const from = Math.max(cursor, cached.from), to = Math.min(range.to, cached.to);
+          if (from >= to) continue;
+          if (cursor < from) highlight(cursor, from);
+          this.decorations.between(from, to, (start, end, mark) => {
+            if (start < to && end > from) append(Math.max(from, start), Math.min(to, end), mark);
+          });
+          cursor = to;
+        }
+        if (cursor < range.to) highlight(cursor, range.to);
       }
+      if (pendingSpan) builder.add(pendingSpan.from, pendingSpan.to, pendingSpan.mark);
+      this.palette = { doc: view.state.doc, tree: this.tree, excluded: this.excluded, ranges };
       return builder.finish();
     }
   }, { decorations: plugin => plugin.readDecorations(),

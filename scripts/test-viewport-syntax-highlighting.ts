@@ -70,6 +70,8 @@ const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-hist
       assert.equal(source.split(marker).length, 2);
       return { loader: 'ts', contents: source.replace(marker, marker
         + '\n      (globalThis as any).__paletteBuilds = ((globalThis as any).__paletteBuilds ?? 0) + 1;')
+        .replace('        highlightTree(syntaxHighlightWindow(this.tree, from, to)',
+          '        (globalThis as any).__paletteRanges?.push({ from, to }); highlightTree(syntaxHighlightWindow(this.tree, from, to)')
         .replace('            view.update([]);', '            (globalThis as any).__paletteCommits = ((globalThis as any).__paletteCommits ?? 0) + 1; view.update([]);') };
     });
   } }] });
@@ -127,6 +129,31 @@ try {
     await page.evaluate(pixels => { (window as any).__paletteEditor.view.scrollDOM.scrollTop += pixels; }, pixels);
     await verifyBand();
   }
+  await page.evaluate(() => {
+    const scope = window as any, view = scope.__paletteEditor.view, bounds = view.scrollDOM.getBoundingClientRect();
+    const line = [...view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')]
+      .find(line => { const rect = line.getBoundingClientRect(); return rect.top > bounds.top + bounds.height / 2 && line.querySelector('span[class]'); })!;
+    scope.__retainedPalette = { line, span: line.querySelector('span[class]') };
+    scope.__paletteRanges = [];
+  });
+  const point = await page.$eval('.cm-scroller', element => {
+    const rect = element.getBoundingClientRect(); return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  });
+  await page.mouse.move(point.x, point.y);
+  for (let index = 0; index < 4; index++) {
+    await page.mouse.wheel({ deltaY: 36 });
+    await verifyBand();
+  }
+  const visited = await page.evaluate(() => (window as any).__paletteRanges as Array<{ from: number; to: number }>);
+  assert.ok(visited.length >= 2, 'trusted scrolling must cross multiple actual palette boundaries');
+  const ordered = [...visited].sort((a, b) => a.from - b.from || a.to - b.to);
+  assert.ok(ordered.every((range, index) => !index || range.from >= ordered[index - 1]!.to),
+    `unchanged reading ranges must not be highlighted repeatedly: ${JSON.stringify(visited)}`);
+  assert.equal(await page.evaluate(() => {
+    const { line, span } = (window as any).__retainedPalette;
+    return line.isConnected && line.querySelector('span[class]') === span;
+  }), true, 'overlapping reading text must retain its native line and token DOM');
+  await page.evaluate(() => { delete (window as any).__paletteRanges; });
   const pending = await page.evaluate(() => {
     const scope = window as any, editor = scope.__paletteEditor;
     scope.__paletteBuilds = 0;

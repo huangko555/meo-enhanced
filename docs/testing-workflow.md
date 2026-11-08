@@ -2574,6 +2574,10 @@ palette must not submit palette-only view updates. Entering a link restores URL
 colors from the current presentation even without a new parse; real typing,
 Undo/Redo and Source/Live roundtrips retain text, focus and caret. Palette work
 outside the physical band keeps its original budget.
+Monotone trusted wheels additionally require each unchanged overlapping range to
+be highlighted only once and retain its native line/token DOM. Reuse is valid
+only for the same document, syntax tree and accepted Live exclusion set; input,
+syntax publication and source reveal keep the existing invalidation checks.
 
 ## Auto-save verification
 
