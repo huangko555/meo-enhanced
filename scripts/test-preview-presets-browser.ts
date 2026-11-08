@@ -17,6 +17,7 @@ const text = [
   '<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd>', '',
   'A footnote.[^sample]', '',
   '```mermaid', 'flowchart LR', '  A[Markdown] --> B[Preview]', '```', '',
+  '```mermaid', 'flowchart LR', '  LongAscii[OFFLINE_MERMAID_START] --> Chinese[中文 标签 内容] --> Wrapped[wrapped words remain readable]', '```', '',
   '| Name | Description |', '| --- | --- |', '| GitHub | Repository documentation |', '',
   ...Array.from({ length: 60 }, (_, index) => `## Section ${index}\n\nReading paragraph ${index} with **bold** and a [link](https://example.com).\n`),
   '[^sample]: A footnote with a [link](https://example.com).'
@@ -185,6 +186,39 @@ try {
     assert.ok(actual.scrollbar.endsWith(background), 'The scrollbar track must not expose the differently themed host');
     assert.equal(actual.track, background, 'The WebKit scrollbar fallback also has an opaque track');
     assert.ok(actual.canScroll && !actual.overflow);
+    const labelGeometry = await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+      const expected = ['OFFLINE_MERMAID_START', '中文 标签 内容', 'wrapped words remain readable'];
+      return expected.map(text => {
+        const paragraph = Array.from(doc.querySelectorAll<HTMLElement>('.meo-export-mermaid.is-rendered .nodeLabel p'))
+          .find(node => node.textContent === text)!;
+        const container = paragraph.parentElement!;
+        const foreignObject = paragraph.closest('foreignObject')!;
+        const range = doc.createRange();
+        range.selectNodeContents(paragraph);
+        const rangeRect = range.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        const foreignObjectRect = foreignObject.getBoundingClientRect();
+        return {
+          text,
+          range: [rangeRect.left, rangeRect.top, rangeRect.right, rangeRect.bottom],
+          container: [containerRect.left, containerRect.top, containerRect.right, containerRect.bottom],
+          foreignObject: [foreignObjectRect.left, foreignObjectRect.top, foreignObjectRect.right, foreignObjectRect.bottom],
+          scroll: [container.scrollWidth, container.scrollHeight, container.clientWidth, container.clientHeight]
+        };
+      });
+    });
+    for (const label of labelGeometry) {
+      const [left, top, right, bottom] = label.range;
+      const [containerLeft, containerTop, containerRight, containerBottom] = label.container;
+      const [foreignLeft, foreignTop, foreignRight, foreignBottom] = label.foreignObject;
+      assert.ok(left >= containerLeft - 1 && top >= containerTop - 1 && right <= containerRight + 1 && bottom <= containerBottom + 1,
+        `GitHub Mermaid label glyph range must fit its effective HTML clipping box: ${JSON.stringify(label)}`);
+      assert.ok(left >= foreignLeft - 1 && top >= foreignTop - 1 && right <= foreignRight + 1 && bottom <= foreignBottom + 1,
+        `GitHub Mermaid label glyph range must fit its Mermaid foreignObject: ${JSON.stringify(label)}`);
+      assert.deepEqual(label.scroll.slice(0, 2), label.scroll.slice(2),
+        `GitHub Mermaid label must not overflow its rendered clipping box: ${JSON.stringify(label)}`);
+    }
   };
   await waitPreset('default');
   const readDiagram = () => page.evaluate(() => {

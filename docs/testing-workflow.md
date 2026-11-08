@@ -561,6 +561,12 @@ transparent/zero-size text, closed details and visible child overrides. Inspect
 the final Word document in Word as well: its HTML converter retains editable
 text but approximates browser typography, repeated spaces, ruby and custom list
 numbering. Deliberately unclosed tags can still affect following HTML content.
+The preset browser owner also checks the painted bounds of long unbroken,
+Chinese and wrapped Mermaid labels in both GitHub appearances. The DOCX browser
+owner verifies actual diagram pixels in the generated file: complete SVG text
+alone cannot detect a label clipped by its foreignObject before rasterization.
+Default/export and GitHub Mermaid initialization are separate consumers and both
+must preserve the dimensions measured by Mermaid.
 `scripts/test-block-editing-transitions.ts` adds a shared production-editor contract
 for formulas, HTML, short/folded code and both Mermaid layouts: four directional
 boundaries, pointer release, Escape/Enter, reverse Tab, document selection, visible

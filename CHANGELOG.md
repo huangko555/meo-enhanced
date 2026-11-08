@@ -43,6 +43,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Made Preview loading and Source/Preview transitions visible without briefly mixing old and new layouts, while retaining immediate completion when content is ready.
 - Used the default cursor over Live images, showing a link cursor only when Ctrl or Meta makes a linked image navigable.
 - Added version details to the feedback menu and kept repeated version-copy feedback stable without a transient copying message.
+- Preserved long Mermaid node labels in Preview and HTML, PDF and Word exports instead of clipping them to a fixed label width.
 
 ## 0.3.40
 - Aligned HTML rendering across Live, Preview and exports, including omitted child end tags, native author-defined sizing and supported SVG fill rules, while preserving source-completion boundaries.

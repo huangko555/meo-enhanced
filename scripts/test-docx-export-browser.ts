@@ -4,12 +4,54 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import JSZip from 'jszip';
+import sharp from 'sharp';
 import exportRuntime from '../src/export/runtime';
 import { renderPdfFromHtmlExport } from '../src/export/pdfRenderer';
 import { complexMermaidSamples } from './fixtures/mermaid-community-samples';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-docx-browser-'));
+
+async function assertLongMermaidLabelMaterializesWithoutCropping(): Promise<void> {
+  const outputDocxPath = path.join(fixtureRoot, 'long-mermaid-label.docx');
+  const text = '```mermaid\nflowchart LR\n  OfflineStart[OFFLINE_MERMAID_START]\n```\n';
+  const rendered = await exportRuntime.renderExportHtmlDocument({
+    readingSnapshot: { snapshotId: 'docx-long-mermaid-label', text, appearance: 'dark', uiLanguage: 'en',
+      environment: { previewFontFamily: '', previewSourceColoring: true } },
+    sourceDocumentPath: path.join(fixtureRoot, 'long-mermaid-label.md'), outputFilePath: outputDocxPath,
+    target: 'docx', title: 'Long Mermaid label', includeTableOfContents: false,
+    baseHref: pathToFileURL(`${fixtureRoot}${path.sep}`).href,
+    mermaidRuntimeSrc: pathToFileURL(path.join(repoRoot, 'webview/dist/mermaid.min.js')).href,
+    shikiLanguageAssetsRoot: path.join(repoRoot, 'webview/dist')
+  });
+  await exportRuntime.writeDocxExport({ htmlDocument: rendered.htmlDocument, outputDocxPath,
+    title: 'Long Mermaid label', uiLanguage: 'en', includeTableOfContents: false,
+    docxRuntimeModulePath: path.join(repoRoot, 'dist/docx-runtime.js'),
+    puppeteerRuntimeModulePath: path.join(repoRoot, 'dist/puppeteer-runtime.js') });
+
+  const archive = await JSZip.loadAsync(fs.readFileSync(outputDocxPath));
+  const images = Object.keys(archive.files).filter(name => name.startsWith('word/media/') && name.endsWith('.png'));
+  assert.ok(images.length >= 1, 'The standalone Mermaid fixture must produce DOCX PNG media');
+  const inkSpans = await Promise.all(images.map(async name => {
+    const png = await archive.file(name)!.async('nodebuffer');
+    const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let firstInk = info.width;
+    let lastInk = -1;
+    for (let pixel = 0; pixel < data.length; pixel += info.channels) {
+      const [red, green, blue] = [data[pixel]!, data[pixel + 1]!, data[pixel + 2]!];
+      // Mermaid label text is dark; node borders are neutral gray and arrows are blue.
+      if (red < 90 && green < 100 && blue < 110) {
+        const x = (pixel / info.channels) % info.width;
+        firstInk = Math.min(firstInk, x);
+        lastInk = Math.max(lastInk, x);
+      }
+    }
+    return { name, width: info.width, height: info.height, firstInk, lastInk, span: lastInk - firstInk + 1 };
+  }));
+  assert.ok(inkSpans.some(image => image.lastInk >= image.firstInk && image.span >= 170),
+    `DOCX Mermaid PNG must rasterize the full long identifier, not its 120px prefix: ${JSON.stringify(inkSpans)}`);
+  console.log('DOCX long Mermaid label materialization passed.');
+}
 
 async function checkHtmlVisibility(): Promise<void> {
   const outputDocxPath = path.join(fixtureRoot, 'html-visibility.docx');
@@ -51,6 +93,7 @@ async function checkHtmlVisibility(): Promise<void> {
 }
 
 try {
+  await assertLongMermaidLabelMaterializesWithoutCropping();
   await checkHtmlVisibility();
   const outputDocxPath = path.join(fixtureRoot, 'rich-media.docx');
   const rendered = await exportRuntime.renderExportHtmlDocument({

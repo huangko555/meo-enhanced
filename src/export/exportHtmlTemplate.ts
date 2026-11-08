@@ -616,6 +616,8 @@ function buildRuntimeScript(hasMermaid: boolean, githubStyle = false): string {
       htmlLabels: true,
       markdownAutoWrap: true,
       flowchart: { htmlLabels: true },
+      // Keep painted labels within the dimensions Mermaid measured before rasterization.
+      themeCSS: '.node .label foreignObject div { max-width: none !important; }',
       legacyMathML: true,
       forceLegacyMathML: true,
       fontFamily: bodyStyles.fontFamily || undefined
