@@ -173,7 +173,11 @@ export function extractHeadings(state: EditorState, tree: Tree = resolvedSyntaxT
   const frontmatter = parseFrontmatter(state);
 
   tree.iterate({
+    mode: IterMode.IgnoreMounts,
     enter(node: any) {
+      // Paragraph tokens and code-language trees cannot own Markdown block
+      // headings. Walking them makes a metadata receipt scale with all text.
+      if (node.name === 'Paragraph' || node.name === 'FencedCode' || node.name === 'CodeBlock') return false;
       const headingLevel = headingLevelFromName(node.name);
       if (headingLevel !== null && !isInsideFrontmatter(frontmatter, node.from)) {
         const line = state.doc.lineAt(node.from);
@@ -188,6 +192,7 @@ export function extractHeadings(state: EditorState, tree: Tree = resolvedSyntaxT
           from: node.from
         });
       }
+      if (headingLevel !== null) return false;
     }
   });
 

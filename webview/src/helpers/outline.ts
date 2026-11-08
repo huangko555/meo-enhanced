@@ -198,6 +198,17 @@ export function createOutlineController({
   let loadingTimer: number | null = null;
   let loadingVisible = false;
   let hasCompletedOutline = false;
+  let headingLines: number[] = [];
+  let expandedNodes: OutlineTreeNode[] = [];
+  let expandedIndex = new Map<number, number>();
+  let expandedKeys = new Map<string, number>();
+  let windowed = false, windowSignature = '';
+  let rowHeights: number[] = [], rowOffsets: number[] = [];
+  let rowMetricsPending = false;
+  let windowRows = new Map<string, HTMLLIElement>();
+  let windowItems = new Map<number, HTMLElement>();
+  let followScheduled = false;
+  let pendingTreeProjection: (() => void) | null = null;
 
   const notifyUiState = () => onUiStateChange?.({ mode, width });
   const mutateLayoutWithViewportPreserved = (mutate: () => void) => {
@@ -244,7 +255,8 @@ export function createOutlineController({
   const findVisibleItem = (index: number): HTMLElement | null => {
     let node = currentNodeByIndex.get(index) ?? null;
     while (node) {
-      const item = outlineContent.querySelector<HTMLElement>(`.outline-item[data-heading-from="${node.heading.from}"]`);
+      const item = windowed ? windowItems.get(node.index)
+        : outlineContent.querySelector<HTMLElement>(`.outline-item[data-heading-from="${node.heading.from}"]`);
       if (item) return item;
       node = node.parentIndex === null ? null : currentNodeByIndex.get(node.parentIndex) ?? null;
     }
@@ -252,6 +264,17 @@ export function createOutlineController({
   };
 
   const highlightVisibleHeadings = (followContent = true) => {
+    if (windowed && rowOffsets.length) {
+      if (followContent) {
+        const indexes = [...visibleHeadingIndexes].map(expandedHeadingIndex).filter((index): index is number => index !== undefined);
+        if (!indexes.length) {
+          const index = expandedHeadingIndex(activeHeadingIndex);
+          if (index !== undefined) indexes.push(index);
+        }
+        revealWindowRows(indexes);
+      }
+      renderWindow();
+    }
     for (const item of outlineContent.querySelectorAll('.outline-item.is-visible, .outline-item.is-visible-first')) {
       item.classList.remove('is-visible', 'is-visible-first');
     }
@@ -292,18 +315,19 @@ export function createOutlineController({
     const editor = getEditor();
     if (!editor) return false;
     const visibleRange = editor.getVisibleDocumentRange();
-    visibleHeadingIndexes = new Set(findVisibleHeadingIndexes(currentOutlineHeadings, visibleRange));
+    visibleHeadingIndexes = new Set(visibleOutlineHeadingIndexes(currentOutlineHeadings, headingLines, visibleRange));
     if (!visibleRange) {
       activeHeadingIndex = -1;
       return true;
     }
     const anchor = editor.getViewportAnchorOffset(ACTIVE_VIEWPORT_RATIO);
-    let nextActive = -1;
-    for (let index = 0; index < currentOutlineHeadings.length; index += 1) {
-      if (currentOutlineHeadings[index].from <= anchor) nextActive = index;
-      else break;
+    let from = 0, to = currentOutlineHeadings.length;
+    while (from < to) {
+      const middle = (from + to) >>> 1;
+      if (currentOutlineHeadings[middle].from <= anchor) from = middle + 1;
+      else to = middle;
     }
-    activeHeadingIndex = nextActive;
+    activeHeadingIndex = from - 1;
     return true;
   };
 
@@ -321,12 +345,30 @@ export function createOutlineController({
   };
 
   function scheduleActiveRefresh() {
+    followScheduled = true;
+    scheduleOutlineFrame();
+  }
+  function scheduleOutlineFrame() {
     if (scrollFrame) return;
     scrollFrame = window.requestAnimationFrame(() => {
       scrollFrame = 0;
-      refreshActive();
+      const follow = followScheduled;
+      followScheduled = false;
+      if (!visible) return;
+      const project = pendingTreeProjection;
+      pendingTreeProjection = null;
+      if (project) { project(); return; }
+      if (follow) refreshActive();
+      else if (windowed) highlightVisibleHeadings(false);
     });
   }
+  outlineContent.addEventListener('scroll', scheduleOutlineFrame, { passive: true });
+  outlineContent.addEventListener('wheel', () => {
+    // A newer gesture in this pane supersedes a queued body-follow frame.
+    followScheduled = false;
+    scheduleOutlineFrame();
+  }, { passive: true });
+  window.addEventListener('resize', scheduleOutlineFrame);
 
   const appendHeadingContent = (item: HTMLElement, heading: OutlineHeading) => {
     if (!heading.inlineSegments?.length) {
@@ -359,7 +401,7 @@ export function createOutlineController({
     }
   };
 
-  const renderNode = (node: OutlineTreeNode): HTMLLIElement => {
+  const renderNode = (node: OutlineTreeNode, descendants = true): HTMLLIElement => {
     const itemNode = document.createElement('li');
     itemNode.className = 'outline-node';
     const row = document.createElement('div');
@@ -390,7 +432,7 @@ export function createOutlineController({
     row.append(foldButton, item);
     itemNode.appendChild(row);
 
-    if (node.children.length > 0 && !collapsedKeys.has(node.key)) {
+    if (descendants && node.children.length > 0 && !collapsedKeys.has(node.key)) {
       const children = document.createElement('ul');
       children.className = 'outline-tree outline-tree-children';
       for (const child of node.children) children.appendChild(renderNode(child));
@@ -399,8 +441,130 @@ export function createOutlineController({
     return itemNode;
   };
 
+  const expandedHeadingIndex = (index: number): number | undefined => {
+    let node = currentNodeByIndex.get(index);
+    while (node) {
+      const position = expandedIndex.get(node.index);
+      if (position !== undefined) return position;
+      node = node.parentIndex === null ? undefined : currentNodeByIndex.get(node.parentIndex);
+    }
+  };
+  const revealWindowRows = (indexes: number[]) => {
+    if (!indexes.length) return;
+    const top = 4 + rowOffsets[Math.min(...indexes)];
+    const bottom = 4 + rowOffsets[Math.max(...indexes) + 1];
+    const height = outlineContent.clientHeight, group = bottom - top;
+    const context = group + OUTLINE_SCROLL_CONTEXT_PX * 2 <= height ? OUTLINE_SCROLL_CONTEXT_PX : 8;
+    const current = outlineContent.scrollTop;
+    if (group > height - 16 || top < current + context) outlineContent.scrollTop = Math.max(0, top - context);
+    else if (bottom > current + height - context) outlineContent.scrollTop = bottom - height + context;
+  };
+
+  /** The complete tree owns navigation and folding. Only its expanded reading
+   * window owns DOM, plus a focused row retained across native outline scrolling. */
+  const renderWindow = () => {
+    if (!windowed || !rowOffsets.length) return;
+    const active = document.activeElement instanceof HTMLButtonElement && outlineContent.contains(document.activeElement)
+      ? document.activeElement : null;
+    const activeItem = active?.closest('.outline-row')?.querySelector<HTMLElement>('.outline-item');
+    const focusKey = activeItem?.dataset.outlineKey;
+    const focused = focusKey ? expandedKeys.get(focusKey) : undefined;
+    const count = Math.max(24, Math.ceil(outlineContent.clientHeight / Math.min(...rowHeights)) + 16);
+    let low = 0, high = expandedNodes.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (rowOffsets[middle + 1] <= outlineContent.scrollTop - 4) low = middle + 1;
+      else high = middle;
+    }
+    const start = Math.min(Math.max(0, expandedNodes.length - count), Math.max(0, low - 8));
+    const end = Math.min(expandedNodes.length, start + count);
+    const pinned = focused !== undefined && (focused < start || focused >= end) ? focused : -1;
+    const signature = `${start}:${end}:${pinned}`;
+    if (signature === windowSignature) return;
+    windowSignature = signature;
+    const previousScroll = outlineContent.scrollTop;
+    const positions = Array.from({ length: Math.max(0, end - start) }, (_, index) => start + index);
+    if (pinned >= 0) { positions.push(pinned); positions.sort((a,b) => a-b); }
+    const tree = document.createElement('ul'); tree.className = 'outline-tree';
+    const nextRows = new Map<string, HTMLLIElement>();
+    windowItems = new Map();
+    let cursor = 0, parents = new Map<number, HTMLLIElement>();
+    const gap = (count: number) => {
+      if (!count) return;
+      const space = document.createElement('li'); space.setAttribute('aria-hidden', 'true');
+      space.style.height = `${rowOffsets[cursor + count] - rowOffsets[cursor]}px`; tree.append(space);
+    };
+    const append = (node: OutlineTreeNode, projected: boolean): HTMLLIElement => {
+      const existing = parents.get(node.index);
+      if (existing) return existing;
+      const row = projected ? windowRows.get(node.key) ?? renderNode(node, false) : document.createElement('li');
+      if (projected) {
+        row.querySelector(':scope > ul')?.remove();
+        const siblings = node.parentIndex === null ? currentTreeRoots : currentNodeByIndex.get(node.parentIndex)!.children;
+        row.setAttribute('aria-posinset', String(siblings.indexOf(node) + 1));
+        row.setAttribute('aria-setsize', String(siblings.length));
+        nextRows.set(node.key, row);
+        windowItems.set(node.index, row.querySelector<HTMLElement>('.outline-item')!);
+      } else { row.className = 'outline-node outline-window-parent'; row.setAttribute('role', 'presentation'); }
+      parents.set(node.index, row);
+      if (node.parentIndex === null) tree.append(row);
+      else {
+        const parent = append(currentNodeByIndex.get(node.parentIndex)!, false);
+        let children = parent.querySelector<HTMLUListElement>(':scope > ul');
+        if (!children) {
+          children = document.createElement('ul'); children.className = 'outline-tree outline-tree-children'; parent.append(children);
+        }
+        children.append(row);
+      }
+      return row;
+    };
+    for (const position of positions) {
+      if (position !== cursor) { gap(position - cursor); parents = new Map(); }
+      append(expandedNodes[position], true); cursor = position + 1;
+    }
+    gap(expandedNodes.length - cursor);
+    windowRows = nextRows;
+    outlineContent.replaceChildren(visibleRangeHighlight, tree);
+    outlineContent.scrollTop = previousScroll;
+    if (active && focusKey) {
+      const row = windowRows.get(focusKey);
+      row?.querySelector<HTMLButtonElement>(active.classList.contains('outline-fold-button') ? '.outline-fold-button' : '.outline-item')?.focus({ preventScroll: true });
+    }
+  };
+
   const renderTree = ({ followContent = true, preserveScroll = false } = {}) => {
     const previousScrollTop = preserveScroll ? outlineContent.scrollTop : null;
+    expandedNodes = []; expandedIndex = new Map(); expandedKeys = new Map();
+    const visit = (nodes: OutlineTreeNode[]) => { for (const node of nodes) {
+      expandedIndex.set(node.index, expandedNodes.length); expandedKeys.set(node.key, expandedNodes.length); expandedNodes.push(node);
+      if (!collapsedKeys.has(node.key)) visit(node.children);
+    } };
+    visit(currentTreeRoots);
+    windowed = expandedNodes.length > 160;
+    windowSignature = ''; windowRows = new Map(); windowItems = new Map();
+    if (windowed) {
+      // Levels have distinct type sizes. Measure one bounded style batch and
+      // index exact row offsets instead of accumulating a uniform-height error.
+      const samples = document.createElement('ul'); samples.className = 'outline-tree';
+      samples.setAttribute('aria-hidden', 'true');
+      samples.style.cssText = 'position:absolute;top:0;left:0;visibility:hidden;pointer-events:none';
+      for (let level = 1; level <= 6; level++) {
+        const sample = document.createElement('li'); sample.className = 'outline-node';
+        const item = document.createElement('button'); item.className = `outline-item outline-level-${level}`;
+        item.textContent = 'M'; sample.append(item); samples.append(sample);
+      }
+      outlineContent.append(samples);
+      const measuredHeights = [...samples.children].map(sample => sample.getBoundingClientRect().height);
+      rowMetricsPending = measuredHeights.some(height => height === 0);
+      if (!rowMetricsPending) rowHeights = measuredHeights;
+      samples.remove();
+      if (!rowHeights.length) return;
+      rowOffsets = [0];
+      for (const node of expandedNodes) rowOffsets.push(rowOffsets.at(-1)! + rowHeights[Math.max(0, Math.min(5, node.heading.level - 1))]);
+      renderWindow(); highlightVisibleHeadings(followContent);
+      if (previousScrollTop !== null) { outlineContent.scrollTop = previousScrollTop; renderWindow(); }
+      return;
+    }
     outlineContent.replaceChildren(visibleRangeHighlight);
     if (currentTreeRoots.length === 0) {
       const emptyMsg = document.createElement('div');
@@ -453,14 +617,16 @@ export function createOutlineController({
     const busy = String(pending);
     const wasPending = outlineContent.getAttribute('aria-busy') === 'true';
     if (outlineContent.getAttribute('aria-busy') !== busy) outlineContent.setAttribute('aria-busy', busy);
-    if (!pending) hasCompletedOutline = true;
     updateLoading(pending);
     // A partial CodeMirror tree is not a complete document outline. Advance it
     // in bounded tasks, retaining identical rows until more metadata is ready.
     const metadataChanged = headings !== currentOutlineHeadings && (!pending || headings.length > 0);
-    if (metadataChanged || !pending && wasPending) {
+    const publish = () => {
+      if (!pending) hasCompletedOutline = true;
+      if (!(metadataChanged || !pending && wasPending)) return;
       const reuseRows = headings.length > 0 && sameOutlinePresentation(currentOutlineHeadings, headings);
       currentOutlineHeadings = headings;
+      headingLines = headings.map(heading => heading.line);
       currentOutlineHeadingIndexByFrom = new Map(currentOutlineHeadings.map((heading, index) => [heading.from, index]));
       if (reuseRows) {
         const positions = new Map<string, number>();
@@ -483,6 +649,20 @@ export function createOutlineController({
       updateActiveHeadings();
       if (reuseRows) highlightVisibleHeadings();
       else renderTree();
+    };
+    // Complete metadata discovery can itself consume a frame in a huge file.
+    // Keep accepted rows until the existing outline frame admits their DOM
+    // projection; never combine the full read and its layout into one task.
+    if (visible && headings.length > 160 && (metadataChanged || !pending && wasPending)) {
+      outlineContent.setAttribute('aria-busy', 'true');
+      pendingTreeProjection = () => {
+        outlineContent.setAttribute('aria-busy', busy);
+        publish();
+      };
+      scheduleOutlineFrame();
+    } else {
+      pendingTreeProjection = null;
+      publish();
     }
     if (visible && pending) headingRefreshTimer = window.setTimeout(() => {
       headingRefreshTimer = null;
@@ -525,6 +705,7 @@ export function createOutlineController({
 
   const setVisible = (nextVisible: boolean) => {
     if (!nextVisible) {
+      pendingTreeProjection = null;
       cancelHeadingRefresh();
       cancelLoading();
       if (!hasCompletedOutline) renderTree();
@@ -536,7 +717,10 @@ export function createOutlineController({
     };
     if (changed && mode === 'fixed') mutateLayoutWithViewportPreserved(update);
     else update();
-    if (visible && changed) refresh();
+    if (visible && changed) {
+      refresh();
+      if (rowMetricsPending) renderTree({ preserveScroll: true });
+    }
   };
 
   const requestVisible = (nextVisible: boolean) => {
@@ -633,6 +817,30 @@ export function createOutlineController({
     );
     if (heading) getEditor()?.scrollToLine(heading.line, 'top');
     if (mode === 'floating') requestVisible(false);
+  });
+
+  // Native Tab order must still cross unmounted rows. A focused row is pinned
+  // while the user scrolls this pane, so wheel input never silently loses focus.
+  outlineContent.addEventListener('keydown', event => {
+    if (!windowed || event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return;
+    const target = event.target instanceof HTMLButtonElement ? event.target : null;
+    const item = target?.closest('.outline-row')?.querySelector<HTMLElement>('.outline-item');
+    const key = item?.dataset.outlineKey, index = key ? expandedKeys.get(key) : undefined;
+    if (!target || index === undefined) return;
+    followScheduled = false;
+    const fold = target.classList.contains('outline-fold-button');
+    let next = index, selector = '.outline-item';
+    if (event.shiftKey && !fold && expandedNodes[index].children.length) selector = '.outline-fold-button';
+    else if (!event.shiftKey && fold) selector = '.outline-item';
+    else {
+      next += event.shiftKey ? -1 : 1;
+      if (next < 0 || next >= expandedNodes.length) return;
+      if (!event.shiftKey && expandedNodes[next].children.length) selector = '.outline-fold-button';
+    }
+    event.preventDefault();
+    revealWindowRows([next]); renderWindow();
+    windowRows.get(expandedNodes[next].key)?.querySelector<HTMLButtonElement>(selector)?.focus({ preventScroll: true });
+    scheduleOutlineFrame();
   });
 
   document.addEventListener('pointerdown', (event) => {

@@ -5905,6 +5905,10 @@ html[data-editor-appearance='light'] .meo-visual-control-btn {
   box-sizing: border-box;
 }
 
+.outline-node.outline-window-parent {
+  padding: 0;
+}
+
 .outline-fold-button {
   display: inline-flex;
   align-self: stretch;

@@ -275,6 +275,34 @@ async function main(): Promise<void> {
       await assertOutlineViewportStability(page, mode);
     }
 
+    const lifecycle = await page.evaluate(async () => {
+      (window as any).__outlineEditor?.destroy();
+      const root = document.getElementById('app')!; root.replaceChildren();
+      const wrapper = document.createElement('div'); wrapper.className = 'editor-wrapper'; root.append(wrapper);
+      const button = document.createElement('button'); root.append(button);
+      let headings = Array.from({ length: 1700 }, (_, index) => ({ text: `Old ${index}`, level: index % 3 + 1, from: index * 80, line: index * 8 + 1 }));
+      const outline = (window as any).EditorStabilityHarness.createOutlineController({ root, editorWrapper: wrapper, outlineButton: button,
+        getEditor: () => ({ getHeadings: () => headings, getViewportAnchorOffset: () => 0,
+          getVisibleDocumentRange: () => ({ from: 0, to: 40, fromLine: 1, toLine: 5 }),
+          getScrollElement: () => wrapper, scrollToLine() {} }) });
+      wrapper.append(outline.sidebar); outline.setVisible(true);
+      const settle = async () => { for (let frame = 0; frame < 4; frame++) await new Promise(requestAnimationFrame); };
+      await settle();
+      const content = outline.sidebar.querySelector('.outline-content')!;
+      const before = content.scrollHeight;
+      outline.setVisible(false); outline.setUiLanguage('zh-CN'); outline.setVisible(true); await settle();
+      const after = content.scrollHeight;
+      headings = headings.map(heading => ({ ...heading, text: heading.text.replace('Old', 'Obsolete') }));
+      outline.refresh(); outline.setVisible(false);
+      headings = headings.map(heading => ({ ...heading, text: heading.text.replace('Obsolete', 'Latest') }));
+      outline.refresh(); outline.setVisible(true); await settle();
+      return { before, after, rows: content.querySelectorAll('.outline-item').length,
+        first: content.querySelector('.outline-item')?.textContent, stale: content.textContent.includes('Obsolete'), busy: content.getAttribute('aria-busy') };
+    });
+    if (Math.abs(lifecycle.before - lifecycle.after) > 1 || lifecycle.rows > 120 || lifecycle.rows === 0
+      || lifecycle.first !== 'Latest 0' || lifecycle.stale || lifecycle.busy !== 'false')
+      throw Error(`Large outline hide/locale/reveal or pending projection retirement regressed: ${JSON.stringify(lifecycle)}`);
+
     console.log('outline scroll sync checks passed');
   } finally {
     await browser.close();

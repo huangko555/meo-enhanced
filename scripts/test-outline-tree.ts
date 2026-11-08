@@ -67,3 +67,23 @@ if (JSON.stringify(setextHeadings.map(({ level, text }) => ({ level, text }))) !
 if (!setextHeadings[0].inlineSegments?.some(segment => segment.text === 'Bold' && segment.strong)) throw new Error('Setext heading inline formatting was lost');
 const emptyHeading = extractHeadings(EditorState.create({ doc: '# #', extensions: [markdown({ base: markdownLanguage })] }))[0];
 if (emptyHeading.text !== '' || emptyHeading.inlineSegments?.length) throw new Error('An empty ATX heading must keep an empty content range');
+
+// Outline discovery needs block structure, not every token in unrelated prose
+// or embedded languages. Keep real nested headings and rich heading text.
+const prose = Array.from({ length: 600 }, (_, index) =>
+  `Paragraph ${index}. ${'**bold** [link](https://example.test) and `code` with *emphasis*. '.repeat(12)}\n\n`).join('');
+const indexedText = '# **Root**\n\n' + prose + '> ## Quoted\n\n- ### Nested\n\nSetext\n---\n\n```markdown\n# Literal code\n```\n';
+const indexedState = EditorState.create({ doc: indexedText, extensions: [markdown({ base: markdownLanguage })] });
+const indexedTree = markdownLanguage.parser.parse(indexedText);
+let visited = 0;
+const observedTree = Object.create(indexedTree);
+observedTree.iterate = (spec: Parameters<typeof indexedTree.iterate>[0]) => indexedTree.iterate({ ...spec,
+  enter(node) { visited++; return spec.enter?.(node); }
+});
+const indexedHeadings = extractHeadings(indexedState, observedTree);
+if (JSON.stringify(indexedHeadings.map(heading => heading.text)) !== JSON.stringify(['Root', 'Quoted', 'Nested', 'Setext']))
+  throw Error('Indexed outline lost nested headings or included fenced Markdown');
+if (!indexedHeadings[0].inlineSegments?.some(segment => segment.strong && segment.text === 'Root'))
+  throw Error('Indexed outline must retain authoritative inline heading styles');
+if (visited >= 2_000) throw Error(`Outline discovery traversed unrelated inline content: ${visited} nodes`);
+console.log(`Outline discovery is bounded by block structure: ${visited} outer nodes`);

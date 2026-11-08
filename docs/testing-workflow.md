@@ -1689,6 +1689,17 @@ browser-protocol key synthesis does not establish this OS boundary.
 
 ## Document-scale coverage
 
+`test-outline-large-startup.ts` protects bounded in-app outline DOM independently
+of the complete heading model. It pairs Live/Source startup, Preview roundtrips,
+ordinary/large replacements and growth across the outline threshold. Trusted
+outline wheels must reach the last heading without mounting the full tree;
+navigation, sibling metadata, hierarchy, retained focused rows and native Tab
+crossing remain required. `test-outline-scroll-sync.ts` also checks hidden locale
+changes, exact range retention and superseded pending projections. The process
+contract in `test-outline-tree.ts` counts outer syntax visits through the actual
+heading extractor while retaining rich, nested and Setext heading semantics.
+These additions keep their existing browser/targeted and unit registrations.
+
 `scripts/test-preview-rendered-actions.ts` updates a LaTeX-delimited formula in
 the retained Preview document, then clicks its rendered text. Ordinary and
 actually windowed light/dark fixtures require unchanged formula HTML and no
