@@ -26,18 +26,125 @@ try {
   await frame.evaluate(() => {
     const target = document.getElementById('editor')!;
     const state = { calls: 0, editable: true };
-    const controller = (window as any).FocusController.createEditorFocusController({
-      root: document.getElementById('app')!,
+    const createController = (root: HTMLElement, editor: HTMLElement, owner = state) => (window as any).FocusController.createEditorFocusController({
+      root,
       getEditor: () => ({
-        view: {dom: target},
-        hasFocus: () => document.hasFocus() && document.activeElement === target,
-        focus: () => {state.calls++; target.focus();},
+        view: {dom: editor},
+        hasFocus: () => document.hasFocus() && document.activeElement === editor,
+        focus: () => {owner.calls++; editor.focus();},
         retainViewportOnWindowReturn: () => () => {}
       }),
-      isEditableMode: () => state.editable
+      isEditableMode: () => owner.editable
     });
-    (window as any).fixture = {state, controller};
+    const controller = createController(document.getElementById('app')!, target);
+    (window as any).fixture = {state, controller, createController};
   });
+  await frame.focus('#editor');
+  const coldBeforeReturn = await frame.evaluate(() => {
+    const {state, controller} = (window as any).fixture;
+    const app = document.getElementById('app')!;
+    const editor = document.getElementById('editor')!;
+    editor.blur(); app.inert = true; controller.armInitialEditorFocus(); state.calls = 0;
+    return {calls: state.calls, documentFocused: document.hasFocus(), active: document.activeElement?.nodeName};
+  });
+  assert.deepEqual(coldBeforeReturn, {calls: 0, documentFocused: true, active: 'BODY'},
+    'the inert cold fixture must retain intent without claiming the editor');
+  await page.focus('#other-input');
+  assert.equal(await frame.evaluate(() => document.hasFocus()), false,
+    'the cold fixture must lose native document focus before return');
+  await frame.evaluate(() => { (document.getElementById('app') as HTMLElement).inert = false; });
+  await page.evaluate(() => (document.getElementById('meo') as HTMLIFrameElement).contentWindow!.focus());
+  const coldInitial = await frame.evaluate(() => {
+    const {state, controller} = (window as any).fixture;
+    const editor = document.getElementById('editor')!;
+    const afterNativeReturn = state.calls;
+    controller.restoreFromHost();
+    return {afterNativeReturn, afterHostEcho: state.calls, focused: document.activeElement === editor,
+      documentFocused: document.hasFocus(), active: document.activeElement?.id ?? document.activeElement?.nodeName};
+  });
+  assert.deepEqual(coldInitial, {afterNativeReturn: 1, afterHostEcho: 1, focused: true,
+    documentFocused: true, active: 'editor'},
+    'cold startup focus must wait for a ready native return and ignore a late Host echo');
+  const canceledColdInitial = await frame.evaluate(() => {
+    const {createController} = (window as any).fixture;
+    const app = document.getElementById('app')!;
+    const createFixture = () => {
+      const root = document.createElement('section');
+      const editor = document.createElement('div'); editor.contentEditable = 'true'; editor.textContent = 'Cold fixture';
+      root.append(editor); app.append(root);
+      const state = {calls: 0, editable: true};
+      return {root, editor, state, controller: createController(root, editor, state)};
+    };
+    const inputFixture = createFixture();
+    const input = document.createElement('input'); inputFixture.root.append(input); input.focus();
+    inputFixture.controller.armInitialEditorFocus(); input.blur();
+    const inputResult = inputFixture.controller.restoreInitialEditorFocusIfReady();
+    const previewFixture = createFixture();
+    previewFixture.controller.armInitialEditorFocus(); previewFixture.state.editable = false;
+    const previewResult = previewFixture.controller.restoreInitialEditorFocusIfReady();
+    const modalFixture = createFixture();
+    modalFixture.controller.armInitialEditorFocus();
+    const dialog = document.createElement('dialog'); document.body.append(dialog); dialog.showModal();
+    const modalResult = modalFixture.controller.restoreInitialEditorFocusIfReady();
+    dialog.close(); dialog.remove();
+    const result = {
+      input: {result: inputResult, calls: inputFixture.state.calls},
+      preview: {result: previewResult, calls: previewFixture.state.calls},
+      modal: {result: modalResult, calls: modalFixture.state.calls}
+    };
+    for (const fixture of [inputFixture, previewFixture, modalFixture]) {
+      fixture.controller.dispose(); fixture.root.remove();
+    }
+    return result;
+  });
+  assert.deepEqual(canceledColdInitial, {
+    input: {result: false, calls: 0}, preview: {result: false, calls: 0}, modal: {result: false, calls: 0}
+  }, 'new input, Preview, and modal ownership must cancel startup focus intent');
+  for (const nextOwner of ['input', 'command'] as const) {
+    const controlPage = await browser.newPage();
+    try {
+      await controlPage.setContent('<input id="outside"><iframe id="control-frame" srcdoc="<main id=app><div id=editor contenteditable=true>Initial text</div><input id=next-input><button id=next-command>Open input</button></main>"></iframe>');
+      const controlFrame = await (await controlPage.waitForSelector('#control-frame'))!.contentFrame();
+      assert.ok(controlFrame);
+      await controlFrame.addScriptTag({content: await bundle.outputs[0]!.text()});
+      await controlFrame.evaluate(() => {
+        const root = document.getElementById('app')!;
+        const editor = document.getElementById('editor')!;
+        const input = document.getElementById('next-input') as HTMLInputElement;
+        const state = {calls: 0, commandCalls: 0};
+        const controller = (window as any).FocusController.createEditorFocusController({
+          root, getEditor: () => ({view: {dom: editor},
+            hasFocus: () => document.hasFocus() && document.activeElement === editor,
+            focus: () => {state.calls++; editor.focus();}, retainViewportOnWindowReturn: () => () => {}}),
+          isEditableMode: () => true
+        });
+        controller.registerInput(input);
+        document.getElementById('next-command')!.addEventListener('click', () => {state.commandCalls++; input.focus();});
+        root.inert = true;
+        controller.armInitialEditorFocus();
+        (window as any).nextOwnerFixture = {root, state, controller};
+      });
+      await controlPage.focus('#outside');
+      await controlFrame.evaluate(() => { (window as any).nextOwnerFixture.root.inert = false; });
+      await controlPage.evaluate(() => document.querySelector<HTMLIFrameElement>('#control-frame')!.contentWindow!.focus());
+      assert.deepEqual(await controlFrame.evaluate(() => ({
+        calls: (window as any).nextOwnerFixture.state.calls,
+        editor: document.activeElement?.id
+      })), {calls: 1, editor: 'editor'}, 'an unclaimed native BODY return must connect input synchronously');
+      await controlFrame.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+      await controlFrame.click(nextOwner === 'input' ? '#next-input' : '#next-command');
+      await controlPage.keyboard.type('NEXT_OWNER');
+      const afterNewOwner = await controlFrame.evaluate(async () => {
+        const fixture = (window as any).nextOwnerFixture;
+        fixture.controller.restoreFromHost();
+        for (let frame = 0; frame < 4; frame++) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        return {calls: fixture.state.calls, commandCalls: fixture.state.commandCalls,
+          active: document.activeElement?.id, text: (document.getElementById('next-input') as HTMLInputElement).value};
+      });
+      assert.deepEqual(afterNewOwner, {calls: 1, commandCalls: nextOwner === 'command' ? 1 : 0,
+        active: 'next-input', text: 'NEXT_OWNER'}, `${nextOwner}: a later control owns its first input and late Host echoes cannot restore the startup editor`);
+    } finally { await controlPage.close(); }
+  }
   // Exercise separate document focus, as with the MEO and Codex Webviews.
   await frame.focus('#editor');
   await page.focus('#other-input');

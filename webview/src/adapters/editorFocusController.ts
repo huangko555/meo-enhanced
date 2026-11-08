@@ -11,6 +11,12 @@ export type EditorFocusController = {
    * The editor retains ownership of its internal inputs and document selection.
    */
   registerInput(input: HTMLInputElement | HTMLTextAreaElement): () => void;
+  /** Records the startup editor target until native focus can actually accept it. */
+  armInitialEditorFocus(): void;
+  /** Claims pending startup focus only when this document is natively active. */
+  restoreInitialEditorFocusIfReady(): 'editor' | false;
+  /** A newer control, mode, or explicit interaction supersedes startup intent. */
+  cancelInitialEditorFocus(): void;
   /** Only an editor return needs the caller's editor surface refresh. */
   restoreFromHost(): 'editor' | 'input' | false;
   /** Actual VS Code window focus, distinct from a Webview's internal handoffs. */
@@ -30,6 +36,7 @@ type InputSelection = {
 
 const focusTakingSelector = 'input, textarea, select, [role="textbox"], [role="combobox"], [role="listbox"], [role="option"], [contenteditable]:not([contenteditable="false"])';
 const focusTransferSelector = 'iframe, dialog[open], [aria-modal="true"], [draggable="true"], [data-editor-focus-transfer]';
+const commandTargetSelector = 'button, a, summary, [role="button"], [role="tab"]';
 const windowReturnPaintGraceMs = 50;
 
 /** Owns focus handoffs between an editable document, window activation, and Webview chrome. */
@@ -63,6 +70,17 @@ export function createEditorFocusController({
   let hostWindowFocused: boolean | null = null;
   let windowFeedbackAccepted = false;
   let releaseWindowReturnViewport: (() => void) | null = null;
+  // Editor creation may happen below an inert loading cover. Keep the initial
+  // target as intent rather than treating a failed programmatic focus as an
+  // editor-owned window return; it may be claimed only after native focus is
+  // back in this document and no newer interaction owns it.
+  let initialEditorFocusPending = false;
+  let initialEditorFocusAvailable = true;
+
+  const abandonInitialEditorFocus = (): void => {
+    initialEditorFocusPending = false;
+    initialEditorFocusAvailable = false;
+  };
 
   const syncFocusFeedback = (): void => {
     const stableHostReturn = hostWindowFocused === true && windowFeedbackAccepted;
@@ -119,6 +137,12 @@ export function createEditorFocusController({
   );
   const isFocusTaking = (target: Element): boolean => Boolean(target.closest(focusTakingSelector));
   const isFocusTransfer = (target: Element): boolean => Boolean(target.closest(focusTransferSelector));
+  const isCommandTarget = (target: Element): boolean => Boolean(target.closest(commandTargetSelector));
+  const editorReadyForFocus = (editor: FocusableEditor): boolean => {
+    const dom = editor.view.dom;
+    return dom.isConnected && !dom.closest('[hidden], [inert]')
+      && dom.getClientRects().length > 0 && getComputedStyle(dom).visibility === 'visible';
+  };
   const clearTransientFrame = (): void => {
     if (transientReturnFrame !== null) window.cancelAnimationFrame(transientReturnFrame);
     transientReturnFrame = null;
@@ -238,10 +262,26 @@ export function createEditorFocusController({
     settleWindowReturnBeforePaint();
     return 'editor';
   };
+  const restoreInitialEditorFocusIfReady = (): 'editor' | false => {
+    if (!initialEditorFocusPending || !document.hasFocus()) return false;
+    if (!isEditableMode() || activeModal()) {
+      abandonInitialEditorFocus();
+      return false;
+    }
+    const active = document.activeElement;
+    if (active !== document.body && active !== document.documentElement) return false;
+    const editor = getEditor();
+    if (!editor || !editorReadyForFocus(editor)) return false;
+    editor.focus();
+    if (!inEditor(document.activeElement)) return false;
+    abandonInitialEditorFocus();
+    return 'editor';
+  };
 
   const onPointerDown = (event: PointerEvent): void => {
     const target = event.target;
     if (!(target instanceof Element)) return;
+    if (isCommandTarget(target)) abandonInitialEditorFocus();
     const editorPointer = inEditor(target);
     const preservesEditor = root.contains(target) && !isFocusTaking(target) && !isFocusTransfer(target);
     if (editorPointer || preservesEditor) {
@@ -251,6 +291,7 @@ export function createEditorFocusController({
       const inputOwnsReturn = registeredInput(document.activeElement) !== null || windowReturnInput !== null;
       preservingEditorFocus = !editorPointer && editorOwnsReturn;
       if (editorPointer) {
+        abandonInitialEditorFocus();
         lastFocusedInput = null;
         windowReturnInput = null;
         documentPointerGeneration += 1;
@@ -268,6 +309,7 @@ export function createEditorFocusController({
       return;
     }
     preservingEditorFocus = false;
+    abandonInitialEditorFocus();
     lastFocusedInput = registeredInput(target);
     windowReturnPointerGeneration = null;
     finishWindowReturn();
@@ -303,6 +345,7 @@ export function createEditorFocusController({
 
   const onFocusIn = (event: FocusEvent): void => {
     if (inEditor(event.target)) {
+      abandonInitialEditorFocus();
       if (preservingEditorFocus && isEditableMode()) {
         const before = document.activeElement;
         getEditor()?.focus();
@@ -324,6 +367,9 @@ export function createEditorFocusController({
     }
     preservingEditorFocus = false;
     const input = registeredInput(event.target);
+    const target = event.target;
+    if (target instanceof Element && root.contains(target)
+      && (isFocusTaking(target) || isFocusTransfer(target) || isCommandTarget(target))) abandonInitialEditorFocus();
     lastFocusedInput = input;
     editorWasLastFocused = false;
     syncFocusFeedback();
@@ -334,7 +380,6 @@ export function createEditorFocusController({
     windowReturnPointerGeneration = null;
     finishWindowReturn();
     if (input) captureInput(input);
-    const target = event.target;
     if (target instanceof Element && root.contains(target) && isFocusTaking(target)) {
       if (inEditor(event.relatedTarget)) transientOrigin = true;
     }
@@ -358,6 +403,7 @@ export function createEditorFocusController({
   };
   const onInputCapture = (event: Event): void => {
     preservingEditorFocus = false;
+    abandonInitialEditorFocus();
     if (event.type === 'compositionstart' && leftAltGesture) leftAltGesture.usedInCombination = true;
     if (!windowReturnPending) return;
     if (inEditor(event.target) || registeredInput(event.target)) {
@@ -369,7 +415,10 @@ export function createEditorFocusController({
   const onCommandClick = (event: MouseEvent): void => {
     // A command may intentionally focus a new editor target. Blank chrome only
     // borrows focus; buttons/links hand it to their existing command owner.
-    if (event.target instanceof Element && event.target.closest('button, a, summary, [role="button"], [role="tab"]')) preservingEditorFocus = false;
+    if (event.target instanceof Element && isCommandTarget(event.target)) {
+      preservingEditorFocus = false;
+      abandonInitialEditorFocus();
+    }
   };
   const onInputStateChange = (event: Event): void => {
     const input = registeredInput(event.target);
@@ -391,6 +440,7 @@ export function createEditorFocusController({
       }
     }
     if (event.key === 'Tab') {
+      abandonInitialEditorFocus();
       transientOrigin = false;
       clearTransientFrame();
       finishWindowReturn();
@@ -453,9 +503,11 @@ export function createEditorFocusController({
     syncFocusFeedback();
   };
   const onWindowFocus = (): void => {
-    if (!restoreOnWindowReturn) return;
-    restoreOnWindowReturn = false;
-    restoreWindowReturn();
+    if (restoreOnWindowReturn) {
+      restoreOnWindowReturn = false;
+      restoreWindowReturn();
+    }
+    restoreInitialEditorFocusIfReady();
   };
 
   document.addEventListener('pointerdown', onPointerDown, true);
@@ -497,11 +549,24 @@ export function createEditorFocusController({
         }
       };
     },
+    armInitialEditorFocus(): void {
+      if (!initialEditorFocusAvailable || !isEditableMode() || activeModal()) return;
+      const active = document.activeElement;
+      if (active !== document.body && active !== document.documentElement) {
+        abandonInitialEditorFocus();
+        return;
+      }
+      initialEditorFocusPending = true;
+    },
+    restoreInitialEditorFocusIfReady,
+    cancelInitialEditorFocus(): void {
+      abandonInitialEditorFocus();
+    },
     restoreFromHost(): 'editor' | 'input' | false {
       // Panel/activity notifications may arrive after a Workbench control took
       // focus. Only a native return into this document may grant focus again.
       if (!document.hasFocus()) return false;
-      return restoreWindowReturn();
+      return restoreWindowReturn() || restoreInitialEditorFocusIfReady();
     },
     dispose(): void {
       document.removeEventListener('pointerdown', onPointerDown, true);
@@ -527,6 +592,7 @@ export function createEditorFocusController({
       hostWindowFocused = null;
       editorWasLastFocused = false;
       windowFeedbackAccepted = false;
+      abandonInitialEditorFocus();
       finishWindowReturn();
       inputs.clear();
       lastFocusedInput = null;

@@ -1010,7 +1010,12 @@ function testPaintedCaretFrameClassification(): void {
   assert.throws(() => assertPaintedCaretFrames('unattributed', [...valid, { epoch: 5, old: 0, next: 19 }]));
 }
 
-async function runWorkbenchMenuFocus(browser: Browser, mode: 'live' | 'source', loading = false): Promise<void> {
+async function runWorkbenchMenuFocus(
+  browser: Browser,
+  mode: 'live' | 'source',
+  loading = false,
+  coldDocumentLines = 2
+): Promise<void> {
   const page = await browser.newPage();
   try {
     await page.setViewport({ width: 1000, height: 700 });
@@ -1022,6 +1027,15 @@ async function runWorkbenchMenuFocus(browser: Browser, mode: 'live' | 'source', 
     await content.setContent('<style>html,body,#app{height:100%;margin:0}#app{display:flex;flex-direction:column}</style><div id="app"></div>');
     await content.addStyleTag({ path: path.join(repoRoot, 'webview', 'src', 'styles.css') });
     await content.addScriptTag({ content: 'window.__hostMessages=[];window.acquireVsCodeApi=()=>({postMessage(message){window.__hostMessages.push(message);if(message.type===\'ready\')window.__hostPageId=message.pageId},getState(){},setState(){}})' });
+    await content.evaluate(() => {
+      const events: unknown[] = [];
+      (window as any).__workbenchFocusEvents = events;
+      for (const type of ['focus', 'blur']) window.addEventListener(type, event => {
+        if (event.target !== window || events.length >= 24) return;
+        events.push({ type, trusted: event.isTrusted, focused: document.hasFocus(),
+          active: document.activeElement?.nodeName ?? null });
+      });
+    });
     if (loading) await content.evaluate(() => {
       // Let the real editor mount, then hold its preparation frames until the
       // loading cover is visible and focus has moved to the Workbench menu.
@@ -1047,7 +1061,10 @@ async function runWorkbenchMenuFocus(browser: Browser, mode: 'live' | 'source', 
     await content.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
     await content.waitForFunction(() => typeof (window as any).__hostPageId === 'string');
     const pageId = await content.evaluate(() => (window as any).__hostPageId as string);
-    await content.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), init(pageId, mode, 'alpha\nbeta'));
+    const text = coldDocumentLines > 2
+      ? Array.from({ length: coldDocumentLines }, (_, line) => `cold line ${line + 1}`).join('\n')
+      : 'alpha\nbeta';
+    await content.evaluate((message) => window.dispatchEvent(new MessageEvent('message', { data: message })), init(pageId, mode, text));
     await content.waitForSelector('.cm-content');
     await content.waitForFunction(loading => loading
       ? document.querySelector<HTMLElement>('.editor-loading')?.hidden === false && document.querySelector<HTMLElement>('.editor-host')?.inert
@@ -1068,14 +1085,93 @@ async function runWorkbenchMenuFocus(browser: Browser, mode: 'live' | 'source', 
     }
     assert.equal(await page.evaluate(() => document.activeElement?.id), 'host-menu', `${mode} late Host notification or loading completion dismissed the Workbench menu`);
     assert.equal(await content.evaluate(() => document.hasFocus()), false, `${mode} late Host notification stole frame focus`);
+    let coldViewportBeforeReturn: number | null = null;
+    if (coldDocumentLines > 2) {
+      const bounds = await (await page.$('#webview'))!.boundingBox();
+      assert.ok(bounds, `${mode} cold long-document frame lacks bounds`);
+      await page.mouse.move(bounds.x + 360, bounds.y + 360);
+      await page.mouse.wheel({ deltaY: 1_000_000 });
+      await content.evaluate(async () => {
+        for (let frame = 0; frame < 4; frame += 1) await new Promise(requestAnimationFrame);
+      });
+      coldViewportBeforeReturn = await content.evaluate(() => {
+        const view = (document.querySelector('.cm-content') as HTMLElement & { cmTile: any }).cmTile.root.view;
+        return view.scrollDOM.scrollTop as number;
+      });
+      assert.ok(coldViewportBeforeReturn > 10_000, `${mode} cold long-document wheel did not reach the distant reading position`);
+      assert.equal(await page.evaluate(() => document.activeElement?.id), 'host-menu', `${mode} cold wheel stole Workbench menu focus`);
+    }
     // Restoring only the shell is not permission to steal focus. A real return
     // into the content window must still reconnect input at the saved position.
+    const collectFocusTrace = async (stage: string) => ({
+      stage,
+      outer: await page.evaluate(() => ({
+        documentHasFocus: document.hasFocus(),
+        frameHasFocus: document.hasFocus(),
+        activeElement: document.activeElement instanceof HTMLElement
+          ? `${document.activeElement.tagName}.${document.activeElement.id}.${document.activeElement.className}`
+          : document.activeElement?.nodeName ?? null
+      })),
+      shell: await shell.evaluate(() => ({
+        documentHasFocus: document.hasFocus(),
+        frameHasFocus: document.hasFocus(),
+        activeElement: document.activeElement instanceof HTMLElement
+          ? `${document.activeElement.tagName}.${document.activeElement.id}.${document.activeElement.className}`
+          : document.activeElement?.nodeName ?? null
+      })),
+      content: await content.evaluate(() => {
+        const host = document.querySelector<HTMLElement>('.editor-host');
+        const loading = document.querySelector<HTMLElement>('.editor-loading');
+        const active = document.activeElement;
+        return {
+          documentHasFocus: document.hasFocus(), frameHasFocus: document.hasFocus(),
+          activeElement: active instanceof HTMLElement ? `${active.tagName}.${active.id}.${active.className}` : active?.nodeName ?? null,
+          contentFocused: active === document.querySelector('.cm-content'),
+          hostInert: host?.inert ?? null, loadingHidden: loading?.hidden ?? null,
+          events: (window as any).__workbenchFocusEvents,
+          messages: ((window as any).__hostMessages ?? []).slice(-8).map((message: any) => message.type)
+        };
+      })
+    });
     await page.evaluate(() => document.querySelector<HTMLIFrameElement>('#webview')!.focus());
     await shell.evaluate(() => document.querySelector<HTMLIFrameElement>('iframe')!.contentWindow!.focus());
-    await content.waitForFunction(() => document.activeElement === document.querySelector('.cm-content'));
+    if (loading) {
+      // The inert loading cover never established an editor return target.
+      // The trusted native frame return, rather than a Host notification, must
+      // reconnect the initial editor target before the first keystroke.
+      assert.equal(await content.evaluate(() => document.hasFocus()), true,
+        `${mode} cold return did not activate the content document`);
+      console.log('[toolbar-cold-return]', JSON.stringify(await collectFocusTrace(`before-host-return:${mode}`)));
+    }
+    try {
+      await content.waitForFunction(() => document.activeElement === document.querySelector('.cm-content'));
+    } catch (error) {
+      console.error('[toolbar-focus-return]', JSON.stringify(await collectFocusTrace(`wait-content-focus:${mode}:${loading ? 'loading' : 'ready'}`)));
+      throw error;
+    }
+    if (loading) {
+      // A late activation echo must be idempotent: native focus already owns
+      // the selection restored above.
+      await content.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'focusEditor' } })));
+      assert.equal(await content.evaluate(() => document.activeElement === document.querySelector('.cm-content')), true,
+        `${mode} late Host notification changed the cold-return target`);
+    }
+    if (coldViewportBeforeReturn !== null) {
+      const viewportFrames = await content.evaluate(async () => {
+        const view = (document.querySelector('.cm-content') as HTMLElement & { cmTile: any }).cmTile.root.view;
+        const values: number[] = [];
+        for (let frame = 0; frame < 4; frame += 1) {
+          await new Promise(requestAnimationFrame);
+          values.push(view.scrollDOM.scrollTop);
+        }
+        return values;
+      });
+      assert.ok(viewportFrames.every(value => Math.abs(value - coldViewportBeforeReturn!) <= 2),
+        `${mode} cold frame return jumped the distant reading viewport before input: ${JSON.stringify({ coldViewportBeforeReturn, viewportFrames })}`);
+    }
     await page.keyboard.type('MENU_RETURN');
     const after = await content.evaluate(() => (window as any).__hostMessages.filter((message: any) => message.type === 'draftChanged').at(-1)?.text);
-    assert.equal(after, 'alpha\nbeta'.slice(0, before) + 'MENU_RETURN' + 'alpha\nbeta'.slice(before), `${mode} content-window return lost the saved position or first input`);
+    assert.equal(after, text.slice(0, before) + 'MENU_RETURN' + text.slice(before), `${mode} content-window return lost the saved position or first input`);
   } finally {
     await page.close();
   }
@@ -1114,6 +1210,8 @@ async function main(): Promise<void> {
     await runWorkbenchMenuFocus(browser, 'source');
     await runWorkbenchMenuFocus(browser, 'live', true);
     await runWorkbenchMenuFocus(browser, 'source', true);
+    await runWorkbenchMenuFocus(browser, 'live', true, 8100);
+    await runWorkbenchMenuFocus(browser, 'source', true, 8100);
     await runAltFocusPolicy(browser, 'live');
     await runAltFocusPolicy(browser, 'source');
     await runIsolatedPaintedActivationClicks();

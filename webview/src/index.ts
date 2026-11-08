@@ -3293,6 +3293,7 @@ const mountEditorForMode = async (mode: 'live' | 'source', signal: AbortSignal):
   if (gitChangesGutterVisible) gitClient?.applyBaselineToEditor(editor);
   syncGitDiffDetails();
   syncGitDiffLineHighlights();
+  if (initialEditorPresentationPending) editorFocusController.armInitialEditorFocus();
   editor.focus();
   pendingInitialText = null;
   failureNotice.clearFailureNotice(editorNoticeIssue.editorMount);
@@ -3337,6 +3338,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
   mountEditor: mountEditorForMode,
   async applyEditorMode(mode, viewport) {
     if (!editor) throw new Error('Editor is not mounted');
+    editorFocusController.cancelInitialEditorFocus();
     const preparingEditor = editor;
     const intent = editorModeApplication.getState().intentId;
     const isCurrent = () => editor === preparingEditor
@@ -3401,6 +3403,7 @@ const editorModeEffectAdapter = createEditorModeEffectAdapter({
     }
   },
   setPreviewActive(active, presentation) {
+    if (active) editorFocusController.cancelInitialEditorFocus();
     const atomicSplit = !active
       && presentation?.mode === 'source'
       && presentation.previousMode !== 'source'
