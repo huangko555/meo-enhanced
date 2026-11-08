@@ -11,15 +11,38 @@ class NativeInputCapabilityError extends Error {
   }
 }
 
+async function inspectContentFrameOwner(frame) {
+  const element = await frame.frameElement();
+  if (!element) throw Error('The content frame has no parent iframe owner');
+  try {
+    return await element.evaluate(node => {
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return {
+        id: node.id,
+        visible: style.visibility === 'visible' && !node.hidden && rect.width > 0 && rect.height > 0,
+        inert: Boolean(node.closest('[inert]')),
+        x: rect.x,
+        y: rect.y
+      };
+    });
+  } finally {
+    await element.dispose();
+  }
+}
+
 async function findActiveWebview(browser, heading) {
   const matches = [];
   for (const page of await browser.pages()) for (const frame of page.frames()) {
-    const accepted = await frame.evaluate(heading => {
-      const root = document.querySelector('.editor-root');
-      return window.frameElement?.id === 'active-frame' && root?.textContent?.includes(heading)
-        && getComputedStyle(window.frameElement).visibility === 'visible'
-        && !document.querySelector('.meo-preload-toolbar');
-    }, heading).catch(() => false);
+    const accepted = await (async () => {
+      const hasActiveDocument = await frame.evaluate(heading => {
+        const root = document.querySelector('.editor-root');
+        return Boolean(root?.textContent?.includes(heading) && !document.querySelector('.meo-preload-toolbar'));
+      }, heading);
+      if (!hasActiveDocument) return false;
+      const owner = await inspectContentFrameOwner(frame);
+      return owner.id === 'active-frame' && owner.visible && !owner.inert;
+    })().catch(() => false);
     if (accepted) matches.push({ page, frame });
   }
   assert.equal(matches.length, 1, 'Exactly one active Webview must match the disposable document heading');
@@ -37,7 +60,6 @@ async function createPointerDriver({ frame, page, mouse = page.mouse, timeoutMs 
 
   const pointFor = async selector => {
     const point = await frame.$eval(selector, node => {
-      if (window.frameElement?.id !== 'active-frame') throw Error('The content frame is not active');
       if (!node.isConnected || node.closest('[inert]') || node.disabled) throw Error('Target is not interactive');
       const style = getComputedStyle(node), rect = node.getBoundingClientRect();
       const left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
@@ -45,9 +67,14 @@ async function createPointerDriver({ frame, page, mouse = page.mouse, timeoutMs 
       if (style.visibility !== 'visible' || right <= left || bottom <= top) throw Error('Target is not visible');
       const x = (left + right) / 2, y = (top + bottom) / 2;
       if (!node.contains(document.elementFromPoint(x, y))) throw Error('The target is covered');
-      const contentFrame = window.frameElement.getBoundingClientRect();
-      return { x, y, innerX: contentFrame.x, innerY: contentFrame.y };
+      return { x, y };
     });
+    const contentFrame = await inspectContentFrameOwner(frame);
+    if (contentFrame.id !== 'active-frame' || !contentFrame.visible || contentFrame.inert) {
+      throw Error('The content frame is not active');
+    }
+    point.innerX = contentFrame.x;
+    point.innerY = contentFrame.y;
     const origin = await page.evaluate(({ id, point }) => {
       const owners = [...document.querySelectorAll('iframe')].filter(node => {
         try { return new URL(node.src).searchParams.get('id') === id; } catch { return false; }

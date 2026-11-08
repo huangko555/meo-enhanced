@@ -101,9 +101,31 @@ if (args.has('--browser-url')) {
       assert.equal(await frame.evaluate(() => (window as any).clicks), 1, 'A different target must not count as the intended click');
     } finally { await frame.evaluate(() => document.getElementById('late-cover')?.remove()); }
 
-    await frame.evaluate(() => { window.frameElement!.id = 'pending-frame'; });
-    await assert.rejects(findActiveWebview(browser, 'Input token'), /Exactly one active Webview/);
-    await frame.evaluate(() => { window.frameElement!.id = 'active-frame'; });
+    await frame.evaluate(() => Object.defineProperty(window, 'frameElement', {
+      configurable: true,
+      value: undefined
+    }));
+    assert.equal(await frame.evaluate(() => window.frameElement), undefined,
+      'The nested content frame must not depend on DOM frameElement access');
+    const shadowed = await findActiveWebview(browser, 'Input token');
+    assert.equal(shadowed.frame, frame, 'The unique active frame must still be found through its CDP owner');
+    const shadowedDriver = await createPointerDriver(shadowed);
+    const shadowedClick = await shadowedDriver.click('#click');
+    assert.equal(await frame.evaluate(() => (window as any).clicks), 2);
+    assert.ok(shadowedClick.events.some((event: any) => event.type === 'pointerdown' && event.trusted));
+    const shadowedDrag = await shadowedDriver.drag('#drag', 45);
+    assert.equal(await frame.$eval('#drag', node => node.getBoundingClientRect().width), 65);
+    assert.ok(shadowedDrag.events.some((event: any) => event.type === 'pointerup' && event.trusted));
+
+    const contentFrame = await frame.frameElement();
+    assert.ok(contentFrame, 'The nested content frame must have a CDP owner');
+    try {
+      await contentFrame.evaluate(node => { node.id = 'pending-frame'; });
+      await assert.rejects(findActiveWebview(browser, 'Input token'), /Exactly one active Webview/);
+    } finally {
+      await contentFrame.evaluate(node => { node.id = 'active-frame'; });
+      await contentFrame.dispose();
+    }
     await page.evaluate(() => {
       const cover = document.createElement('div'); cover.id = 'cover';
       cover.style.cssText = 'position:fixed;inset:0;background:black;z-index:5'; document.body.append(cover);

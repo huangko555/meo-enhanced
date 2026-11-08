@@ -884,6 +884,17 @@ exact commands without running them.
 
 ## Native acceptance environment
 
+Browser-protocol resource checks use a normal installed launch. If a separate
+UI Automation or accessibility check needs `--force-renderer-accessibility`,
+record that launch separately; its renderer load and timings are not equivalent
+to a normal launch. Preserve failures in either environment rather than treating
+a passing contrast as proof of accessibility performance.
+
+Resolve the active content iframe through its browser-protocol frame owner and
+check its actual ID, CSS visibility and nonzero size. Older supported VS Code
+versions can omit `window.frameElement` inside an otherwise interactive Webview. A missing
+content-world accessor does not establish that the editor failed to load.
+
 Before using browser-protocol pointer input in an installed Workbench, run
 `bun scripts/test-native-input-delivery.ts`. This bounded driver contract verifies
 actual press/move/release receipts, rejects an acknowledged but undelivered press,
