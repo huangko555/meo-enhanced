@@ -6070,7 +6070,7 @@ body.outline-resizing .preview-frame {
 
 /* Without numbers, the sign column and minimum gutter width still reserve
    space. Keep compact markers at the content edge, not before that space. */
-.cm-editor:not(.meo-git-diff-details-visible):not(:has(.cm-lineNumbers)) .cm-gutter.meo-git-gutter {
+.cm-editor:not(.meo-git-diff-details-visible)[data-meo-source-line-numbers='off'] .cm-gutter.meo-git-gutter {
   order: 1;
   margin-left: auto;
 }
@@ -6249,9 +6249,9 @@ body.outline-resizing .preview-frame {
   stroke: currentColor;
 }
 
-.cm-editor:not(:has(.cm-lineNumbers)) .cm-gutter.meo-git-diff-sign-gutter,
-.cm-editor:not(:has(.cm-lineNumbers)) .cm-gutter.meo-git-diff-sign-gutter .cm-gutterElement,
-.cm-editor:not(:has(.cm-lineNumbers)) .meo-git-diff-sign-gutter-spacer {
+.cm-editor[data-meo-source-line-numbers='off'] .cm-gutter.meo-git-diff-sign-gutter,
+.cm-editor[data-meo-source-line-numbers='off'] .cm-gutter.meo-git-diff-sign-gutter .cm-gutterElement,
+.cm-editor[data-meo-source-line-numbers='off'] .meo-git-diff-sign-gutter-spacer {
   box-sizing: border-box;
   width: 18px;
   min-width: 18px;
@@ -6259,19 +6259,19 @@ body.outline-resizing .preview-frame {
   overflow: visible;
 }
 
-.cm-editor:not(:has(.cm-lineNumbers)) .meo-git-diff-sign-gutter-cell {
+.cm-editor[data-meo-source-line-numbers='off'] .meo-git-diff-sign-gutter-cell {
   display: flex;
   align-items: flex-start;
   justify-content: flex-end;
 }
 
-.cm-editor:not(:has(.cm-lineNumbers)) .meo-git-diff-sign {
+.cm-editor[data-meo-source-line-numbers='off'] .meo-git-diff-sign {
   position: static;
   right: auto;
   flex: none;
 }
 
-.cm-editor.meo-git-diff-details-visible:not(:has(.cm-lineNumbers))
+.cm-editor.meo-git-diff-details-visible[data-meo-source-line-numbers='off']
   .meo-git-diff-sign-gutter-cell.is-current {
   background: linear-gradient(
     to right,
@@ -6282,7 +6282,7 @@ body.outline-resizing .preview-frame {
   box-shadow: 2px 0 color-mix(in srgb, var(--git-added) 12%, transparent);
 }
 
-.cm-editor.meo-git-diff-details-visible:not(:has(.cm-lineNumbers))
+.cm-editor.meo-git-diff-details-visible[data-meo-source-line-numbers='off']
   .meo-git-diff-sign-gutter-cell.is-original {
   background: linear-gradient(
     to right,
@@ -6293,12 +6293,12 @@ body.outline-resizing .preview-frame {
   box-shadow: 2px 0 color-mix(in srgb, var(--git-deleted) 12%, transparent);
 }
 
-.cm-editor.meo-git-diff-details-visible:not(:has(.cm-lineNumbers))
+.cm-editor.meo-git-diff-details-visible[data-meo-source-line-numbers='off']
   .meo-git-diff-current-line {
   box-shadow: -7px 0 color-mix(in srgb, var(--git-added) 12%, transparent);
 }
 
-.cm-editor.meo-git-diff-details-visible:not(:has(.cm-lineNumbers))
+.cm-editor.meo-git-diff-details-visible[data-meo-source-line-numbers='off']
   .meo-git-diff-original-block {
   box-shadow: -7px 0 color-mix(in srgb, var(--git-deleted) 12%, transparent);
 }

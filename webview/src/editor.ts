@@ -430,7 +430,8 @@ function lineNumberExtensions(
   _mode: EditableEditorMode,
   sourceMode: SourceLineNumberMode
 ): Extension {
-  const preference = sourceLineNumberModeFacet.of(sourceMode);
+  const preference = [sourceLineNumberModeFacet.of(sourceMode),
+    EditorView.editorAttributes.of({ 'data-meo-source-line-numbers': sourceMode })];
   return sourceMode === 'off' ? preference
     : [preference, lineNumbers({ formatNumber: formatSourceLineNumber }), highlightActiveLineGutter()];
 }

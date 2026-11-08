@@ -2554,7 +2554,10 @@ in Live, Source, Source + Preview and Preview with ordinary and actually optimiz
 large documents. It then brackets virtual-padding style mutations in a Chromium
 trace and checks the number of restyled elements, excluding unrelated frames and
 background tasks. Inline virtual-scroll geometry must not invalidate the whole
-reading subtree through authored HTML color selectors. It belongs to
+reading subtree through authored HTML color selectors. A second synchronous
+probe replaces overview end markers and requires bounded style work without
+restyling the line-number gutter. Its visibility comes from the existing line
+number setting, not an editor-wide descendant query. It belongs to
 `test:large-document-budget`; `--capture` also saves viewport screenshots under
 `.local/scroll-style-budget/`. This bounded work check does not certify native
 wheel-to-paint latency or whole-document scroll integrity. Authored HTML colors,

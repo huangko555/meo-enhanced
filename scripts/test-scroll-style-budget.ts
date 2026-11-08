@@ -96,6 +96,45 @@ try {
       assert.ok(contentElements > 100, `${mode}: fixture must contain enough rendered text`);
       assert.ok(maximum < contentElements / 4,
         `${mode}: virtual padding restyled ${maximum}/${contentElements} reading elements`);
+
+      // Overview markers are replaced during ordinary scrolling, even with no
+      // diff hunks. Their DOM must not invalidate every line-number descendant
+      // through an editor-wide :has() rule.
+      await page.tracing.start({ categories: ['devtools.timeline', 'blink.user_timing'] });
+      const gutterElements = await page.evaluate(() => {
+        const editor = document.querySelector<HTMLElement>('.editor-host .cm-editor')!;
+        const marker = document.createElement('div');
+        marker.className = 'meo-git-overview-ruler';
+        editor.append(marker);
+        void editor.offsetHeight;
+        const count = editor.querySelectorAll('.cm-gutterElement').length;
+        performance.mark('scroll-gutter-budget-start');
+        for (let index = 0; index < 4; index++) {
+          const end = document.createElement('div');
+          end.className = 'meo-git-overview-ruler-file-end';
+          marker.replaceChildren(end);
+          void editor.offsetHeight;
+        }
+        performance.mark('scroll-gutter-budget-end');
+        marker.remove();
+        return count;
+      });
+      const gutterTraceBytes = await page.tracing.stop();
+      assert.ok(gutterTraceBytes);
+      const gutterTrace = JSON.parse(Buffer.from(gutterTraceBytes).toString()) as typeof trace;
+      const gutterStart = gutterTrace.traceEvents.find(event => event.name === 'scroll-gutter-budget-start');
+      const gutterEnd = gutterTrace.traceEvents.find(event => event.name === 'scroll-gutter-budget-end');
+      assert.ok(gutterStart && gutterEnd);
+      const gutterCounts = gutterTrace.traceEvents.filter(event => event.name === 'UpdateLayoutTree'
+        && event.tid === gutterStart.tid && event.ts >= gutterStart.ts && event.ts <= gutterEnd.ts)
+        .map(event => event.args?.elementCount ?? 0);
+      assert.ok(gutterCounts.length >= 4, 'Overview updates must exercise actual style recalculation');
+      const maximumGutterStyledElements = Math.max(...gutterCounts);
+      console.log(JSON.stringify({ mode, large, gutterElements, maximumGutterStyledElements }));
+      assert.ok(gutterElements > 20, 'The reading surface must contain enough line-number elements');
+      assert.ok(maximumGutterStyledElements < gutterElements / 2,
+        `${mode}: overview updates restyled ${maximumGutterStyledElements}/${gutterElements} gutter elements`);
+      Object.assign(reports.at(-1) as object, { gutterElements, maximumGutterStyledElements });
       if (process.argv.includes('--capture')) await page.screenshot({ path: `${directory}/${mode}-${large}.png` });
     } finally { host.dispose(); await page.close(); }
   }
