@@ -302,82 +302,52 @@ try {
     console.log('LaTeX settings switch: visible bilingual UI, off/on, normal/worker paths, Source/Live/table/Preview, external updates and unchanged source passed');
     await closeTestBrowser(browser); process.exit(0);
   } else if (process.argv.includes('--extras-only')) {
+    const tabs = ['general', 'appearance', 'typing', 'presets', 'shortcuts', 'about'];
     for (const text of ['# Notes\n\nUnchanged content', '# Notes\n\n' + 'Document paragraph.\n\n'.repeat(7000)]) {
       await openFixture(text);
-      await page.evaluate(() => {
-        const state = { installed: false, version: '', features: [] };
-        (window as any).__extrasState = state;
-        window.dispatchEvent(new MessageEvent('message', { data: { type: 'extensionFeaturesChanged', state } }));
-      });
-      await page.waitForSelector('.editor-wrapper:not(.meo-preload-editor-shell) .cm-content');
-      await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button');
-      await page.click('[data-tab="extensions"]');
-      await page.waitForFunction(() => document.querySelector('#meo-settings-extras')?.textContent?.includes('MEO Extras'));
-      assert.equal(await page.$eval('#meo-settings-extras .settings-button', e => (e as HTMLButtonElement).disabled), true);
-      assert.equal(await page.$('#meo-settings-extras a'), null, 'Unpublished package has no pretend install URL');
-      await page.evaluate(() => {
-        const state = { installed: true, version: '0.1.0', features: [{ id: 'mindmap', label: 'Mind map', labelZh: '思维导图', description: 'Document mind maps.', descriptionZh: '全文与正文导图。', enabled: true, active: true, failed: false }] };
-        (window as any).__extrasState = state;
-        window.dispatchEvent(new MessageEvent('message', { data: { type: 'extensionFeaturesChanged', state } }));
-      });
-      assert.equal(await page.$eval('#meo-settings-extras .settings-button', e => (e as HTMLButtonElement).disabled), false);
-      await page.click('#meo-settings-extras .settings-button');
-      await page.waitForFunction(() => (window as any).__messages.some((m: any) => m.type === 'extensionFeaturesRequest' && m.action === 'openDetails'));
-      const toggle = '[data-extra-feature="mindmap"] [role="switch"]';
-      await page.click(toggle);
-      await page.waitForFunction(selector => document.querySelector(selector)?.getAttribute('aria-checked') === 'false' && !(document.querySelector(selector) as HTMLButtonElement).disabled, {}, toggle);
-      assert(await page.$('[data-tab="extensions"]'), 'All features off keeps the management tab');
-      assert(await page.$(toggle), 'Disabled features remain registered and can be enabled');
-      await page.click(toggle);
-      await page.waitForFunction(selector => document.querySelector(selector)?.getAttribute('aria-checked') === 'true' && !(document.querySelector(selector) as HTMLButtonElement).disabled, {}, toggle);
-      await page.evaluate(() => { (window as any).__extrasFail = true; });
-      await page.click(toggle); await page.waitForSelector('#meo-settings-extras [role="status"]');
-      assert.equal(await page.$eval(toggle, e => e.getAttribute('aria-checked')), 'true');
-      await page.evaluate(() => { (window as any).__extrasFail = false; });
-      await page.click('#meo-settings-extras [role="status"] + button');
-      await page.waitForFunction(() => !document.querySelector('#meo-settings-extras [role="status"]'));
+      await page.waitForFunction(() => !!document.querySelector('.editor-wrapper:not(.meo-preload-editor-shell) .cm-content')
+        && !document.querySelector<HTMLElement>('.editor-host')!.inert && document.querySelector<HTMLElement>('.editor-loading')?.hidden !== false);
+      const open = async () => { await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button'); };
+      await open();
+      const visibleTabs = () => page.$$eval('.settings-tab', nodes => nodes.map(node => (node as HTMLElement).dataset.tab));
+      assert.deepEqual(await visibleTabs(), tabs, 'Only the six published settings tabs are exposed');
+      for (const state of [{ installed: false, version: '', features: [] }, { installed: true, version: '0.1.0', features: [] },
+        { installed: true, version: '0.1.0', features: [{ id: 'mindmap', label: 'Mind map', description: 'Document mind maps.', enabled: true, active: true, failed: false }] }]) {
+        await page.evaluate(state => window.dispatchEvent(new MessageEvent('message', { data: { type: 'extensionFeaturesChanged', state } })), state);
+        assert.deepEqual(await visibleTabs(), tabs, 'Extras availability must not reveal its unpublished tab');
+        assert.equal(await page.$('#meo-settings-extras'), null);
+      }
+      await page.focus('[data-tab="shortcuts"]'); await page.keyboard.press('ArrowRight');
+      assert.equal(await page.$eval('.settings-window', e => (e as HTMLElement).dataset.tab), 'about', 'Keyboard navigation skips Extras');
+      await page.keyboard.press('ArrowRight');
+      assert.equal(await page.$eval('.settings-window', e => (e as HTMLElement).dataset.tab), 'general');
       for (const language of ['en', 'zh-CN']) for (const appearance of ['light', 'dark']) {
         await page.click('[data-tab="general"]'); await page.click(`[data-setting="language"] [data-value="${language}"]`);
         await page.click('[data-tab="appearance"]'); await page.click(`[data-appearance-mode="${appearance}"]`);
-        await page.click('[data-tab="extensions"]');
-        assert.equal(await page.$eval(toggle, e => e.getAttribute('aria-label')), language === 'en' ? 'Mind map' : '思维导图');
-        assert.equal(await page.$eval('#meo-settings-extras .settings-button', e => e.textContent), language === 'en' ? 'User guide' : '使用说明');
+        assert.deepEqual(await visibleTabs(), tabs);
+        await page.focus('.settings-search'); await page.keyboard.type('MEO Extras');
+        assert.equal(await page.$('[data-tab="extensions"]'), null);
+        assert.equal(await page.$('#meo-settings-extras'), null);
+        assert.ok((await page.$$eval('.settings-tab-badge', nodes => nodes.map(node => node.textContent))).every(count => count === '0'),
+          'Search must not count unpublished Extras settings');
+        await page.click('.settings-search-clear');
+        await page.setViewport({ width: 640, height: 640 });
+        assert.equal(await page.$eval('.settings-content', e => e.scrollWidth <= e.clientWidth + 1), true);
         if (process.env.MEO_SETTINGS_SCREENSHOTS) {
           const directory = path.resolve(process.env.MEO_SETTINGS_SCREENSHOTS); await fs.mkdir(directory, { recursive: true });
-          await page.screenshot({ path: path.join(directory, `extras-${language}-${appearance}.png`) });
+          await page.screenshot({ path: path.join(directory, `extras-hidden-${language}-${appearance}.png`) });
         }
-        await page.evaluate(() => {
-          const state = { ...(window as any).__extrasState, features: [] };
-          window.dispatchEvent(new MessageEvent('message', { data: { type: 'extensionFeaturesChanged', state } }));
-        });
-        await page.waitForSelector('#meo-settings-extras [role="status"]');
-        assert(await page.$('[data-tab="extensions"]'), 'Installed but unready keeps the tab and recovery controls');
-        await page.click('#meo-settings-extras [role="status"] + button');
-        await page.waitForSelector(toggle);
-        await page.evaluate(() => {
-          const state = (window as any).__extrasState;
-          window.dispatchEvent(new MessageEvent('message', { data: { type: 'extensionFeaturesChanged', state: { ...state,
-            features: [...state.features, { id: 'failed-fixture', label: 'Failed feature', labelZh: '失败功能', enabled: true, active: false, failed: true }] } } }));
-        });
-        assert(await page.$('[data-extra-feature="failed-fixture"] .settings-description'), 'Failed feature has an explanation');
-        assert.equal(await page.$eval(toggle, e => (e as HTMLButtonElement).disabled), false, 'Other features remain operable');
-        await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'extensionFeaturesChanged', state: (window as any).__extrasState } })));
-        await page.focus('.settings-search'); await page.keyboard.type('mind map');
-        assert.ok(await page.$(toggle)); await page.click('.settings-search-clear');
-        await page.setViewport({width: 640, height: 640});
-        assert.equal(await page.$eval('.settings-content', e => e.scrollWidth <= e.clientWidth + 1), true, 'Feature management fits narrow settings');
-        await fs.mkdir('.local/document-view-tests', {recursive: true});
-        await page.screenshot({path: `.local/document-view-tests/extras-${language}-${appearance}.png`});
-        await page.setViewport({width: 1100, height: 780});
+        await page.setViewport({ width: 1100, height: 780 });
       }
+      assert.equal(await page.evaluate(() => (window as any).__messages.some((m: any) => m.type === 'extensionFeaturesRequest')), false,
+        'Opening settings must not request the unpublished panel');
+      await page.click('.settings-close'); await open();
+      assert.deepEqual(await visibleTabs(), tabs, 'Reopening settings retains the published navigation');
       await page.click('.settings-close');
-      assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.toString()), text, 'Feature settings never edit ordinary or large documents');
-      await page.click('.more-tools-wrapper > .format-button'); await page.click('.more-tools-settings-button'); await page.click('[data-tab="extensions"]');
-      assert.equal(await page.$eval(toggle, e => e.getAttribute('aria-checked')), 'true');
-      await page.click('.settings-close');
+      assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor')).state.doc.toString()), text);
     }
     assert.deepEqual(errors, []);
-    console.log('PASS Extras settings: install placeholder, toggles, errors, languages, themes, narrow UI, ordinary/large unchanged documents');
+    console.log('PASS unpublished Extras hidden: states, search, keyboard, bilingual themes, narrow UI and unchanged ordinary/large documents');
     await closeTestBrowser(browser); process.exit(0);
   }
   // Use the real outline controller: its position is owned by the wrapper,

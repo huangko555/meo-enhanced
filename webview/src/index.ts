@@ -3794,7 +3794,7 @@ const previewPresetSettings = createPreviewPresetSettings({
 const extensionFeatureSettings = createExtensionFeatureSettings(request => vscode.postMessage(request), () => settingsWindow?.present());
 function getSettingsWindow(): ReturnType<typeof createSettingsWindow> {
   return settingsWindow ??= createSettingsWindow({
-    extensionFeatures: extensionFeatureSettings,
+    // Keep the optional Extras panel out of settings until it is published.
     ...versionInformationSource,
     openLink: href => vscode.postMessage({ type: 'openLink', href }),
     logoUrl: document.querySelector<HTMLMetaElement>('meta[name="meo-logo"]')?.content ?? '',

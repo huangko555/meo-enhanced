@@ -3058,6 +3058,11 @@ The table/history packs exercise the new editing paths; the appearance pack
 includes the actual settings and toolbar menus. Browser tests use the production
 editor and full Webview bootstrap. They assert resulting documents, undo results,
 actual remapped gestures, persisted projections, focus and DOM disposal.
+`test-settings-window-production.ts --extras-only` checks the unpublished Extras
+panel stays out of the six public tabs regardless of installed/feature states.
+Search counts, keyboard navigation and reopen stay consistent, with no Extras
+panel request. The check pairs ordinary/large documents and bilingual light/dark
+narrow layouts, retaining exact document text.
 Image-location mode checks wait for a visible, stable radio after viewport or
 path-feedback layout changes, then require trusted press, release and click on
 the same current input plus its immediate checked state. The existing desktop
