@@ -3810,11 +3810,18 @@ function rebuildLiveSelectionBlocks(decorations: DecorationSet, transaction: Tra
 
 function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction: Transaction, tree: Tree): DecorationSet | undefined {
   const before = transaction.startState, state = transaction.state;
+  const bandChanged = livePresentationBandChanged(transaction);
+  // Raw line bands can cut through a table, list or disclosure. Compare the
+  // canonical, semantically closed windows before deciding which roots enter.
+  const previousWindow = bandChanged ? livePresentationWindow(before, tree) : null;
+  const nextWindow = bandChanged ? livePresentationWindow(state, tree) : null;
+  const onlyWindow = previousWindow && nextWindow && !transaction.selection
+    && transaction.effects.every(isLiveViewportPresentationEffect);
   let changedBlockContext = false;
-  const active = new Set([...collectActiveLines(before), ...collectActiveLines(state)]);
+  const active = new Set<number>(onlyWindow ? [] : [...collectActiveLines(before), ...collectActiveLines(state)]);
   // Pointer release changes the presentation selection without moving the
   // native caret. Retire the held source block as well as rebuilding the hit.
-  for (const selection of [sourcePresentationSelection(before), sourcePresentationSelection(state), before.selection, state.selection]) for (const range of selection.ranges) {
+  for (const selection of onlyWindow ? [] : [sourcePresentationSelection(before), sourcePresentationSelection(state), before.selection, state.selection]) for (const range of selection.ranges) {
     const first = state.doc.lineAt(range.from).number, last = state.doc.lineAt(range.to).number;
     for (let line = first; line <= last; line += 1) active.add(line);
   }
@@ -3846,11 +3853,22 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
   includeChangedRange(previousMath?.searchReveal, nextMath?.searchReveal);
   includeChangedRange(getHtmlEditingRange(before), getHtmlEditingRange(state));
   includeChangedRange(blockReadingFocusAt(before), blockReadingFocusAt(state));
-  if (livePresentationBandChanged(transaction)) for (const source of [before, state]) {
-    const band = getLivePresentationBand(source);
-    if (!band) continue;
-    tree.iterate({ from: band.from, to: band.to, enter(node) {
+  if (bandChanged) {
+    const entering: SourceRange[] = [];
+    if (previousWindow && nextWindow) {
+      const old = previousWindow.scope, next = nextWindow.scope;
+      if (next.from < old.from) entering.push({ from: next.from, to: Math.min(next.to, old.from) });
+      if (next.to > old.to) entering.push({ from: Math.max(next.from, old.to), to: next.to });
+    } else {
+      // Preserve the full invalidation path when window closure is unavailable.
+      for (const source of [before, state]) {
+        const band = getLivePresentationBand(source);
+        if (band) entering.push(band);
+      }
+    }
+    for (const range of entering) tree.iterate({ ...range, enter(node) {
       if (node.name === 'Document') return;
+      if (node.to <= range.from || node.from >= range.to) return false;
       active.add(state.doc.lineAt(node.from).number);
       active.add(state.doc.lineAt(node.to).number);
       return false;
@@ -3951,9 +3969,9 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
     result = replaceLivePresentationRanges(result, scope.from, scope.to, additions);
   }
   const band = getLivePresentationBand(state);
-  if (band && (livePresentationBandChanged(transaction)
+  if (band && (bandChanged
     || merged.some(range => range.from < band.from || range.to > band.to))) {
-    const window = livePresentationWindow(state, tree);
+    const window = nextWindow ?? livePresentationWindow(state, tree);
     if (window) {
       const ranges: Range<Decoration>[] = [];
       for (const cursor = result.iter(); cursor.value; cursor.next()) ranges.push(cursor.value.range(cursor.from, cursor.to));

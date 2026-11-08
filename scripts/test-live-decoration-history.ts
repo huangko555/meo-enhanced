@@ -24,15 +24,18 @@ const build = await Bun.build({ entrypoints: [path.join(root, 'scripts/test-live
           'if (globalThis.__liveTestParseEnd !== undefined) (globalThis.__liveTestLimitedParses ??= []).push({ tree: newCx.tree.length, length: tr.newDoc.length, done: newCx.isDone(tr.newDoc.length) }); return new LanguageState(newCx);') };
     });
     builder.onLoad({ filter: /webview[\\/]src[\\/]liveMode\.ts$/ }, async ({ path }) => {
-      const source = await Bun.file(path).text();
+      const source = (await Bun.file(path).text()).replace(/\r\n/g, '\n');
       const boundary = 'return buildDecorations(state, fallback, extra.changes);';
       assert.equal(source.split(boundary).length, 2);
       const localBoundary = 'function projectLiveLocalInput(decorations: DecorationSet, transaction: Transaction): DecorationSet | undefined {';
       assert.equal(source.split(localBoundary).length, 2);
+      const rangeBoundary = '  ranges: DecorationCollector; tree: Tree\n} {';
+      assert.equal(source.split(rangeBoundary).length, 2);
       return { loader: 'ts', contents: source.replace(boundary,
         '((globalThis as any).__fullLiveBuilds ??= 0); (globalThis as any).__fullLiveBuilds++; ' +
         '((globalThis as any).__fullLiveBuildStates ??= []).push({ context, complete: markdownStructureAvailable(state) }); ' + boundary)
-        .replace(localBoundary, localBoundary + ' ((globalThis as any).__scopedLiveInputs ??= 0); (globalThis as any).__scopedLiveInputs++;') };
+        .replace(localBoundary, localBoundary + ' ((globalThis as any).__scopedLiveInputs ??= 0); (globalThis as any).__scopedLiveInputs++;')
+        .replace(rangeBoundary, rangeBoundary + ' if ((globalThis as any).__windowBuildReads) (globalThis as any).__windowBuildReads.push(scope ? { ...scope } : null);') };
     });
     for (const [file, boundary, counter] of [
       ['liveRenderedBlocks', 'function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock[] {', '__renderedDiscoveries'],
@@ -78,6 +81,46 @@ try {
   await page.addStyleTag({ path: path.join(root, 'webview/src/styles.css') });
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
   await installGitDiffWorker(page);
+  await page.evaluate(async () => {
+    const scope = window as any, api = scope.__liveHistory;
+    const text = Array.from({ length: 1_200 }, (_, i) => `## Window ${i}\n\n${'A paragraph with **formatted text** and a [link](https://example.test). '.repeat(6)}\n\n`
+      + (i % 8 === 0 ? '| A | B |\n| --- | --- |\n| cell | value |\n\n$$\nx^2 + 1\n$$\n\n' : '')).join('');
+    const editor = scope.__windowEditor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'source' });
+    await editor.prepareLiveSyntax(() => true); await editor.setMode('live');
+    if (!api.largeBudget(editor)) throw Error('Window overlap fixture must use the real bounded Live presentation');
+    scope.__windowText = text;
+  });
+  const windowFrames = () => page.evaluate(async () => { for (let i = 0; i < 3; i++) await new Promise(requestAnimationFrame); });
+  await windowFrames();
+  const windowPoint = await page.$eval('.cm-scroller', element => { const r = element.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await page.mouse.move(windowPoint.x, windowPoint.y);
+  let windowChanges = 0;
+  const windowDirections = new Set<number>();
+  for (const direction of [1, -1]) for (let index = 0; index < 18; index++) {
+    const before = await page.evaluate(() => { const scope = window as any; scope.__windowBuildReads = []; return scope.__liveHistory.presentationScope(scope.__windowEditor); });
+    await page.mouse.wheel({ deltaY: direction * 180 }); await windowFrames();
+    const result = await page.evaluate(() => {
+      const scope = window as any, api = scope.__liveHistory, editor = scope.__windowEditor;
+      const reads = scope.__windowBuildReads; delete scope.__windowBuildReads;
+      return { next: api.presentationScope(editor), reads, text: editor.getText() === scope.__windowText };
+    });
+    assert.equal(result.text, true);
+    if (before.from === result.next.from && before.to === result.next.to) continue;
+    windowChanges++;
+    windowDirections.add(direction);
+    for (const range of result.reads) {
+      assert.ok(range, 'Reading window updates must not rebuild the full document');
+      const overlap = Math.max(0, Math.min(before.to, range.to) - Math.max(before.from, range.from));
+      assert.ok(overlap <= 1, `Reading must reuse the unchanged semantic overlap instead of rebuilding ${overlap} characters`);
+    }
+    assert.deepEqual(await page.evaluate(() => (window as any).__liveHistory.presentationShape((window as any).__windowEditor)),
+      await page.evaluate(() => (window as any).__liveHistory.presentationShape((window as any).__windowEditor, true)),
+      'Incremental reading windows must match a complete authoritative presentation in both directions');
+  }
+  assert.ok(windowChanges >= 2, 'Trusted reading gestures must cross actual presentation windows');
+  assert.deepEqual([...windowDirections].sort(), [-1, 1], 'Both forward and reverse gestures must change actual presentation windows');
+  await page.evaluate(() => (window as any).__windowEditor.destroy());
+  console.log(`Live reading reuses semantic overlap through ${windowChanges} actual window changes`);
   const windowConstruction = await page.evaluate(async () => {
     const scope = window as any, api = scope.__liveHistory;
     const text = '# First reading window\n\n' + 'Visible prose.\n\n'.repeat(120)

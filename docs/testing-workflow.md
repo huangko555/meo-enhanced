@@ -227,6 +227,11 @@ owner does not consume focus attempts; new input and disposal still cancel it.
 Retained Preview settings are covered by `test-preview-webview-adapter.ts`
 (cache invalidation, delayed preload/render retirement, coalescing and unchanged
 switch reuse) and the font-wheel browser contract (Custom to Auto while hidden).
+The font-wheel contract also requires ordinary trusted wheels to be non-cancelable
+after releasing the modifier or completing a pinch, while Ctrl/Cmd wheels still
+cancel their default. Modifier-only fine wheels without a keydown retain their
+first delta and must not scale the browser surface. Its event trace samples the
+completed dispatch in a later task; a microtask between listeners is too early.
 The same Preview lifecycle contract must clear a failed render attempt so a later
 user action can retry; a superseded attempt cannot consume the next request or
 leave the host callback in its diagnostic failure state. Keep this assertion
@@ -744,6 +749,10 @@ the actual change. The real DOM keydown path must not request the full HTML bloc
 list to decide whether the current selection needs source editing. A real collapsed-code
 pointer click must not invalidate unrelated canonical Markdown presentation. Existing
 exact undo/redo, pending-input mode changes and widget-position checks remain required.
+Its forward/reverse trusted-wheel slice crosses real Live presentation windows,
+rejects rebuilding their unchanged semantic overlap, and compares every changed
+window with a complete authoritative render. Lists, tables and other multi-line
+roots use semantically expanded bounds; raw line-band overlap is insufficient.
 `test-live-scan-budget.ts` also checks the actual CodeMirror height-comparison mode
 (`minPointSize=0`): shared offscreen widgets must not pull ordinary marks into that
 comparison. Preserve point semantics and the combined height summary when mapping

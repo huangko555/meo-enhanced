@@ -1840,7 +1840,7 @@ let documentViews: ReturnType<typeof mountDocumentViews> | null = null;
 const previewController = createPreviewController({
   refreshDocumentBlocks: documentBlocks.refreshPreview,
   getImageIntrinsicSize: src => imageIntrinsicSizes.get(imageDimensionSourceKey(src)) ?? null,
-  onFontSizeWheel: event => editorFontWheel.handleWheel(event),
+  bindFontSizeWheel: (document, signal) => editorFontWheel.bind(document, { signal, capture: false }),
   requestFonts: previewFontsTransport.request,
   vscode,
   optionsMenu: previewOptionsPanel,
@@ -2422,10 +2422,7 @@ const editorFontWheel = createEditorFontWheel({
   apply: preference => applyEditorFontSizePreference(preference),
   save: () => vscode.postMessage({ type: 'setEditorFontSize', ...editorFontSizePreference })
 });
-const fontWheelAbort = new AbortController();
-document.addEventListener('wheel', event => {
-  if (event.target instanceof Element && event.target.closest('.editor-host')) editorFontWheel.handleWheel(event);
-}, { capture: true, passive: false, signal: fontWheelAbort.signal });
+editorFontWheel.bind(document, { accepts: event => event.target instanceof Element && !!event.target.closest('.editor-host') });
 
 editorAppearanceControl.element.addEventListener('click', (event) => {
   const button = event.target instanceof Element
@@ -3606,6 +3603,7 @@ const handleInit = (message: InitMessage) => {
   acceptImageIntrinsicSizes(message.imageIntrinsicSizes ?? []);
   editorFontWheel.flush();
   editorMouseWheelZoom = message.editorMouseWheelZoom ?? true;
+  editorFontWheel.refresh();
   applyEditorLineHeight(message.editorLineHeight ?? DEFAULT_EDITOR_LINE_HEIGHT, { refreshPreview: false });
   acceptEditingPreferences(message.editingPreferences, message.editingPreferencesRevision ?? 0);
   activeUiLanguagePreference = message.uiLanguagePreference;
@@ -3806,6 +3804,7 @@ function getSettingsWindow(): ReturnType<typeof createSettingsWindow> {
       setMouseWheelZoom: enabled => {
         editorFontWheel.flush();
         editorMouseWheelZoom = enabled;
+        editorFontWheel.refresh();
         vscode.postMessage({ type: 'setEditorMouseWheelZoom', enabled });
       },
       setFontSize: value => applyEditorFontSizePreference(value, { post: true }),
@@ -3874,7 +3873,7 @@ window.addEventListener('message', (event) => {
   if (message.type === 'webviewVisibilityResult') { readingLayout.accept(message); return; }
   if (message.type === 'webviewVisibilityChanged') { readingLayout.refresh(); return; }
   if (message.type === 'editorLineHeightChanged') { applyEditorLineHeight(message.value); return; }
-  if (message.type === 'editorMouseWheelZoomChanged') { editorFontWheel.flush(); editorMouseWheelZoom = message.enabled; return; }
+  if (message.type === 'editorMouseWheelZoomChanged') { editorFontWheel.flush(); editorMouseWheelZoom = message.enabled; editorFontWheel.refresh(); return; }
   if (message.type === 'uiColorsResult') { uiColorsTransport.accept(message); return; }
   if (message.type === 'uiColorsChanged') { uiColors = message.colors; refreshUiColors(); return; }
   if (message.type === 'openPreviewPresetSettings') { setMoreToolsVisible(false); getSettingsWindow().open('presets'); return; }
@@ -4306,7 +4305,6 @@ const terminateWebviewSession = () => {
   blockContentTransport.cancel();
   readingLayout.dispose();
   previewFontsTransport.dispose();
-  fontWheelAbort.abort();
   editorFontWheel.dispose();
   settingsWindow?.dispose();
   feedbackVersionPopover?.dispose();
@@ -4620,7 +4618,7 @@ restoreReadingPositionBtn.addEventListener('click', () => {
 for (const eventName of ['wheel', 'pointerdown', 'keydown', 'touchstart']) {
   root.addEventListener(eventName, (event) => {
     if (event.isTrusted) readingPositionLifecycle?.userInteracted();
-  }, { capture: true });
+  }, { capture: true, passive: true });
 }
 
 document.addEventListener('visibilitychange', () => {

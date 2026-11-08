@@ -9,7 +9,8 @@ import { ensureSyntaxTree, forceParsing, syntaxTree, syntaxTreeAvailable } from 
 import { diagnosticDataField } from '../webview/src/helpers/diagnostics';
 import { replaceLocalLinkStatuses } from '../webview/src/helpers/localLinks';
 import { getGitDiffSummary, getGitDiffOriginalBlocks } from '../webview/src/helpers/gitDiffGutter';
-import { editorMarkdownLanguage, getLivePresentationDecorations } from '../webview/src/liveMode';
+import { editorMarkdownLanguage, getLivePresentationDecorations, refreshLiveDecorationsAfterSearchEffect } from '../webview/src/liveMode';
+import { livePresentationWindow } from '../webview/src/helpers/livePresentationWindow';
 import { parseFootnotes } from '../webview/src/helpers/footnotes';
 import { editorScrollIntoView } from '../webview/src/editor/scrollEffects';
 import { isCompleteMarkdownStructure, markdownStructureIdentity } from '../webview/src/editor/markdownStructure';
@@ -93,6 +94,16 @@ function footnoteSnapshot(state: EditorState) {
   diagnostics: (editor: ReturnType<typeof createEditor>) => editor.view.state.field(diagnosticDataField),
   decorations(editor: ReturnType<typeof createEditor>): DecorationSet {
     return getLivePresentationDecorations(editor.view.state);
+  },
+  presentationScope: (editor: ReturnType<typeof createEditor>) => livePresentationWindow(editor.view.state, syntaxTree(editor.view.state))?.scope,
+  presentationShape(editor: ReturnType<typeof createEditor>, fresh = false) {
+    const state = fresh ? editor.view.state.update({ effects: refreshLiveDecorationsAfterSearchEffect.of(true) }).state : editor.view.state;
+    const shape: unknown[] = [];
+    for (const cursor = getLivePresentationDecorations(state).iter(); cursor.value; cursor.next()) {
+      const spec = cursor.value.spec;
+      shape.push([cursor.from, cursor.to, spec.class, spec.attributes, spec.block, spec.widget?.constructor.name]);
+    }
+    return shape;
   },
   input(editor: ReturnType<typeof createEditor>, from: number, text: string, time?: number) {
     editor.view.dispatch({ changes: { from, insert: text }, selection: { anchor: from + text.length },

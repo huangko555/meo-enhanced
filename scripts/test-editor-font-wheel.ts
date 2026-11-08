@@ -39,8 +39,8 @@ const fixture = async (language = 'zh-CN', appearance = 'light', mac = false) =>
       if (left >= right || top >= bottom) return null;
       return document.elementFromPoint(left + Math.min(8, right - left - 1), top + Math.min(8, bottom - top - 1));
     };
-    if (!window.__fontWheelTraceInstalled) {
-      window.__fontWheelTraceInstalled=true;
+    if (window.__fontWheelTraceRoot !== document.documentElement) {
+      window.__fontWheelTraceRoot=document.documentElement;
       document.addEventListener('wheel', event => {
         const target = event.target;
         const describe = element => element instanceof Element
@@ -49,11 +49,12 @@ const fixture = async (language = 'zh-CN', appearance = 'light', mac = false) =>
         const record = phase => window.__fontWheelTrace.push({
           phase, stage: window.__fontWheelStage, deltaX: event.deltaX, deltaY: event.deltaY,
           ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey, altKey: event.altKey,
+          cancelable: event.cancelable, trusted: event.isTrusted,
           defaultPrevented: event.defaultPrevented, target: describe(target),
           activeElement: describe(document.activeElement)
         });
-        record('capture'); queueMicrotask(() => record('after-dispatch'));
-      }, { capture: true });
+        record('capture'); setTimeout(() => record('after-dispatch'), 0);
+      }, { capture: true, passive: true });
     }
     window.acquireVsCodeApi=()=>({getState(){},setState(){},postMessage(message){
       window.__hostMessages.push(message);
@@ -153,6 +154,8 @@ try {
   await fixture();
   assert.equal(await size(), 15);
   await wheel(-100, 'Control', '.editor-host > .cm-editor', 'auto-15-initial'); await waitSize(16); await waitSaved(16);
+  assert.equal(await page.evaluate(() => (window as any).__fontWheelTrace.some((event: any) => event.stage === 'auto-15-initial'
+    && event.phase === 'after-dispatch' && event.trusted && event.defaultPrevented)), true, 'Ctrl wheel must still cancel its native default');
   console.log('[wheel-receipt:auto-15-initial]', JSON.stringify(await page.evaluate(() => ({
     stage: (window as any).__fontWheelStage,
     wheelTrace: ((window as any).__fontWheelTrace ?? []).filter((entry: any) => entry.stage === 'auto-15-initial'),
@@ -186,9 +189,26 @@ try {
   await openSettings(); await page.click(switchSelector); await page.click('.settings-close');
   await page.waitForFunction(() => (window as any).__completed.some((message: any) => message.type === 'setEditorMouseWheelZoom' && message.enabled));
   const scrollBefore = await page.$eval('.cm-scroller', element => element.scrollTop);
-  await wheel(300, null);
+  await wheel(300, null, '.editor-host > .cm-editor', 'ordinary-fast-path');
   await page.waitForFunction(before => document.querySelector('.cm-scroller')!.scrollTop > before, {}, scrollBefore);
   assert.equal(await size(), 20, 'Ordinary scrolling leaves typography unchanged');
+  assert.equal(await page.evaluate(() => (window as any).__fontWheelTrace.find((event: any) => event.stage === 'ordinary-fast-path')?.cancelable), false,
+    'Ordinary trusted scrolling must not wait on a cancelable ancestor wheel listener');
+
+  // Chromium can deliver a pinch/remote Ctrl-wheel without a keydown. Keep its
+  // first fine delta, then retire the temporary blocker after the gesture.
+  const viewportBeforePinch = await page.evaluate(() => ({ scale: visualViewport!.scale, ratio: devicePixelRatio, width: innerWidth }));
+  const client = await page.createCDPSession();
+  const pinchPoint = await page.$eval('.cm-scroller', element => { const r = element.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  for (let index = 0; index < 8; index++) await client.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...pinchPoint, deltaX: 0, deltaY: -5, modifiers: 2 });
+  await waitSize(21); await waitSaved(21);
+  assert.deepEqual(await page.evaluate(() => ({ scale: visualViewport!.scale, ratio: devicePixelRatio, width: innerWidth })), viewportBeforePinch,
+    'The first modifier-only wheel must not zoom the browser surface');
+  await wheel(100); await waitSize(20); await waitSaved(20);
+  await wheel(120, null, '.editor-host > .cm-editor', 'after-pinch-fast-path');
+  assert.equal(await page.evaluate(() => (window as any).__fontWheelTrace.find((event: any) => event.stage === 'after-pinch-fast-path')?.cancelable), false,
+    'Ending a pinch or releasing Ctrl must restore passive ordinary scrolling');
+  await client.detach();
 
   await page.click('[data-mode="live"]'); await wheel(-100); await waitSize(21); await waitSaved(21);
   await page.click('[data-mode="preview"]');
@@ -199,6 +219,22 @@ try {
     return getComputedStyle(doc.querySelector('.meo-export-doc')!).fontSize === '22px';
   });
   assert.equal(await page.evaluate(() => (window as any).__hostMessages.findLast((message: any) => message.type === 'requestPreviewRender').environment.editorFontSizePx), 22, 'Preview/export use the same saved size');
+  await page.evaluate(() => {
+    const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+    const scope = window as any; scope.__previewWheelReceipts = [];
+    doc.addEventListener('wheel', event => scope.__previewWheelReceipts.push({ cancelable: event.cancelable, trusted: event.isTrusted }), { passive: true });
+    const consumer = doc.createElement('div'); consumer.id = 'nested-wheel-consumer';
+    consumer.style.cssText = 'position:fixed;inset:35%;z-index:9999';
+    consumer.addEventListener('wheel', event => event.preventDefault(), { passive: false });
+    doc.body.append(consumer);
+  });
+  await wheel(-100, 'Control', '.preview-frame');
+  assert.equal(await size(), 22, 'A Preview control that consumes its own wheel retains priority over document font zoom');
+  await page.evaluate(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!.getElementById('nested-wheel-consumer')!.remove());
+  await wheel(120, null, '.preview-frame');
+  assert.equal(await page.evaluate(() => (window as any).__previewWheelReceipts.at(-1)?.trusted), true);
+  assert.equal(await page.evaluate(() => (window as any).__previewWheelReceipts.at(-1)?.cancelable), false,
+    'Preview ordinary reading must also return to the passive wheel fast path');
 
   // A retained Preview must accept typography changes made while it is hidden.
   await page.click('[data-mode="source"]');
