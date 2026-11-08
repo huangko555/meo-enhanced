@@ -32,7 +32,7 @@ async function checkEditorModulePreload(browser: Awaited<ReturnType<typeof launc
   try {
     await page.setCacheEnabled(false);
     await page.exposeFunction('__preloadHost', (message: any) => message.type === 'ready'
-      ? { ...init, pageId: message.pageId, mode: 'source' }
+      ? { ...init, pageId: message.pageId, mode: 'source', uiLanguage: 'en', uiLanguagePreference: 'en' }
       : message.type === 'requestPreviewRender' ? {
         type: 'previewRenderResult', requestId: message.requestId,
         result: { ok: true, value: exportRuntime.renderPreviewDocument({ markdownText: message.text,
@@ -62,6 +62,25 @@ async function checkEditorModulePreload(browser: Awaited<ReturnType<typeof launc
       && document.querySelector<HTMLElement>('.editor-host')?.inert === false, { timeout: 10000 });
     assert.equal(editorRequests, 1, 'Mount must reuse the prepared module instead of fetching a second copy');
     assert.equal(await page.$('.meo-startup-loading'), null, 'Ready Source must retire the startup feedback');
+    assert.equal(await page.$('.settings-window'), null, 'Startup must not construct a closed settings window');
+    await page.click('.more-tools-wrapper > .format-button');
+    await page.click('.more-tools-settings-button');
+    await page.waitForSelector('.settings-window[open]');
+    assert.equal(await page.$eval('.settings-title', element => element.textContent), 'Settings',
+      'First construction must use the initialized language rather than the bootstrap default');
+    assert.equal(await page.$eval('.settings-search', element => element === document.activeElement), true);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.$eval('.editor-host .cm-content', element => element === document.activeElement), true,
+      'Closing the first settings window must return focus to the editor');
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'openPreviewPresetSettings' } })));
+    await page.waitForSelector('.settings-window[open][data-tab="presets"]');
+    await page.keyboard.press('Escape');
+    await page.click('.more-tools-wrapper > .format-button');
+    await page.click('.more-tools-sponsor-button');
+    await page.waitForSelector('.settings-window[open][data-tab="about"]');
+    assert.equal(await page.$$eval('.settings-window', elements => elements.length), 1,
+      'Every settings entry must reuse the same window');
+    await page.keyboard.press('Escape');
     assert.deepEqual(errors, [], 'The separately emitted editor must retain the shell\'s shared runtime');
     console.log('Editor module prepared before shell execution and reused by Source mount');
   } finally { releaseShell(); await context.close(); server.stop(true); }

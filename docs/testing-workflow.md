@@ -2259,6 +2259,18 @@ For repeatable built-Webview loading measurements after a production build:
 bun scripts/benchmark-mode-loading.ts --confirm-long-run --rounds 5 --label candidate
 ```
 
+For a focused Source startup investigation, add `--mode source --startup-only` and
+select one production fixture with `--fixture ordinary` or `--fixture rich-heavy`.
+This path imports the emitted production editor preload and startup HTML shell, then
+records both the historical first-content sample and a stricter interactive sample
+from the same animation-frame observations.  The interactive sample is admitted only
+after the actual mode host, inherited `inert`/busy state, loading covers, and Preview
+frame preparation have cleared; a pending side Preview does not block Source.  The
+startup-only report is diagnostic and does not claim mode-transition or resource
+completion coverage.  Keep matching build, browser, viewport, fixture hash, and
+sampling settings when comparing revisions.  The helper contract is covered by
+`bun scripts/test-mode-loading-readiness.ts`.
+
 This uses the emitted ESM chunks and real Mermaid runtime, with a fresh browser
 context and disabled HTTP cache for each Live, Source, and Preview startup.
 Ordinary, many-line, rich-block, and prose-only Mermaid mention fixtures have

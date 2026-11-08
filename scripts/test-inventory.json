@@ -245,6 +245,11 @@
       "command": "bun scripts/test-native-input-delivery.ts",
       "reason": "Native acceptance driver preflight: real browser pointer receipts and negative controls; optional --browser-url attaches to an already scoped disposable Workbench. External application/OS acceptance remains separate, so this driver contract is not part of quick."
     },
+    "scripts/test-mode-loading-readiness.ts": {
+      "kind": "targeted",
+      "command": "bun scripts/test-mode-loading-readiness.ts",
+      "reason": "Contract test for the shared mode-loading benchmark readiness helper: separates first content from true interactive admission, honors inherited inert/busy/loading barriers, and ignores a pending side Preview while Source is usable."
+    },
     "scripts/test-document-views-browser.ts": {
       "kind": "targeted",
       "command": "MEO_EXTRAS_DIR=<companion-directory> bun scripts/test-document-views-browser.ts [--dark] [--blocks-only | --catalog-only]",
@@ -494,6 +499,7 @@
     "exclusive": [
       "scripts/test-navigation-reveal-production.ts",
       "scripts/test-command-history-production.ts",
+      "scripts/test-mode-loading-readiness.ts",
       "scripts/test-document-block-preview-idle.ts",
       "scripts/test-document-statistics-selection.ts",
       "scripts/test-vscode-document-statistics.cjs",

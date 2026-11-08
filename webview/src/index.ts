@@ -1475,7 +1475,7 @@ reportIssueButton.addEventListener('click', () => {
   });
   setMoreToolsVisible(false);
 });
-sponsorProjectButton.addEventListener('click', () => { setMoreToolsVisible(false); settingsWindow?.open('about'); });
+sponsorProjectButton.addEventListener('click', () => { setMoreToolsVisible(false); getSettingsWindow().open('about'); });
 
 document.addEventListener('pointerdown', (event) => {
   if (!moreToolsWrapper.contains(event.target as Node) && !feedbackVersionPopover?.contains(event.target as Node)) {
@@ -1850,7 +1850,7 @@ const previewController = createPreviewController({
   isCurrentText: (text) => normalizeDocumentText(getCurrentEditorText()) === text,
   getCodePalette: (appearance) => resolveCodePaletteForPreview(appearance),
   applyCodeTheme: (appearance) => applyCodeThemeForPreview(appearance),
-  onManagePresets: () => { setMoreToolsVisible(false); settingsWindow?.open('presets'); },
+  onManagePresets: () => { setMoreToolsVisible(false); getSettingsWindow().open('presets'); },
   onPresetPreferencesChanged: () => {
     persistUiState();
     syncToolbarOverflow();
@@ -3792,53 +3792,55 @@ const previewPresetSettings = createPreviewPresetSettings({
   changed: () => settingsWindow?.present()
 });
 const extensionFeatureSettings = createExtensionFeatureSettings(request => vscode.postMessage(request), () => settingsWindow?.present());
-settingsWindow = createSettingsWindow({
-  extensionFeatures: extensionFeatureSettings,
-  ...versionInformationSource,
-  openLink: href => vscode.postMessage({ type: 'openLink', href }),
-  logoUrl: document.querySelector<HTMLMetaElement>('meta[name="meo-logo"]')?.content ?? '',
-  appearance: {
-    getColors: () => uiColors, getMode: () => themeAdapter.getPreference(), getScheme: () => themeAdapter.getAppearance(),
-    getFontSize: () => editorFontSizePreference,
-    mac: /Mac|iPhone|iPad|iPod/.test(navigator.platform),
-    getMouseWheelZoom: () => editorMouseWheelZoom,
-    setMouseWheelZoom: enabled => {
-      editorFontWheel.flush();
-      editorMouseWheelZoom = enabled;
-      vscode.postMessage({ type: 'setEditorMouseWheelZoom', enabled });
+function getSettingsWindow(): ReturnType<typeof createSettingsWindow> {
+  return settingsWindow ??= createSettingsWindow({
+    extensionFeatures: extensionFeatureSettings,
+    ...versionInformationSource,
+    openLink: href => vscode.postMessage({ type: 'openLink', href }),
+    logoUrl: document.querySelector<HTMLMetaElement>('meta[name="meo-logo"]')?.content ?? '',
+    appearance: {
+      getColors: () => uiColors, getMode: () => themeAdapter.getPreference(), getScheme: () => themeAdapter.getAppearance(),
+      getFontSize: () => editorFontSizePreference,
+      mac: /Mac|iPhone|iPad|iPod/.test(navigator.platform),
+      getMouseWheelZoom: () => editorMouseWheelZoom,
+      setMouseWheelZoom: enabled => {
+        editorFontWheel.flush();
+        editorMouseWheelZoom = enabled;
+        vscode.postMessage({ type: 'setEditorMouseWheelZoom', enabled });
+      },
+      setFontSize: value => applyEditorFontSizePreference(value, { post: true }),
+      getLineHeight: () => editorLineHeight,
+      setLineHeight: value => applyEditorLineHeight(value, { post: true }),
+      reportSaveError: message => failureNotice.setFailureNotice(() => ({ title: activeUiLanguage === 'zh-CN' ? '外观设置保存失败' : 'Unable to save appearance settings', message }), 'error', 'appearance-settings'),
+      clearSaveError: () => failureNotice.clearFailureNotice('appearance-settings'),
+      setMode: mode => themeAdapter.setAppearance(mode, { post: true }),
+      preview: colors => { uiColorsPreview = colors; refreshUiColors(); },
+      update: colors => uiColorsTransport.update(colors)
     },
-    setFontSize: value => applyEditorFontSizePreference(value, { post: true }),
-    getLineHeight: () => editorLineHeight,
-    setLineHeight: value => applyEditorLineHeight(value, { post: true }),
-    reportSaveError: message => failureNotice.setFailureNotice(() => ({ title: activeUiLanguage === 'zh-CN' ? '外观设置保存失败' : 'Unable to save appearance settings', message }), 'error', 'appearance-settings'),
-    clearSaveError: () => failureNotice.clearFailureNotice('appearance-settings'),
-    setMode: mode => themeAdapter.setAppearance(mode, { post: true }),
-    preview: colors => { uiColorsPreview = colors; refreshUiColors(); },
-    update: colors => uiColorsTransport.update(colors)
-  },
-  previewPresets: previewPresetSettings,
-  registerInput: input => editorFocusController.registerInput(input),
-  imageLocation: imageLocationSettings,
-  initialLanguage: activeUiLanguage, platform: /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'mac' : 'other',
-  getPreferences: () => editingPreferences, update: change => editingPreferencesTransport.update(change), returnFocus: () => getActiveEditorMode() === 'preview' ? moreToolsButton : editor ?? moreToolsButton,
-  getGeneral: language => {
-    const strings = getUiStrings(language);
-    const switchItem = (id: GeneralSetting['id'], section: 'display' | 'math' | 'opening', title: string, get: () => boolean, set: (value: boolean) => void, description?: string): GeneralSetting => ({ id, section, title, description, control: { kind: 'switch', get, set } });
-    return [
-      switchItem('lineNumbers', 'display', strings.showLineNumbers, () => pendingSourceLineNumbers !== 'off', () => sourceLineNumbersBtn.click()),
-      switchItem('foldCode', 'display', strings.foldLongCodeBlocks, () => longCodeBlockFoldingEnabled, () => longCodeBlockFoldingBtn.click()),
-      switchItem('width', 'display', strings.constrainWidth, () => contentMaxWidthEnabled, setContentMaxWidthEnabled),
-      switchItem('strongColor', 'display', strings.strongColoring, () => liveStrongColoring, setLiveStrongColoring),
-      switchItem('boldHeadings', 'display', strings.boldHeadings, () => boldHeadingsEnabled, setBoldHeadingsEnabled),
-      switchItem('stickyHeader', 'display', strings.stickyTableHeader, () => tableStickyHeaderEnabled, setTableStickyHeaderEnabled),
-      switchItem('latexDelimiters', 'math', strings.latexMathDelimiters, () => latexDelimiters, setLatexDelimiters, strings.latexMathDelimitersDescription),
-      switchItem('restorePosition', 'opening', strings.resumeReadingPositionLabel, () => restoreReadingPositionOnOpen, setRestoreReadingPositionOnOpen),
-      switchItem('largeDocument', 'opening', strings.largeDocumentStartup, () => largeDocumentOptimizationEnabled, setLargeDocumentOptimizationEnabled, strings.largeDocumentStartupDescription),
-      { id: 'language', section: 'interface', title: strings.interfaceLanguage, control: { kind: 'choice', get: () => activeUiLanguagePreference, set: value => { activeUiLanguagePreference = value as UiLanguagePreference; uiLanguageControl.setActive(activeUiLanguagePreference); applyUiLanguage(value === 'auto' ? automaticUiLanguage : value as UiLanguage); vscode.postMessage({ type: 'setUiLanguagePreference', language: activeUiLanguagePreference }); }, options: [{ value: 'auto', label: strings.auto }, { value: 'zh-CN', label: '简体中文' }, { value: 'en', label: 'English' }] } },
-    ];
-  }
-});
-moreSettingsButton.addEventListener('click', () => { setMoreToolsVisible(false); settingsWindow?.open(); });
+    previewPresets: previewPresetSettings,
+    registerInput: input => editorFocusController.registerInput(input),
+    imageLocation: imageLocationSettings,
+    initialLanguage: activeUiLanguage, platform: /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'mac' : 'other',
+    getPreferences: () => editingPreferences, update: change => editingPreferencesTransport.update(change), returnFocus: () => getActiveEditorMode() === 'preview' ? moreToolsButton : editor ?? moreToolsButton,
+    getGeneral: language => {
+      const strings = getUiStrings(language);
+      const switchItem = (id: GeneralSetting['id'], section: 'display' | 'math' | 'opening', title: string, get: () => boolean, set: (value: boolean) => void, description?: string): GeneralSetting => ({ id, section, title, description, control: { kind: 'switch', get, set } });
+      return [
+        switchItem('lineNumbers', 'display', strings.showLineNumbers, () => pendingSourceLineNumbers !== 'off', () => sourceLineNumbersBtn.click()),
+        switchItem('foldCode', 'display', strings.foldLongCodeBlocks, () => longCodeBlockFoldingEnabled, () => longCodeBlockFoldingBtn.click()),
+        switchItem('width', 'display', strings.constrainWidth, () => contentMaxWidthEnabled, setContentMaxWidthEnabled),
+        switchItem('strongColor', 'display', strings.strongColoring, () => liveStrongColoring, setLiveStrongColoring),
+        switchItem('boldHeadings', 'display', strings.boldHeadings, () => boldHeadingsEnabled, setBoldHeadingsEnabled),
+        switchItem('stickyHeader', 'display', strings.stickyTableHeader, () => tableStickyHeaderEnabled, setTableStickyHeaderEnabled),
+        switchItem('latexDelimiters', 'math', strings.latexMathDelimiters, () => latexDelimiters, setLatexDelimiters, strings.latexMathDelimitersDescription),
+        switchItem('restorePosition', 'opening', strings.resumeReadingPositionLabel, () => restoreReadingPositionOnOpen, setRestoreReadingPositionOnOpen),
+        switchItem('largeDocument', 'opening', strings.largeDocumentStartup, () => largeDocumentOptimizationEnabled, setLargeDocumentOptimizationEnabled, strings.largeDocumentStartupDescription),
+        { id: 'language', section: 'interface', title: strings.interfaceLanguage, control: { kind: 'choice', get: () => activeUiLanguagePreference, set: value => { activeUiLanguagePreference = value as UiLanguagePreference; uiLanguageControl.setActive(activeUiLanguagePreference); applyUiLanguage(value === 'auto' ? automaticUiLanguage : value as UiLanguage); vscode.postMessage({ type: 'setUiLanguagePreference', language: activeUiLanguagePreference }); }, options: [{ value: 'auto', label: strings.auto }, { value: 'zh-CN', label: '简体中文' }, { value: 'en', label: 'English' }] } },
+      ];
+    }
+  });
+}
+moreSettingsButton.addEventListener('click', () => { setMoreToolsVisible(false); getSettingsWindow().open(); });
 preferencesHeading.textContent = 'More settings';
 preferencesLabel.textContent = 'Appearance · Input · Shortcuts';
 
@@ -3875,7 +3877,7 @@ window.addEventListener('message', (event) => {
   if (message.type === 'editorMouseWheelZoomChanged') { editorFontWheel.flush(); editorMouseWheelZoom = message.enabled; return; }
   if (message.type === 'uiColorsResult') { uiColorsTransport.accept(message); return; }
   if (message.type === 'uiColorsChanged') { uiColors = message.colors; refreshUiColors(); return; }
-  if (message.type === 'openPreviewPresetSettings') { setMoreToolsVisible(false); settingsWindow?.open('presets'); return; }
+  if (message.type === 'openPreviewPresetSettings') { setMoreToolsVisible(false); getSettingsWindow().open('presets'); return; }
   if (message.type === 'documentContentResult') { documentContentTransport.accept(message); blockContentTransport.accept(message); return; }
   if (message.type === 'previewFontsResult') { previewFontsTransport.accept(message); return; }
   if (message.type === 'extensionFeaturesChanged' || message.type === 'extensionFeaturesResult') { extensionFeatureSettings.accept(message); return; }

@@ -154,6 +154,7 @@ try {
     ` });
     if (stubMermaid) await page.evaluate(() => { (window as any).mermaid = { initialize() {}, async render() { return { svg: '<svg viewBox="0 0 120 60"><text x="4" y="20">diagram</text></svg>' }; } }; });
     await page.addScriptTag({ content: await build.outputs[0].text() });
+    assert.equal(await page.$('.settings-window'), null, 'The production shell must defer the closed settings window');
     await page.evaluate(({ text, mode, outline }) => {
       const global = window as any; global.__preferences = { input: { ...global.EditingSettingsHarness.defaultInputAssistance }, shortcuts: {} };
       global.__initMessage = { type: 'init', documentId: 'file:///settings.md', text, version: 1, savedRevision: { version: 1, text }, diagnostics: [], mode, uiLanguage: 'zh-CN', uiLanguagePreference: 'zh-CN', automaticUiLanguage: 'zh-CN', sourceLineNumbers: 'on', previewAppearance: 'light', previewFontFamily: '', previewSourceColoring: true, previewShowComments: false, editorAppearance: 'dark', gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit', fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: false, outlineWidth: 260, vscodeTheme: null, editingPreferences: global.__preferences, editingPreferencesRevision: 0 };
