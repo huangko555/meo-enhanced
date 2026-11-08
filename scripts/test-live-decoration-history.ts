@@ -614,11 +614,16 @@ try {
     scope.__referenceBudgetEditor = editor;
   });
   await page.waitForFunction(() => !(window as any).__liveHistory.pending((window as any).__referenceBudgetEditor));
-  const referencePositions = await page.evaluate(() => (window as any).__liveHistory.positionSnapshot((window as any).__referenceBudgetEditor));
-  assert.deepEqual(await page.evaluate(() => {
-    const scope = window as any; scope.__referenceBudgetEditor.refreshDecorations();
-    return scope.__liveHistory.positionSnapshot(scope.__referenceBudgetEditor);
-  }), referencePositions, 'creating a link definition with Enter must also update references outside the changed block');
+  const referencePositions = await page.evaluate(() => {
+    const scope = window as any, editor = scope.__referenceBudgetEditor;
+    // Compare one accepted reading window. A queued buffer expansion between
+    // separate browser calls would also legitimately add distant body styles.
+    const before = scope.__liveHistory.positionSnapshot(editor);
+    editor.refreshDecorations();
+    return { before, after: scope.__liveHistory.positionSnapshot(editor) };
+  });
+  assert.deepEqual(referencePositions.after, referencePositions.before,
+    'creating a link definition with Enter must also update references outside the changed block');
   await page.evaluate(() => (window as any).__referenceBudgetEditor.destroy());
   for (const target of ['middle', 'end']) {
     await page.evaluate(target => {

@@ -705,6 +705,16 @@ actual DOM movement. It also verifies that background Mermaid warming waits for
 native scrolling to settle, resumes afterward, and respects cancellation. Cold
 newly visible Live diagrams now also wait for the existing viewport's gesture
 settlement; explicit source/theme refreshes and fullscreen remain foreground.
+The same test completes real code tokens while holding the reading owner:
+ordinary documents refresh immediately, large documents accept after release,
+and explicit theme changes remain immediate. An observer on the real highlighter
+counts syntax visits so rich prose cannot turn code-block discovery into an
+inline-token walk. Trusted wheels also cross CodeMirror's offscreen buffer while
+the existing frame owner is held: accepted visible content must not cause a
+foreground window commit, while a jump outside it must still present immediately.
+`test-live-decoration-history.ts` retains full incremental/authoritative window
+comparisons and compares reference-refresh positions within one accepted window,
+without interleaving a legitimate queued buffer expansion between snapshots.
 `test-preview-mermaid-runtime.ts` requires no runtime call during continuing
 trusted wheels, eventual SVG after stopping, and bounded Preview result commits.
 Full-document scroll and font sweeps use delayed

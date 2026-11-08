@@ -120,11 +120,23 @@ export function liveViewportPresentationExtensions() {
         const innerFrom = view.state.doc.line(Math.max(1, first - 20)).from;
         const innerTo = view.state.doc.line(Math.min(view.state.doc.lines, last + 20)).to;
         if (innerFrom >= band.from && innerTo <= band.to) return;
-        // Already accepted content covers this viewport. Prepare its guard band
-        // through the input-prioritized owner; a jump beyond it stays immediate.
-        if (usesLargeDocumentDerivedWorkBudget(view.state) && from >= band.from && to <= band.to)
-          requestLiveInputDerivedWorkOnFrame(view, readingConsumer, present);
-        else present();
+        // CodeMirror's viewport includes offscreen buffers. Their crossing must
+        // not force another presentation into the native scroll task while the
+        // actual reading surface is still covered by accepted content.
+        if (usesLargeDocumentDerivedWorkBudget(view.state)) {
+          let covered = from >= band.from && to <= band.to;
+          if (!covered) {
+            const bounds = view.scrollDOM.getBoundingClientRect(), top = view.documentTop;
+            covered = view.lineBlockAtHeight(bounds.top - top).from >= band.from
+              && view.lineBlockAtHeight(bounds.bottom - top).to <= band.to;
+          }
+          if (covered) {
+            requestLiveInputDerivedWorkOnFrame(view, readingConsumer, present);
+            return;
+          }
+        }
+        // A real jump beyond accepted visible content remains immediate.
+        present();
       });
     };
     schedule();

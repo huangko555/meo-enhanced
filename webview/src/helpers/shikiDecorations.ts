@@ -10,7 +10,7 @@ import {
 } from '@codemirror/state';
 import { Decoration, ViewPlugin, EditorView, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import type { SyntaxNode, SyntaxNodeRef } from '@lezer/common';
+import { IterMode, type SyntaxNode, type SyntaxNodeRef } from '@lezer/common';
 import {
   resolveShikiLang,
   getShikiTokens,
@@ -421,7 +421,11 @@ function buildDecorations(
     syntaxTree(view.state).iterate({
       from: view.viewport.from,
       to: view.viewport.to,
+      mode: IterMode.IgnoreMounts,
       enter(node) {
+        // Code blocks can occur in containers, but prose/heading inline trees
+        // cannot own them. Math bodies already come from their shared index.
+        if (node.name === 'Paragraph' || node.name.startsWith('ATXHeading') || node.name.startsWith('SetextHeading')) return false;
         if (node.name === 'FencedCode' || node.name === 'CodeBlock') {
           if (!bodies.some(body => body.from < node.to && body.to > node.from)) {
             entries.push({ from: node.from, to: node.to, node: node.node.cursor() });
@@ -449,6 +453,7 @@ const shikiPlugin = ViewPlugin.fromClass(
     private caretFrame: number | null = null;
     private caretPending = false;
     private highlightRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    private themeVersion = getShikiThemeVersion();
     private readonly canHighlight = (): boolean => {
       if (this.destroyed) return false;
       if (!(usesLargeDocumentDerivedWorkBudget(this.view.state)
@@ -495,6 +500,13 @@ const shikiPlugin = ViewPlugin.fromClass(
       this.releaseHighlighting = activateShikiCodeHighlighting();
       this.decorations = buildDecorations(view, Decoration.none, this.allowUnseen, this.canHighlight);
       this.unsubscribe = subscribeShikiRefresh(() => {
+        if (this.destroyed) return;
+        const version = getShikiThemeVersion(), paletteChanged = version !== this.themeVersion;
+        this.themeVersion = version;
+        // A result that started before the wheel gesture must not re-enter
+        // the presentation transaction merely because its tokens are ready.
+        // Explicit palette changes retain their immediate projection.
+        if (!paletteChanged && usesLargeDocumentDerivedWorkBudget(view.state) && !this.canHighlight()) return;
         view.dispatch({ effects: shikiRefreshEffect.of(null) });
       });
     }

@@ -8,7 +8,24 @@ import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-block-scroll-layout-'));
 const build = await Bun.build({
   entrypoints: ['scripts/test-rendered-block-scroll-layout-entry.ts'], outdir: temp,
-  naming: 'bundle.js', format: 'iife', target: 'browser'
+  naming: 'bundle.js', format: 'iife', target: 'browser',
+  plugins: [{ name: 'observe-code-block-discovery', setup(builder) {
+    builder.onLoad({ filter: /webview[\\/]src[\\/]editor[\\/]liveInputDerivedWork\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text(), start = source.indexOf('export function requestLiveInputDerivedWorkOnFrame(');
+      assert.ok(start >= 0);
+      const body = source.indexOf('  const plugin = view.plugin(codeMirrorLiveInputDerivedWorkPlugin);', start);
+      assert.ok(body > start);
+      return { loader: 'ts', contents: source.slice(0, body)
+        + '  if ((globalThis as any).__heldReadingWork) { (globalThis as any).__heldReadingWork.set(consumerKey, operation); return; }\n'
+        + source.slice(body) };
+    });
+    builder.onLoad({ filter: /webview[\\/]src[\\/]helpers[\\/]shikiDecorations\.ts$/ }, async ({ path }) => {
+      const source = await Bun.file(path).text(), marker = '      enter(node) {';
+      assert.equal(source.split(marker).length, 2, 'Observe the actual code-block discovery callback');
+      return { loader: 'ts', contents: source.replace(marker, marker
+        + '\n        (globalThis as any).__shikiSyntaxVisits = ((globalThis as any).__shikiSyntaxVisits ?? 0) + 1;') };
+    });
+  } }]
 });
 if (!build.success) throw new Error(build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
@@ -237,6 +254,90 @@ try {
   assert.equal(scheduling.calls.includes('scroll-cancelled'), false);
   assert.equal(scheduling.calls.includes('scroll-cold'), true, 'Cold rendering must resume after scrolling');
   console.log('Background Mermaid scroll deferral, visible updates and cancellation passed');
+  await page.evaluate(() => (window as any).scrollLayoutEditor.destroy());
+  for (const large of [false, true]) {
+    const code = `const scroll_receipt_${large ? 'large' : 'small'} = "ready";`;
+    await page.evaluate(({ large, code }) => {
+      const scope = window as any, api = scope.RenderedBlockScrollLayoutHarness;
+      api.setShikiTheme({ name: `reading-receipt-${large}`, type: 'dark',
+        tokenColors: [{ scope: 'keyword', settings: { foreground: '#55aa55' } }] });
+      const editor = api.createEditor({ parent: document.getElementById('app'), initialMode: 'live', onApplyChanges() {},
+        text: '**bold** [link](https://example.test) and `code` with *emphasis*. '.repeat(400) + '\n\n'
+          + 'Ordinary reading content with enough lines to scroll.\n\n'.repeat(large ? 4_000 : 20) });
+      if (api.usesLargeDocumentDerivedWorkBudget(editor.view.state) !== large) throw Error('Exercise both reading budget paths');
+      scope.__shikiSyntaxVisits = 0;
+      editor.view.dispatch({ effects: api.shikiRefreshEffect.of(null) });
+      if (scope.__shikiSyntaxVisits === 0 || scope.__shikiSyntaxVisits > 120)
+        throw Error(`Code-block discovery must skip unrelated prose tokens: ${scope.__shikiSyntaxVisits}`);
+      const viewport = api.getViewportController(editor.view), scrolling = viewport.isUserScrolling;
+      const receipt = scope.__tokenReceipt = { editor, held: true, count: 0, restore() { viewport.isUserScrolling = scrolling; } };
+      viewport.isUserScrolling = () => receipt.held;
+      const dispatch = editor.view.dispatch.bind(editor.view);
+      editor.view.dispatch = (...specs: any[]) => {
+        for (const spec of specs) {
+          const effects = Array.isArray(spec.effects) ? spec.effects : spec.effects ? [spec.effects] : [];
+          receipt.count += effects.filter((effect: any) => effect.is(api.shikiRefreshEffect)).length;
+        }
+        return dispatch(...specs);
+      };
+      api.requestShikiTokens('javascript', code);
+    }, { large, code });
+    await page.waitForFunction(code => !!(window as any).RenderedBlockScrollLayoutHarness.getShikiTokens('javascript', code), {}, code);
+    await page.evaluate(async () => { for (let frame = 0; frame < 3; frame++) await new Promise(requestAnimationFrame); });
+    const held = await page.evaluate(() => (window as any).__tokenReceipt.count);
+    assert.ok(large ? held === 0 : held > 0, `Ready tokens must respect large-document reading ownership, observed ${held}`);
+    await page.evaluate(() => { (window as any).__tokenReceipt.held = false; });
+    await page.waitForFunction(() => (window as any).__tokenReceipt.count > 0);
+    const theme = await page.evaluate(() => {
+      const scope = window as any, receipt = scope.__tokenReceipt; receipt.held = true;
+      const before = receipt.count;
+      scope.RenderedBlockScrollLayoutHarness.setShikiTheme({ name: 'explicit-scroll-theme', type: 'dark',
+        tokenColors: [{ scope: 'keyword', settings: { foreground: '#aa55aa' } }] });
+      return receipt.count - before;
+    });
+    assert.ok(theme > 0, 'Explicit palette changes retain their immediate refresh path');
+    await page.evaluate(() => { const receipt = (window as any).__tokenReceipt; receipt.restore(); receipt.editor.destroy(); });
+  }
+  console.log('Late code tokens: ordinary immediate, large reading deferral, idle acceptance and explicit theme changes passed');
+  await page.evaluate(() => {
+    const scope = window as any, api = scope.RenderedBlockScrollLayoutHarness;
+    scope.__readingEditor = api.createEditor({ parent: document.getElementById('app'), initialMode: 'live', onApplyChanges() {},
+      text: 'Ordinary paragraph for window admission.\n\n'.repeat(6_000) });
+  });
+  await page.evaluate(async () => { for (let frame = 0; frame < 6; frame++) await new Promise(requestAnimationFrame); });
+  await page.evaluate(() => {
+    const scope = window as any, api = scope.RenderedBlockScrollLayoutHarness, view = scope.__readingEditor.view;
+    scope.__heldReadingWork = new Map(); scope.__readingCommits = [];
+    const dispatch = view.dispatch.bind(view);
+    view.dispatch = (...specs: any[]) => {
+      for (const spec of specs) for (const effect of Array.isArray(spec.effects) ? spec.effects : spec.effects ? [spec.effects] : []) {
+        if (!api.isLiveViewportPresentationEffect(effect)) continue;
+        const band = api.getLivePresentationBand(view.state), bounds = view.scrollDOM.getBoundingClientRect(), top = view.documentTop;
+        const from = view.lineBlockAtHeight(bounds.top - top).from, to = view.lineBlockAtHeight(bounds.bottom - top).to;
+        scope.__readingCommits.push({ covered: from >= band.from && to <= band.to, from, to, band });
+      }
+      return dispatch(...specs);
+    };
+  });
+  const readingPoint = await page.$eval('.cm-scroller', element => { const rect = element.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }; });
+  await page.mouse.move(readingPoint.x, readingPoint.y);
+  for (let wheel = 0; wheel < 24; wheel++) {
+    await page.mouse.wheel({ deltaY: 80 });
+    await page.evaluate(async () => { for (let frame = 0; frame < 2; frame++) await new Promise(requestAnimationFrame); });
+  }
+  const admission = await page.evaluate(() => ({ commits: (window as any).__readingCommits, queued: (window as any).__heldReadingWork.size }));
+  assert.equal(admission.commits.filter((commit: any) => commit.covered).length, 0,
+    `CodeMirror overscan must not force foreground presentation while visible content is accepted: ${JSON.stringify(admission.commits)}`);
+  assert.ok(admission.queued > 0, 'Trusted reading must exercise deferred buffer preparation');
+  await page.evaluate(() => { (window as any).__readingCommits = []; (window as any).__readingEditor.view.scrollDOM.scrollTop = 12_000; });
+  await page.waitForFunction(() => (window as any).__readingCommits.some((commit: any) => !commit.covered));
+  await page.evaluate(() => {
+    const scope = window as any, operations = [...scope.__heldReadingWork.values()]; delete scope.__heldReadingWork;
+    for (const operation of operations) (operation as () => void)();
+    scope.__readingEditor.destroy();
+  });
+  console.log('Live visible content keeps priority; offscreen buffer preparation uses the existing frame owner');
 } catch (error) { primaryError = error; }
 finally {
   fs.rmSync(temp, { recursive: true, force: true });
