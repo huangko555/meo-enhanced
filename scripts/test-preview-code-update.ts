@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import exportRuntime from '../src/export/runtime';
 import type { createPreviewController } from '../webview/src/helpers/preview';
+import { assessLargeDocument } from '../src/foundation/largeDocument';
 
 type Harness = Window & {
   __previewController: ReturnType<typeof createPreviewController>;
@@ -76,7 +77,7 @@ assert.ok(build.success, build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 let primaryError: unknown;
 try {
-  for (const scenario of ['staggered', 'superseded', 'removed', 'hidden', 'theme', 'disabled', 'disposed', 'font-map-grow', 'font-map-shrink']) {
+  for (const scenario of ['staggered', 'bounded', 'superseded', 'removed', 'hidden', 'theme', 'disabled', 'disposed', 'font-map-grow', 'font-map-shrink']) {
     const page = await browser.newPage();
     const waitFor = async (predicate: () => unknown) => {
       try { await page.waitForFunction(predicate); }
@@ -164,8 +165,10 @@ try {
       `\`\`\`${first}\n${revision}_first = 1\n\`\`\``,
       `\`\`\`${second}\n${revision}_second = 2\n\`\`\``,
       '[Stable link](https://example.com)',
-      ...Array.from({ length: 10 }, (_, index) => `Tail paragraph ${index}`)
+      ...Array.from({ length: 10 }, (_, index) => `Tail paragraph ${index}` + (scenario === 'bounded' ? ' ordinary prose'.repeat(600) : ''))
     ].join('\n\n');
+    if (scenario === 'bounded') assert.ok(assessLargeDocument(text('old')).boundedEditorWork
+      && !assessLargeDocument(text('old')).windowedPreview, 'exercise the real early resource budget');
     await render(text('old'));
     await waitFor(() => {
       const scope = window as Harness;

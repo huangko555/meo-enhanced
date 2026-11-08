@@ -4,18 +4,26 @@ import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 import fs from 'node:fs';
 import path from 'node:path';
+import { assessLargeDocument } from '../src/foundation/largeDocument';
 
 const formulas = '# Formula viewport\n\nInline $a+b$ stays in prose.\n\n$$\n\\frac{x^2+1}{y}=\\sqrt{z}\n$$\n\n';
-const text = formulas + Array.from({ length: 4_100 }, (_, index) => `Paragraph ${index}.\n\n`).join('')
-  + '## Distant formulas\n\n$$\n\\sum_{i=1}^{n} i\n$$\n\n```latex\n\\text{中文} + \\frac{1}{2}\n```\n\nEND';
-const value = exportRuntime.renderPreviewDocument({ markdownText: text, sourceDocumentPath: 'C:/formula-viewport.md', uiLanguage: 'en' });
+const distantFormulas = '## Distant formulas\n\n$$\n\\sum_{i=1}^{n} i\n$$\n\n```latex\n\\text{中文} + \\frac{1}{2}\n```\n\nEND';
+const largeText = formulas + Array.from({ length: 4_100 }, (_, index) => `Paragraph ${index}.\n\n`).join('')
+  + distantFormulas;
+const complex = formulas + '```typescript\nconst value = 1;\n```\n\n'.repeat(55) + distantFormulas;
+assert.ok(assessLargeDocument(complex).boundedEditorWork && !assessLargeDocument(complex).windowedPreview,
+  'short complex fixture must exercise the earlier work budget without a logical Preview window');
+assert.equal((exportRuntime.renderPreviewDocument({ markdownText: complex, sourceDocumentPath: 'C:/complex.md', uiLanguage: 'en' })
+  .html.match(/data-meo-deferred-math=/g) ?? []).length, 3,
+  'short complex Preview must defer distant display formulas before the windowing threshold');
+const value = exportRuntime.renderPreviewDocument({ markdownText: largeText, sourceDocumentPath: 'C:/formula-viewport.md', uiLanguage: 'en' });
 assert.equal((value.html.match(/data-meo-deferred-math=/g) ?? []).length, 3,
   'large Preview must send source for offscreen display formulas instead of expanding every formula');
 assert.ok(value.html.includes('katex'), 'inline formulas retain their original prose layout');
 const small = exportRuntime.renderPreviewDocument({ markdownText: formulas, sourceDocumentPath: 'C:/small.md', uiLanguage: 'en' });
 assert.ok(small.html.includes('katex-display'));
 assert.ok(!small.html.includes('data-meo-deferred-math'));
-const exported = renderMarkdownToHtml({ markdownText: text, markdownFilePath: 'C:/formula-viewport.md', target: 'html' });
+const exported = renderMarkdownToHtml({ markdownText: largeText, markdownFilePath: 'C:/formula-viewport.md', target: 'html' });
 assert.ok(exported.html.includes('katex-display'), 'exports remain complete standalone documents');
 assert.ok(!exported.html.includes('data-meo-deferred-math'));
 console.log('Large Preview defers display formulas; inline, small documents and exports stay complete');
@@ -34,116 +42,190 @@ let failure: unknown;
 let stage = 'render';
 let diagnosticPage: Awaited<ReturnType<typeof browser.newPage>> | undefined;
 try {
-  const page = await browser.newPage();
-  diagnosticPage = page;
-  page.setDefaultTimeout(8_000);
-  const errors: string[] = [];
-  page.on('pageerror', error => errors.push(String(error)));
-  await page.setViewport({ width: 1100, height: 720 });
-  await page.goto(server.url.href);
-  await page.addStyleTag({ path: 'webview/src/styles.css' });
-  await page.evaluate(() => { document.body.style.backgroundColor = '#1e1e1e'; });
-  await page.addStyleTag({ content: '.preview-host:not([hidden]){height:100%;display:flex;flex-direction:column}.preview-frame{width:100%;height:100%;flex:1}' });
-  await page.addScriptTag({ content: await build.outputs[0].text() });
-  const render = async (text: string, value: unknown, preserve = false) => {
-    await page.evaluate(({ text, value, preserve }) => {
+  for (const text of [complex, largeText]) {
+    const page = await browser.newPage();
+    diagnosticPage = page;
+    page.setDefaultTimeout(8_000);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(String(error)));
+    await page.setViewport({ width: 1100, height: 720 });
+    await page.goto(server.url.href);
+    await page.addStyleTag({ path: 'webview/src/styles.css' });
+    await page.evaluate(() => { document.body.style.backgroundColor = '#1e1e1e'; });
+    await page.addStyleTag({ content: '.preview-host:not([hidden]){height:100%;display:flex;flex-direction:column}.preview-frame{width:100%;height:100%;flex:1}' });
+    await page.addScriptTag({ content: await build.outputs[0].text() });
+    const render = async (text: string, value: unknown, preserve = false) => {
+      await page.evaluate(({ text, value, preserve }) => {
+        const scope = window as any, controller = scope.__previewController;
+        scope.__previewRenderedAt = 0;
+        controller.setVisible(true);
+        controller.setSourceColoring(false);
+        void controller.requestRender(text, { force: true, restoreLine: preserve ? undefined : 1,
+          preserveViewport: preserve, preserveFrame: preserve });
+        const message = scope.__previewMessages.filter((m: any) => m.type === 'requestPreviewRender').at(-1);
+        controller.acceptRenderResponse({ type: 'previewRenderResult', requestId: message.requestId, result: { ok: true, value } });
+      }, { text, value, preserve });
+      await page.waitForFunction(() => !!(window as any).__previewRenderedAt);
+    };
+    const value = exportRuntime.renderPreviewDocument({ markdownText: text, sourceDocumentPath: 'C:/formula-viewport.md', uiLanguage: 'en' });
+    await render(text, value);
+    stage = 'first formula and copy';
+    await page.waitForFunction(() => {
+      const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+      const first = doc.querySelector('.meo-export-math-display');
+      return first?.querySelector('.katex-display') && first.querySelector(':scope > .meo-preview-code-actions [role="button"]');
+    });
+    const first = await page.evaluate(() => {
+      const scope = window as any, doc = scope.__previewController.host.querySelector('iframe').contentDocument;
+      const roots = [...doc.querySelectorAll('.meo-export-math-display')];
+      scope.__firstFormula = roots[0];
+      scope.__firstFormulaHtml = roots[0].querySelector('.katex-display');
+      const decode = (source: string) => new TextDecoder().decode(Uint8Array.from(atob(source), character => character.charCodeAt(0)));
+      return {
+        rendered: roots.filter((root: Element) => root.querySelector('.katex-display')).length,
+        pending: roots.filter((root: Element) => root.hasAttribute('data-meo-deferred-math')).length,
+        copy: decode(roots[0].getAttribute('data-source-b64')),
+        inline: doc.querySelector('.meo-export-math-inline')?.textContent,
+        copyButton: !!roots[0].querySelector(':scope > .meo-preview-code-actions [role="button"]')
+      };
+    });
+    assert.equal(first.rendered, 1, 'only the nearby display formula is expanded');
+    assert.equal(first.pending, 2, 'distant formulas retain their source and cheap DOM');
+    assert.equal(first.copy, '\\frac{x^2+1}{y}=\\sqrt{z}');
+    assert.equal(first.inline, 'a+b', 'inline prose remains immediately rendered');
+    assert.ok(first.copyButton, 'hydration preserves direct copy controls');
+
+    const updatedText = 'A new introductory paragraph.\n\n' + text;
+    stage = 'preserved formula update';
+    await render(updatedText, exportRuntime.renderPreviewDocument({ markdownText: updatedText, sourceDocumentPath: 'C:/formula-viewport.md', uiLanguage: 'en' }), true);
+    assert.equal(await page.evaluate(() => {
+      const scope = window as any, doc = scope.__previewController.host.querySelector('iframe').contentDocument;
+      return doc.contains(scope.__firstFormula) && doc.contains(scope.__firstFormulaHtml)
+        && !scope.__firstFormula.hasAttribute('data-meo-deferred-math')
+        && Number(scope.__firstFormula.dataset.sourceLine) === 7;
+    }), true, 'unchanged formula DOM survives a source-map update without reverting to a placeholder');
+
+    stage = 'hidden and revealed formulas';
+    await page.evaluate(() => {
       const scope = window as any, controller = scope.__previewController;
-      scope.__previewRenderedAt = 0;
+      controller.setVisible(false);
+      const doc = controller.host.querySelector('iframe').contentDocument;
+      doc.scrollingElement.scrollTop = doc.scrollingElement.scrollHeight;
+    });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(await page.evaluate(() => {
+      const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+      return doc.querySelectorAll('[data-meo-deferred-math]').length;
+    }), 2, 'hidden Preview does not generate distant formulas');
+    await page.evaluate(() => {
+      const controller = (window as any).__previewController;
       controller.setVisible(true);
-      controller.setSourceColoring(false);
-      void controller.requestRender(text, { force: true, preserveViewport: preserve, preserveFrame: preserve });
-      const message = scope.__previewMessages.filter((m: any) => m.type === 'requestPreviewRender').at(-1);
-      controller.acceptRenderResponse({ type: 'previewRenderResult', requestId: message.requestId, result: { ok: true, value } });
-    }, { text, value, preserve });
-    await page.waitForFunction(() => !!(window as any).__previewRenderedAt);
-  };
-  await render(text, value);
-  stage = 'first formula and copy';
-  await page.waitForFunction(() => {
-    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
-    const first = doc.querySelector('.meo-export-math-display');
-    return first?.querySelector('.katex-display') && first.querySelector(':scope > .meo-preview-code-actions [role="button"]');
-  });
-  const first = await page.evaluate(() => {
-    const scope = window as any, doc = scope.__previewController.host.querySelector('iframe').contentDocument;
-    const roots = [...doc.querySelectorAll('.meo-export-math-display')];
-    scope.__firstFormula = roots[0];
-    scope.__firstFormulaHtml = roots[0].querySelector('.katex-display');
-    const decode = (source: string) => new TextDecoder().decode(Uint8Array.from(atob(source), character => character.charCodeAt(0)));
-    return {
-      rendered: roots.filter((root: Element) => root.querySelector('.katex-display')).length,
-      pending: roots.filter((root: Element) => root.hasAttribute('data-meo-deferred-math')).length,
-      copy: decode(roots[0].getAttribute('data-source-b64')),
-      inline: doc.querySelector('.meo-export-math-inline')?.textContent,
-      copyButton: !!roots[0].querySelector(':scope > .meo-preview-code-actions [role="button"]')
-    };
-  });
-  assert.equal(first.rendered, 1, 'only the nearby display formula is expanded');
-  assert.equal(first.pending, 2, 'distant formulas retain their source and cheap DOM');
-  assert.equal(first.copy, '\\frac{x^2+1}{y}=\\sqrt{z}');
-  assert.equal(first.inline, 'a+b', 'inline prose remains immediately rendered');
-  assert.ok(first.copyButton, 'hydration preserves direct copy controls');
-
-  const updatedText = 'A new introductory paragraph.\n\n' + text;
-  stage = 'preserved formula update';
-  await render(updatedText, exportRuntime.renderPreviewDocument({ markdownText: updatedText, sourceDocumentPath: 'C:/formula-viewport.md', uiLanguage: 'en' }), true);
-  assert.equal(await page.evaluate(() => {
-    const scope = window as any, doc = scope.__previewController.host.querySelector('iframe').contentDocument;
-    return doc.contains(scope.__firstFormula) && doc.contains(scope.__firstFormulaHtml)
-      && !scope.__firstFormula.hasAttribute('data-meo-deferred-math')
-      && Number(scope.__firstFormula.dataset.sourceLine) === 7;
-  }), true, 'unchanged formula DOM survives a source-map update without reverting to a placeholder');
-
-  stage = 'hidden and revealed formulas';
-  await page.evaluate(() => {
-    const scope = window as any, controller = scope.__previewController;
-    controller.setVisible(false);
-    const doc = controller.host.querySelector('iframe').contentDocument;
-    doc.scrollingElement.scrollTop = doc.scrollingElement.scrollHeight;
-  });
-  await new Promise(resolve => setTimeout(resolve, 100));
-  assert.equal(await page.evaluate(() => {
-    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
-    return doc.querySelectorAll('[data-meo-deferred-math]').length;
-  }), 2, 'hidden Preview does not generate distant formulas');
-  await page.evaluate(() => {
-    const controller = (window as any).__previewController;
-    controller.setVisible(true);
-    const doc = controller.host.querySelector('iframe').contentDocument;
-    controller.getOutlineAdapter().scrollToLine(Number([...doc.querySelectorAll('.meo-export-math-display')].at(-1).dataset.sourceLine));
-  });
-  await page.waitForFunction(() => {
-    const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
-    return doc.querySelectorAll('.meo-export-math-display .katex-display').length === 3;
-  });
-  const visible = await page.evaluate(async () => {
-    const controller = (window as any).__previewController, doc = controller.host.querySelector('iframe').contentDocument;
-    for (let i = 0; i < 4; i++) await new Promise(requestAnimationFrame);
-    const last = [...doc.querySelectorAll('.meo-export-math-display')].at(-1) as HTMLElement;
-    const rect = last.getBoundingClientRect();
-    return { text: last.textContent, visible: rect.bottom > 0 && rect.top < doc.documentElement.clientHeight,
-      firstRetained: doc.contains((window as any).__firstFormulaHtml), height: rect.height };
-  });
-  assert.ok(visible.text.includes('中文') && visible.visible && visible.height > 0, 'UTF-8 formula source renders on reveal at its reading position');
-  assert.ok(visible.firstRetained, 'offscreen formula retains its generated DOM');
-  stage = 'atomic visible formula update';
-  await page.evaluate(() => {
-    const scope = window as any;
-    scope.__previewRenderProbe = () => {
-      const doc = scope.__previewController.host.querySelector('iframe').contentDocument;
-      const last = [...doc.querySelectorAll('.meo-export-math-display')].at(-1);
-      scope.__formulaCommit = !!last?.querySelector('.katex-display') && !last.hasAttribute('data-meo-deferred-math');
-      scope.__previewRenderProbe = undefined;
-    };
-  });
-  const changedText = updatedText.replace('\\frac{1}{2}', '\\frac{3}{4}');
-  await render(changedText, exportRuntime.renderPreviewDocument({ markdownText: changedText, sourceDocumentPath: 'C:/formula-viewport.md', uiLanguage: 'en' }), true);
-  assert.equal(await page.evaluate(() => (window as any).__formulaCommit), true,
-    'updating an already generated formula must commit its result without a raw-TeX frame');
-  if (process.env.MEO_TEST_SCREENSHOT) await page.screenshot({ path: process.env.MEO_TEST_SCREENSHOT });
-  assert.deepEqual(errors, []);
-  await page.evaluate(() => (window as any).__previewController.dispose());
-  console.log('Deferred Preview formulas: visible-only work, exact copy, preserved DOM, hidden/reveal and reading position passed');
+      const doc = controller.host.querySelector('iframe').contentDocument;
+      controller.getOutlineAdapter().scrollToLine(Number([...doc.querySelectorAll('.meo-export-math-display')].at(-1).dataset.sourceLine));
+    });
+    await page.waitForFunction(() => {
+      const doc = (window as any).__previewController.host.querySelector('iframe').contentDocument;
+      return doc.querySelectorAll('.meo-export-math-display .katex-display').length === 3;
+    });
+    const visible = await page.evaluate(async () => {
+      const controller = (window as any).__previewController, doc = controller.host.querySelector('iframe').contentDocument;
+      for (let i = 0; i < 4; i++) await new Promise(requestAnimationFrame);
+      const last = [...doc.querySelectorAll('.meo-export-math-display')].at(-1) as HTMLElement;
+      const rect = last.getBoundingClientRect();
+      return { text: last.textContent, visible: rect.bottom > 0 && rect.top < doc.documentElement.clientHeight,
+        firstRetained: doc.contains((window as any).__firstFormulaHtml), height: rect.height };
+    });
+    assert.ok(visible.text.includes('中文') && visible.visible && visible.height > 0, 'UTF-8 formula source renders on reveal at its reading position');
+    assert.ok(visible.firstRetained, 'offscreen formula retains its generated DOM');
+    stage = 'atomic visible formula update';
+    await page.evaluate(() => {
+      const scope = window as any;
+      scope.__previewRenderProbe = () => {
+        const doc = scope.__previewController.host.querySelector('iframe').contentDocument;
+        const last = [...doc.querySelectorAll('.meo-export-math-display')].at(-1);
+        scope.__formulaCommit = !!last?.querySelector('.katex-display') && !last.hasAttribute('data-meo-deferred-math');
+        scope.__previewRenderProbe = undefined;
+      };
+    });
+    const changedText = updatedText.replace('\\frac{1}{2}', '\\frac{3}{4}');
+    await render(changedText, exportRuntime.renderPreviewDocument({ markdownText: changedText, sourceDocumentPath: 'C:/formula-viewport.md', uiLanguage: 'en' }), true);
+    assert.equal(await page.evaluate(() => (window as any).__formulaCommit), true,
+      'updating an already generated formula must commit its result without a raw-TeX frame');
+    if (text === complex) {
+      stage = 'bounded visible formula batches';
+      const empty = 'A fresh formula surface.';
+      await render(empty, exportRuntime.renderPreviewDocument({ markdownText: empty, sourceDocumentPath: 'C:/formula-batch.md', uiLanguage: 'en' }));
+      await page.evaluate(() => {
+        const scope = window as any; scope.__mathBatchSizes = [];
+        let previous = 0;
+        const sample = () => {
+          const doc = scope.__previewController.host.querySelector('iframe').contentDocument;
+          const count = [...doc.querySelectorAll('.meo-export-math-display')].filter((element: Element) =>
+            atob(element.getAttribute('data-source-b64') ?? '').startsWith('x_{batch-') && element.querySelector('.katex-display')).length;
+          if (count > previous) scope.__mathBatchSizes.push(count - previous);
+          previous = count;
+          if (count < 6) requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      });
+      const dense = Array.from({ length: 6 }, (_, index) => `$$\nx_{batch-${index}}^2\n$$\n\n`).join('') + text;
+      const frameBounds = await page.$eval('.preview-frame', element => {
+        const rect = element.getBoundingClientRect(); return { x: rect.x + 100, y: rect.y + 30 };
+      });
+      await page.mouse.move(frameBounds.x, frameBounds.y); await page.mouse.down();
+      assert.equal(await page.evaluate(() => (window as any).__previewController.isViewportInteracting()), true);
+      await render(dense, exportRuntime.renderPreviewDocument({ markdownText: dense, sourceDocumentPath: 'C:/formula-batch.md', uiLanguage: 'en' }));
+      await page.evaluate(async () => { for (let index = 0; index < 3; index++) await new Promise(requestAnimationFrame); });
+      assert.equal(await page.evaluate(() => (window as any).__mathBatchSizes.length), 0,
+        'a held native gesture must defer cold formula generation in a complex non-windowed document');
+      await page.mouse.up();
+      await page.waitForFunction(() => (window as any).__mathBatchSizes.reduce((sum: number, count: number) => sum + count, 0) === 6);
+      const batches = await page.evaluate(() => (window as any).__mathBatchSizes as number[]);
+      assert.ok(batches.every(count => count <= 2), `visible formula initialization must yield between bounded batches: ${batches}`);
+      const codeBatches = await page.evaluate(async value => {
+        const scope = window as any, doc = scope.__previewController.host.querySelector('iframe').contentDocument;
+        const counts: number[] = [];
+        let previous = 0, quiet = 0;
+        const started = performance.now();
+        const done = new Promise<number[]>((resolve, reject) => {
+          const sample = () => {
+            const count = [...doc.querySelectorAll('code.hljs')].filter((code: Element) => code.querySelector('[data-meo-shiki]')).length;
+            if (count > previous) { counts.push(count - previous); quiet = 0; }
+            else quiet++;
+            previous = count;
+            if (counts.length && quiet >= 6) resolve(counts);
+            else if (performance.now() - started > 5_000) reject(Error('Cold code projection never settled: ' + JSON.stringify({
+              codes: doc.querySelectorAll('code.hljs').length, anyCode: doc.querySelector('code')?.outerHTML.slice(0, 240),
+              budget: doc.documentElement.dataset.meoPreviewResourceBudget, pending: scope.__previewMessages.at(-1)?.type
+            })));
+            else requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        });
+        scope.__previewTokenTheme = { name: 'cold-preview-batch', type: 'dark', colors: { 'editor.foreground': '#dddddd' },
+          tokenColors: [{ scope: ['keyword', 'storage.type'], settings: { foreground: '#55aa55' } }] };
+        scope.__previewController.setAppearance('dark');
+        const requests = () => scope.__previewMessages.filter((item: any) => item.type === 'requestPreviewRender');
+        const before = requests().at(-1).requestId;
+        scope.__previewController.setSourceColoring(true);
+        while (requests().at(-1).requestId === before) {
+          if (performance.now() - started > 5_000) throw Error('The coloring request never reached the Host');
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        const message = requests().at(-1);
+        scope.__previewController.acceptRenderResponse({ type: 'previewRenderResult', requestId: message.requestId,
+          result: { ok: true, value } });
+        return done;
+      }, exportRuntime.renderPreviewDocument({ markdownText: dense, sourceDocumentPath: 'C:/formula-batch.md', uiLanguage: 'en' }));
+      assert.ok(codeBatches.length > 1 && codeBatches.every(count => count <= 2),
+        `arriving code tokens must use the bounded reading queue: ${codeBatches}`);
+    }
+    if (process.env.MEO_TEST_SCREENSHOT) await page.screenshot({ path: process.env.MEO_TEST_SCREENSHOT });
+    assert.deepEqual(errors, []);
+    await page.evaluate(() => (window as any).__previewController.dispose());
+    console.log('Deferred Preview formulas: visible-only work, exact copy, preserved DOM, hidden/reveal, reading position and bounded gesture-safe batches passed');
+    await page.close();
+  }
 } catch (error) { failure = error; console.error(stage, await diagnosticPage?.evaluate(() => {
   const scope = window as any, doc = scope.__previewController?.host.querySelector('iframe')?.contentDocument;
   return { formulas: [...(doc?.querySelectorAll('.meo-export-math-display') ?? [])].map((element: Element) => element.outerHTML.slice(0, 350)), copyControls: doc?.querySelectorAll('.meo-preview-code-actions').length };

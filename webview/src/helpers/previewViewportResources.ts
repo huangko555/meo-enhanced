@@ -2,6 +2,11 @@ type ResourceKind = 'code' | 'mermaid' | 'copy';
 type Candidates = Record<ResourceKind, Set<HTMLElement>> & { mermaidOrder: WeakMap<HTMLElement, number> };
 const candidatesByDocument = new WeakMap<Document, Candidates>();
 
+/** The existing structural work budget also covers complex non-windowed DOM. */
+export function hasBoundedPreviewResources(document: Document): boolean {
+  return document.documentElement.dataset.meoPreviewResourceBudget === 'bounded';
+}
+
 /** Undefined preserves the standalone/small-document renderer's existing path. */
 export function getPreviewViewportResources(document: Document, kind: ResourceKind): readonly HTMLElement[] | undefined {
   const candidates = candidatesByDocument.get(document);
@@ -16,7 +21,7 @@ export function getPreviewMermaidResourceIndex(document: Document, element: HTML
 /** Owns the resource index for one presentation, including preserved iframe updates. */
 export function observePreviewViewportResources(document: Document, changed: () => void) {
   const Observer = (document.defaultView as (Window & typeof globalThis) | null)?.IntersectionObserver;
-  if (document.documentElement.dataset.meoPreviewLargeDocument !== 'true' || !Observer) return null;
+  if (!hasBoundedPreviewResources(document) || !Observer) return null;
   const candidates: Candidates = { code: new Set(), mermaid: new Set(), copy: new Set(), mermaidOrder: new WeakMap() };
   let resources: HTMLElement[] = [];
   const kinds = new Map<HTMLElement, ResourceKind[]>();

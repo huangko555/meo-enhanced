@@ -95,6 +95,24 @@ try {
           // Count layout passes instead of imposing a machine-dependent timing threshold.
           assert.ok(layouts <= 2, `Preview code projection caused repeated layout: ${JSON.stringify({ width, appearance, stage, layouts })}`);
         }
+        const batches = await page.evaluate(async () => {
+          for (const source of document.querySelectorAll<HTMLElement>('.meo-export-code-line-source')) delete source.dataset.meoShiki;
+          const colored = () => [...document.querySelectorAll('code.hljs')].filter(code => code.querySelector('[data-meo-shiki]')).length;
+          const counts: number[] = [];
+          let pending = true;
+          for (let index = 0; index < 60 && pending; index++) {
+            pending = false;
+            const before = colored();
+            (window as any).highlight.applyPreviewCodeHighlight(document, true, () => true,
+              { maxBlocks: 2, onPending: () => { pending = true; } });
+            counts.push(colored() - before);
+            if (pending) await new Promise(requestAnimationFrame);
+          }
+          return { counts, pending };
+        });
+        assert.ok(batches.counts.length > 1 && batches.counts.every(count => count > 0 && count <= 2)
+          && !batches.pending, `Cold code projection must yield between bounded fence batches: ${JSON.stringify(batches)}`);
+        assert.deepEqual(await page.$$eval('.meo-export-code-line-source', lines => lines.map(line => line.textContent)), originalText);
         await page.evaluate(() => (window as any).highlight.release());
         await page.close();
       }

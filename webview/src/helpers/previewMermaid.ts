@@ -2,7 +2,7 @@ import { syncPreviewRenderedActions } from './previewBlockActions';
 import type { EditorAppearance } from '../../../src/protocol/editorCommands';
 import { getGithubMermaidConfig } from '../../../src/preview/githubMermaid';
 import { getMermaidColorVariables, getMermaidPalette } from '../../../src/shared/mermaidPalette';
-import { getPreviewMermaidResourceIndex, getPreviewViewportResources } from './previewViewportResources';
+import { getPreviewMermaidResourceIndex, getPreviewViewportResources, hasBoundedPreviewResources } from './previewViewportResources';
 
 type PreviewAppearance = Exclude<EditorAppearance, 'auto'>;
 import {
@@ -21,7 +21,7 @@ const PREVIEW_MERMAID_CACHE_LIMIT = 100;
 const previewMermaidSvgCache = new Map<string, string>();
 
 function isNearPreviewViewport(block: HTMLElement, frameDocument: Document): boolean {
-  if (frameDocument.documentElement.dataset.meoPreviewLargeDocument !== 'true') return true;
+  if (!hasBoundedPreviewResources(frameDocument)) return true;
   const height = frameDocument.defaultView?.innerHeight ?? 0;
   const bounds = block.getBoundingClientRect();
   return bounds.height > 0 && bounds.bottom >= -height && bounds.top <= height * 2;
@@ -107,7 +107,7 @@ export function createPreviewMermaidRenderer(
 /** A queued or in-flight batch can outlive the gesture check that scheduled it.
  * Retire obsolete work promptly, and leave the UI thread to native dragging. */
 async function waitForPreviewGesture(document: Document, isCurrent: () => boolean, isInteracting: () => boolean): Promise<boolean> {
-  while (isCurrent() && document.documentElement.dataset.meoPreviewLargeDocument === 'true' && isInteracting())
+  while (isCurrent() && hasBoundedPreviewResources(document) && isInteracting())
     await new Promise<void>(resolve => setTimeout(resolve, 50));
   return isCurrent();
 }
@@ -167,6 +167,34 @@ async function renderMermaidBlocks(
   let renderIndex = 0;
   const prepared: Array<{ block: HTMLElement; source: string; svg: string }> = [];
   const failed: HTMLElement[] = [];
+  const commitPrepared = () => {
+    if (!isCurrent() || prepared.length + failed.length === 0) return;
+    commit(() => {
+      if (!isCurrent()) return;
+      for (const { block, source, svg } of prepared) {
+        block.classList.toggle('is-math', isDisplayMathDiagram(source));
+        block.classList.add('is-rendered');
+        block.classList.remove('is-error');
+        delete block.dataset.meoPreviewMermaidPending;
+        block.dataset.meoPreviewMermaidAppearance = appearance;
+        block.dataset.meoPreviewMermaidPreset = preset;
+        block.dataset.meoPreviewMermaidPresetRevision = revision;
+        block.dataset.meoPreviewMermaidTheme = themeKey;
+        const copyActions = block.querySelector(':scope > .meo-preview-code-actions');
+        const languageLabel = block.querySelector(':scope > .meo-export-code-language-label');
+        block.innerHTML = `<div class="meo-export-mermaid-svg">${svg}</div>`;
+        if (languageLabel) block.prepend(languageLabel);
+        if (copyActions) block.append(copyActions);
+      }
+      for (const block of failed) {
+        block.classList.add('is-error');
+        delete block.dataset.meoPreviewMermaidPending;
+      }
+    });
+    prepared.length = failed.length = 0;
+    syncPreviewRenderedActions(frameDocument);
+    onDiagramRendered?.();
+  };
   for (const { block, documentIndex } of blocks) {
     // Mermaid's promises can resolve in one task. Let input and paint run
     // between diagrams while retaining the exclusive theme lease.
@@ -214,32 +242,12 @@ async function renderMermaidBlocks(
     } catch {
       failed.push(block);
     }
+    if (hasBoundedPreviewResources(frameDocument) && prepared.length + failed.length >= 2) {
+      if (!await waitForPreviewGesture(frameDocument, isCurrent, isInteracting)) return;
+      commitPrepared();
+    }
   }
-  if (prepared.length === 0 && failed.length === 0 || !await waitForPreviewGesture(frameDocument, isCurrent, isInteracting)) return;
-  commit(() => {
-    if (!isCurrent()) return;
-    for (const { block, source, svg } of prepared) {
-      block.classList.toggle('is-math', isDisplayMathDiagram(source));
-      block.classList.add('is-rendered');
-      block.classList.remove('is-error');
-      delete block.dataset.meoPreviewMermaidPending;
-      block.dataset.meoPreviewMermaidAppearance = appearance;
-      block.dataset.meoPreviewMermaidPreset = preset;
-      block.dataset.meoPreviewMermaidPresetRevision = revision;
-      block.dataset.meoPreviewMermaidTheme = themeKey;
-      const copyActions = block.querySelector(':scope > .meo-preview-code-actions');
-      const languageLabel = block.querySelector(':scope > .meo-export-code-language-label');
-      block.innerHTML = `<div class="meo-export-mermaid-svg">${svg}</div>`;
-      if (languageLabel) block.prepend(languageLabel);
-      if (copyActions) block.append(copyActions);
-    }
-    for (const block of failed) {
-      block.classList.add('is-error');
-      delete block.dataset.meoPreviewMermaidPending;
-    }
-  });
-  syncPreviewRenderedActions(frameDocument);
-  onDiagramRendered?.();
+  if (await waitForPreviewGesture(frameDocument, isCurrent, isInteracting)) commitPrepared();
 }
 
 function readPreviewMermaidPalette(

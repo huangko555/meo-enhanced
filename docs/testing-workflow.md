@@ -697,8 +697,12 @@ It rejects redundant source-metadata mutations and geometry reads from detached
 or disposing tables, while retaining focused-cell caret measurement.
 Its controlled height-map receipt isolates delayed CodeMirror anchoring from
 actual DOM movement. It also verifies that background Mermaid warming waits for
-native scrolling to settle, resumes afterward, and respects cancellation; visible
-render calls remain immediate. Full-document scroll and font sweeps use delayed
+native scrolling to settle, resumes afterward, and respects cancellation. Cold
+newly visible Live diagrams now also wait for the existing viewport's gesture
+settlement; explicit source/theme refreshes and fullscreen remain foreground.
+`test-preview-mermaid-runtime.ts` requires no runtime call during continuing
+trusted wheels, eventual SVG after stopping, and bounded Preview result commits.
+Full-document scroll and font sweeps use delayed
 SVG adapters to control layout timing; actual Mermaid rendering is covered by
 the editing contracts and full-document UAT.
 The viewport-controller unit matrix interleaves background document presentation,
@@ -1681,6 +1685,16 @@ It also changes the same source block between Mermaid, math and ordinary code
 in both document sizes. Each accepted result must expose only its own controls,
 and a trusted source-copy click must copy the current block's exact contents.
 
+`scripts/test-preview-deferred-math.ts` pairs a short complex non-windowed
+document with the existing large fixture. Both use the existing structural work
+budget for nearby resources; a small simple document and standalone exports stay
+complete. A held native gesture must defer new formula generation, then visible
+formulas appear in bounded batches after release. Arriving real Shiki tokens must
+also pass through that same reading queue. Existing formula DOM, exact copy,
+hidden/reveal behavior and atomic changed-formula commits remain required.
+`test-preview-code-update.ts` adds an actually bounded non-windowed case to the
+pending-token matrix, preserving old code until its replacement tokens are ready.
+
 After changes to packaged syntax engines or Webview resource loading, run
 `scripts/test-vscode-resource-loading.ps1 -CodePath <Code.exe>` against the
 production build. Its disposable native profile checks real VS Code resource
@@ -2248,7 +2262,9 @@ Custom fixture-specific phases still require their matching curated document.
 renderer and Shiki projection in Chromium at three widths and both appearances.
 It checks source text, theme changes, viewport deferral, scrolling, resizing, and
 full-document projection. CDP layout counts enforce bounded layout work during
-projection without relying on machine-dependent elapsed-time thresholds. It runs
+projection without relying on machine-dependent elapsed-time thresholds. Cold
+reading projection additionally yields between batches of at most two fences,
+retaining complete source and the uncapped full-document path. It runs
 in the appearance pack, highlight suite, and full browser suite.
 
 `scripts/test-source-lightweight-shiki-lifecycle.ts` checks shared highlighter

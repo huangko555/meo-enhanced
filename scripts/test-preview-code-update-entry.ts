@@ -20,7 +20,7 @@ const controller = createPreviewController({
   getEditorAppearance: () => 'dark',
   getImageIntrinsicSize: src => (window as any).__previewImageSizes?.[src] ?? null,
   getCodePalette: appearance => palette.resolve(undefined, appearance).preview,
-  applyCodeTheme: appearance => setShikiTheme(palette.resolve(undefined, appearance).sourceTheme, 'preview'),
+  applyCodeTheme: appearance => setShikiTheme((window as any).__previewTokenTheme ?? palette.resolve(undefined, appearance).sourceTheme, 'preview'),
   mermaidRenderResources: createMermaidDiagramRenderPool({
     initialize: initializeMermaidEditorRuntime,
     render: renderMermaidRuntime

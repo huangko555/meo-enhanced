@@ -18,7 +18,7 @@ import { setPreviewCodeSources } from './previewCodeSource';
 import { logWebviewRenderError } from './errors';
 import { normalizeDocumentText } from '../../../src/foundation/documentText';
 import { assessLargeDocument } from '../../../src/foundation/largeDocument';
-import { getPreviewViewportResources, observePreviewViewportResources } from './previewViewportResources';
+import { getPreviewViewportResources, observePreviewViewportResources, hasBoundedPreviewResources } from './previewViewportResources';
 import { comparePreviewVisualSourceEntries, createPreviewSourceEntries, createPreviewSourceGeometry, measurePreviewSourceEntry, type PreviewSourceEntry } from './previewSourceGeometry';
 import { capturePreviewReadingAnchor, restoreFullPreviewReadingScrollTop } from './previewReadingAnchor';
 import { createPreviewScrollRange } from './previewScrollRange';
@@ -371,7 +371,7 @@ function morphPreviewMain(
     nextMain.className = 'meo-export-doc';
     nextMain.innerHTML = html;
     if (sourceRevision) sourceKeys = previewSourceMorphKeys(currentMain, nextMain, sourceRevision.before, sourceRevision.after, sourceRevision.mapSourceLine);
-    const nearbyControls = frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true';
+    const nearbyControls = hasBoundedPreviewResources(frameDocument);
     if (!nearbyControls) addPreviewCodeCopyControls(nextMain, frameDocument.documentElement.lang as UiLanguage);
     const currentTables = retainTableColumns ? Array.from(currentMain.querySelectorAll<HTMLTableElement>('table')) : [];
     const tableSource = (table: HTMLTableElement) => {
@@ -445,7 +445,7 @@ function morphPreviewMain(
         return node !== retainedPositionMarker;
       },
       onBeforeElUpdated(fromElement, toElement) {
-        if (frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true'
+        if (hasBoundedPreviewResources(frameDocument)
           && fromElement.matches(previewCopyBlockSelector) && toElement.matches(previewCopyBlockSelector)
           && previewCopyBlockKind(fromElement) === previewCopyBlockKind(toElement)) {
           // Match only controls that already exist. Populating the entire
@@ -1437,6 +1437,7 @@ export function createPreviewController({
     readonly signature: string;
   }>();
   let previewMathObserver: IntersectionObserver | null = null;
+  let flushPreviewMath: (() => boolean) | null = null;
   let previewTableLayout: PreviewTableLayoutController | null = null;
   const tableColumnPreferences = createPreviewTableColumnPreferences();
   let previewViewportResources: ReturnType<typeof observePreviewViewportResources> = null;
@@ -1473,8 +1474,12 @@ export function createPreviewController({
     return () => !disposed && isSourceColoringEnabled() && (latestPayload?.preset ?? 'default') === presetPreference && generation === frameGeneration
       && activeFrameDocument === frameDocument;
   };
-  const applyCodeHighlight = (frameDocument: Document): void => {
-    if (!applyPreviewCodeHighlight(frameDocument, true, currentCodeHighlight(frameDocument)) || !searchQuery) return;
+  const applyCodeHighlight = (frameDocument: Document, reading = false): void => {
+    // Cold reading enrichment yields between fences. Explicit content/theme
+    // commits keep the existing atomic projection with no intermediate palette.
+    const budget = reading && hasBoundedPreviewResources(frameDocument)
+      ? { maxBlocks: 2, onPending: () => scheduleViewportHighlight(frameDocument) } : undefined;
+    if (!applyPreviewCodeHighlight(frameDocument, true, currentCodeHighlight(frameDocument), budget) || !searchQuery) return;
     // Token spans replace text nodes that may own visible Find marks. The
     // existing search owner retains its logical anchor and projects it again.
     search.invalidate();
@@ -1491,7 +1496,7 @@ export function createPreviewController({
     highlightFrame = window.requestAnimationFrame(() => {
       highlightFrame = null;
       if (!disposed && activeFrameDocument === frameDocument && !host.hidden) {
-        if (frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true' && isViewportInteracting()) {
+        if (hasBoundedPreviewResources(frameDocument) && isViewportInteracting()) {
           // Native dragging owns the browser's range and layout. Enrich the
           // newly visible band after the gesture, rather than reshaping it
           // underneath the thumb or competing with queued pointer delivery.
@@ -1501,19 +1506,21 @@ export function createPreviewController({
           }, 250);
           return;
         }
+        const moreMath = flushPreviewMath?.() ?? false;
         addPreviewCodeCopyControls(frameDocument, uiLanguage);
         refreshDocumentBlocks?.(frameDocument);
         if (currentCodeHighlight(frameDocument)()) {
-          applyCodeHighlight(frameDocument);
+          applyCodeHighlight(frameDocument, true);
         }
         ensureReadableCode(frameDocument, false);
-        if (frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true' && latestPayload?.hasMermaid) {
+        if (hasBoundedPreviewResources(frameDocument) && latestPayload?.hasMermaid) {
           const generation = frameGeneration;
           void previewMermaidRenderer.render(frameDocument, appearance,
             () => { sourceMapDirty = true; },
             () => !disposed && !host.hidden && generation === frameGeneration && activeFrameDocument === frameDocument,
             mutate => withViewportTransaction(() => { mutate(); sourceMapDirty = true; }));
         }
+        if (moreMath) scheduleViewportHighlight(frameDocument);
       }
     });
   };
@@ -1578,7 +1585,8 @@ export function createPreviewController({
       return;
     }
     if (!disposed && isSourceColoringEnabled() && activeFrameDocument) {
-      applyCodeHighlight(activeFrameDocument);
+      if (hasBoundedPreviewResources(activeFrameDocument)) scheduleViewportHighlight(activeFrameDocument);
+      else applyCodeHighlight(activeFrameDocument);
     }
   }, 'preview');
 
@@ -1629,6 +1637,7 @@ export function createPreviewController({
   const disposePreviewMathViewports = () => {
     previewMathObserver?.disconnect();
     previewMathObserver = null;
+    flushPreviewMath = null;
     for (const viewport of previewMathViewports.values()) {
       viewport.controller.destroy();
     }
@@ -1844,6 +1853,7 @@ export function createPreviewController({
   const attachPreviewMathViewports = (frameDocument: Document) => {
     previewMathObserver?.disconnect();
     previewMathObserver = null;
+    flushPreviewMath = null;
     const roots = Array.from(frameDocument.querySelectorAll<HTMLElement>(
       '.meo-export-math-display, .meo-export-math-inline'
     ));
@@ -1883,21 +1893,39 @@ export function createPreviewController({
       else controller.destroy();
     };
     const frameWindow = frameDocument.defaultView;
-    if (frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true' && frameWindow?.IntersectionObserver) {
+    if (hasBoundedPreviewResources(frameDocument) && frameWindow?.IntersectionObserver) {
       // A single observer gates the expensive per-formula resize/font measurements.
       // Keep fitted DOM when suspending so scrolling does not change page geometry.
       for (const viewport of previewMathViewports.values()) viewport.controller.setActive(false);
+      const pending = new Set<HTMLElement>();
+      flushPreviewMath = () => {
+        if (disposed || activeFrameDocument !== frameDocument || host.hidden || !pending.size) return false;
+        const started = performance.now();
+        let count = 0;
+        withViewportTransaction(() => {
+          for (const element of pending) {
+            pending.delete(element);
+            if (!element.isConnected) continue;
+            attach(element);
+            if (++count >= 2 || performance.now() - started >= 4) break;
+          }
+        });
+        return pending.size > 0;
+      };
       previewMathObserver = new frameWindow.IntersectionObserver(entries => {
         if (disposed || activeFrameDocument !== frameDocument || host.hidden) return;
         for (const entry of entries) {
           const element = entry.target as HTMLElement;
           if (!element.isConnected) continue;
           if (entry.isIntersecting) {
-            if (element.hasAttribute('data-meo-deferred-math')) withViewportTransaction(() => attach(element));
-            else attach(element);
+            pending.add(element);
           }
-          else previewMathViewports.get(element)?.controller.setActive(false);
+          else {
+            pending.delete(element);
+            previewMathViewports.get(element)?.controller.setActive(false);
+          }
         }
+        if (pending.size) scheduleViewportHighlight(frameDocument);
       }, { rootMargin: '800px 0px' });
       for (const element of roots) previewMathObserver.observe(element);
     } else {
@@ -2096,9 +2124,12 @@ export function createPreviewController({
     appearanceRetention?.release();
     const payload = latestPayload;
     const layout = latestAcceptedLayout;
+    const assessment = assessLargeDocument(renderedText);
+    const resourceBudget = assessment.boundedEditorWork ? 'bounded' : 'ordinary';
     cancelHighlightFrame();
     commitPendingCodeHighlight = null;
     const reusableDocument = activeFrameDocument === frame.contentDocument ? activeFrameDocument : null;
+    if (reusableDocument) reusableDocument.documentElement.dataset.meoPreviewResourceBudget = resourceBudget;
     const reusableMain = reusableDocument?.querySelector<HTMLElement>('main.meo-export-doc');
     const previousRenderedText = frameRenderedText;
     searchAnchor = searchAdapter.getSearchAnchor();
@@ -2155,7 +2186,8 @@ export function createPreviewController({
       const signal = frameEvents.signal;
       frameRenderedText = renderedText;
       frameDocument.documentElement.dataset.meoPreviewLayout = layout;
-      frameDocument.documentElement.dataset.meoPreviewLargeDocument = String(assessLargeDocument(renderedText).windowedPreview);
+      frameDocument.documentElement.dataset.meoPreviewLargeDocument = String(assessment.windowedPreview);
+      frameDocument.documentElement.dataset.meoPreviewResourceBudget = resourceBudget;
       // A logical window already bounds mounted DOM. CSS skipping inside that
       // window would measure 90/120px placeholders during an input handoff,
       // then repeatedly move the reading position as the real rows reappear.
@@ -2443,7 +2475,7 @@ export function createPreviewController({
     previewTableLayout?.dispose();
     previewTableLayout = null;
     loadingFrameText = renderedText;
-    const large = assessLargeDocument(renderedText).windowedPreview;
+    const large = assessment.windowedPreview;
     const header = `<!DOCTYPE html><html lang="${uiLanguage}" data-meo-preview-large-document="${large}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">${katexStylesTag}<style data-meo-preview-styles>${styles}</style><style>${previewScrollbarStyles}${previewCodeCopyStyles}${previewImageActionStyles}${previewLatexMathViewportStyles}${previewSourcePositionMarkerStyles}.meo-export-doc a[data-meo-preview-href]{cursor:pointer}${previewSearchStyles}</style></head><body><div class="meo-export-page"><main class="meo-export-doc markdown-body">`;
     const footer = '</main></div></body></html>';
     frame.onload = null;
@@ -3841,6 +3873,7 @@ export function createPreviewController({
         previewGestureUntil = 0;
         previewMathObserver?.disconnect();
         previewMathObserver = null;
+        flushPreviewMath = null;
         for (const viewport of previewMathViewports.values()) viewport.controller.setActive(false);
         closePreviewBlockFullscreen(frame.contentDocument);
         previewImageActions?.closeFullscreen();

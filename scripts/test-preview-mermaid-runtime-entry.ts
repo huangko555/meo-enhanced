@@ -25,7 +25,7 @@ const mermaidResources = createMermaidDiagramRenderPool({
 (window as any).__probePreviewGestureBatch = async () => {
   const runtime = await loadMermaidRuntime(), original = runtime.render;
   const frame = document.createElement('iframe'); frame.style.height = '400px'; document.body.append(frame);
-  const doc = frame.contentDocument!; doc.documentElement.dataset.meoPreviewLargeDocument = 'true';
+  const doc = frame.contentDocument!; doc.documentElement.dataset.meoPreviewResourceBudget = 'bounded';
   doc.body.innerHTML = [0, 1].map(index => `<div class="meo-export-mermaid" style="height:100px" data-source-b64="${btoa(`flowchart LR; A[Gesture-${Date.now()}-${index}]-->B`)}"></div>`).join('');
   let interacting = false, started = 0, completed = 0, notices = 0;
   const releases: Array<() => void> = [];
@@ -59,6 +59,22 @@ const mermaidResources = createMermaidDiagramRenderPool({
     interacting = false; for (const release of releases) release(); renderer.dispose();
     await operation.catch(() => {}); runtime.render = original; frame.remove();
   }
+};
+(window as any).__probePreviewCommitBatches = async () => {
+  const runtime = await loadMermaidRuntime(), original = runtime.render;
+  const frame = document.createElement('iframe'); frame.style.height = '400px'; document.body.append(frame);
+  const doc = frame.contentDocument!; doc.documentElement.dataset.meoPreviewResourceBudget = 'bounded';
+  doc.body.innerHTML = Array.from({ length: 6 }, (_, index) => `<div class="meo-export-mermaid" style="height:40px" data-source-b64="${btoa(`flowchart LR; A[Batch-${Date.now()}-${index}]-->B`)}"></div>`).join('');
+  runtime.render = (async (id: string) => ({ svg: `<svg xmlns="http://www.w3.org/2000/svg" id="${id}" viewBox="0 0 100 30"><rect width="100" height="30"/></svg>` })) as typeof runtime.render;
+  const batches: number[] = [];
+  const renderer = createPreviewMermaidRenderer(mermaidResources, error => { throw error; });
+  const painted = () => doc.querySelectorAll('.meo-export-mermaid.is-rendered svg').length;
+  try {
+    await renderer.render(doc, 'dark', undefined, () => true, mutate => {
+      const before = painted(); mutate(); batches.push(painted() - before);
+    });
+    return { batches, painted: painted() };
+  } finally { renderer.dispose(); runtime.render = original; frame.remove(); }
 };
 const mermaidPresentationFactory = createMermaidDiagramPresentationFactory({
   resources: mermaidResources,

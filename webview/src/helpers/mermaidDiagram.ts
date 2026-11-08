@@ -18,7 +18,7 @@ import { openMermaidFullscreen, type MermaidFullscreenViewer, type MermaidFullsc
 import { focusRenderedBlockAction } from './renderedBlockActionFocus';
 import { measureMermaidPreviewViewport, mountMermaidPreviewControls } from './renderedBlockModeControls';
 import { estimateBlockWidgetHeight } from '../editor/blockWidgetHeight';
-import { usesLargeDocumentDerivedWorkBudget } from '../editor/liveInputDerivedWork';
+import { requestLiveInputDerivedWorkOnFrame, usesLargeDocumentDerivedWorkBudget } from '../editor/liveInputDerivedWork';
 import { stepVisualZoom, visualZoomPanAtPoint } from './visualZoom';
 
 declare global {
@@ -989,6 +989,18 @@ export class MermaidDiagramWidget extends WidgetType {
     this.requestCurrentPresentation = (refresh = false) => {
       if (refresh) needsPresentation = true;
       if (!needsPresentation || (!nearScreen && !this.fullscreenSession) || this.container !== container || !this.presentationHandle) return;
+      if (!refresh && gated && !this.fullscreenSession && getViewportController(view!)?.isUserScrolling()) {
+        // The viewport owns wheel/momentum settlement. Reuse the Editor's
+        // existing frame queue instead of starting layout work in a scroll.
+        // Explicit source/theme updates keep their foreground priority.
+        queueMicrotask(() => {
+          if (this.container !== container || !container.isConnected) return;
+          requestLiveInputDerivedWorkOnFrame(view!, this, () => {
+            if (this.container === container && container.isConnected) this.requestCurrentPresentation();
+          });
+        });
+        return;
+      }
       if (this.staleSvg && !container.querySelector('.meo-mermaid-svg-wrapper')) {
         this.renderSvg(container, this.staleSvg, view, false);
         container.style.removeProperty('min-height');
