@@ -275,6 +275,16 @@ An edit outside the mounted band still invalidates its syntax context. Previousl
 themed rows remain painted until the replacement context is ready, through the
 existing atomic Preview commit and reading-position transaction.
 
+Complete interactive Preview, including the screen-reader route, also defers
+large supported fences to viewport Shiki highlighting. It must not create a
+second whole-fence fallback token tree merely because DOM windowing is disabled.
+Large built-in MEO fences keep every source row in one element per line; generated
+line numbers have empty CSS alternative text and do not enter the accessibility
+tree or copied source. GitHub and custom renderer row structure is retained;
+standalone exports keep their complete token HTML and original row structure.
+The forced-accessibility production contract verifies offscreen AX text, full
+copy, deep search, wrapping, mode reuse and runtime screen-reader changes.
+
 Shiki workers transfer numeric ranges and a shared color palette. The receiving
 surface reconstructs token objects in yielding batches and abandons retired work;
 the transfer never clones full scope explanations onto the UI thread. Tokenization

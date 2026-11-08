@@ -555,11 +555,15 @@ whitespace, invalid input and late-result protection. Its trusted-wheel scenario
 places rendered HTML above the viewport and checks every frame of HTML and math
 expansion, preventing unrelated reading-anchor restoration from shifting earlier content.
 Word HTML acceptance uses `scripts/test-docx-export-runtime.ts` for inline text,
-figure captions and explicit pre-wrap line breaks, and
+figure captions, explicit line breaks and exact whitespace in `pre`, `pre-wrap`
+and `break-spaces`, including leading/trailing spaces, blank lines, inline runs,
+inheritance and overrides. Negative controls keep `normal`, `nowrap` and
+`pre-line` space collapsing, while Markdown source stays unchanged. Use
 `scripts/test-docx-export-browser.ts` for hidden attributes, CSS visibility,
-transparent/zero-size text, closed details and visible child overrides. Inspect
+transparent/zero-size text, closed details, visible child overrides and whitespace
+after browser materialization. Inspect
 the final Word document in Word as well: its HTML converter retains editable
-text but approximates browser typography, repeated spaces, ruby and custom list
+text but approximates browser typography, ruby and custom list
 numbering. Deliberately unclosed tags can still affect following HTML content.
 The preset browser owner also checks the painted bounds of long unbroken,
 Chinese and wrapped Mermaid labels in both GitHub appearances. The DOCX browser
@@ -889,6 +893,19 @@ UI Automation or accessibility check needs `--force-renderer-accessibility`,
 record that launch separately; its renderer load and timings are not equivalent
 to a normal launch. Preserve failures in either environment rather than treating
 a passing contrast as proof of accessibility performance.
+
+`bun scripts/test-preview-code-accessibility.ts` launches the production Webview
+with `--force-renderer-accessibility` and the VS Code screen-reader body class.
+It verifies 18,000 complete source rows, a bounded markup budget, actual offscreen
+accessibility-tree text, decorative number exclusion, copy, search, wrapping and
+runtime reader changes. Readiness requires the completed, visible, interactive
+iframe; an early cleared status label is insufficient. Warm switching starts
+after the first visible syntax band has settled. Cold/warm safety budgets are
+5/3 seconds; the node budget independently rejects the known unbounded path.
+`--normal-launch` runs the same reader scenario without the launch switch as a
+separate contrast. These checks cover Chromium's accessibility representation;
+installed VS Code and real screen-reader speech/navigation still need native
+acceptance. They do not establish whether the historical failure was a regression.
 
 Resolve the active content iframe through its browser-protocol frame owner and
 check its actual ID, CSS visibility and nonzero size. Older supported VS Code

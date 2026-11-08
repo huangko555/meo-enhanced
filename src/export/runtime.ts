@@ -142,6 +142,7 @@ export function preparePreviewDocument(options: PreviewDocumentOptions, windowed
     deferImages: true,
     deferDisplayMath: assessLargeDocument(options.markdownText).windowedPreview,
     windowedPresentation: windowed,
+    deferCodeHighlight: true,
     deferLocalLinks: true,
     allowLocalLinks: true,
     preset,
@@ -152,9 +153,9 @@ export function preparePreviewDocument(options: PreviewDocumentOptions, windowed
     ...(definition.custom ? { presetRevision: definition.custom.revision } : {}),
     styles: {
       dark: buildPresetPreviewStyles(preset, environment, 'dark', options.contentWidth, definition)
-        + (windowed ? windowedPreviewStyles : '') + (options.layout === 'side' ? sourceFootnoteStyles : '') + prepared.authorStyles,
+        + previewCodeStyles + (windowed ? windowedPreviewStyles : '') + (options.layout === 'side' ? sourceFootnoteStyles : '') + prepared.authorStyles,
       light: buildPresetPreviewStyles(preset, environment, 'light', options.contentWidth, definition)
-        + (windowed ? windowedPreviewStyles : '') + (options.layout === 'side' ? sourceFootnoteStyles : '') + prepared.authorStyles
+        + previewCodeStyles + (windowed ? windowedPreviewStyles : '') + (options.layout === 'side' ? sourceFootnoteStyles : '') + prepared.authorStyles
     }
   };
   return {
@@ -171,6 +172,27 @@ export function preparePreviewDocument(options: PreviewDocumentOptions, windowed
     }
   };
 }
+
+// Full-document accessibility still mounts every code row. One source element
+// per row avoids two decorative DOM nodes and a grid layout for every line.
+// The empty CSS alternative text keeps generated numbers out of the AX tree.
+const previewCodeStyles = `
+.meo-export-code-line.meo-preview-code-line {
+  display: block;
+  position: relative;
+  padding-left: calc(var(--meo-preview-code-digits) * 1ch + 1.25ch);
+}
+.meo-preview-code-line::before {
+  content: attr(data-line-number) / "";
+  position: absolute;
+  left: 0;
+  width: calc(var(--meo-preview-code-digits) * 1ch);
+  color: var(--meo-muted);
+  text-align: right;
+  white-space: nowrap;
+  user-select: none;
+}
+`;
 
 const sourceFootnoteStyles = `
 .meo-export-doc section.footnotes.meo-preview-source-footnote{margin:1em 0;padding:.5em 0;border-top:0}

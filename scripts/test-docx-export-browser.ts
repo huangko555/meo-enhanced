@@ -65,7 +65,8 @@ async function checkHtmlVisibility(): Promise<void> {
     '<p style="color:#1230">hidden-short-alpha</p>', '', '<p style="color:rgba(0,0,0,0)">hidden-rgba</p>', '',
     '<p style="font-size:0">hidden-zero<span style="font-size:16px">visible-sized</span></p>', '',
     '<details><summary>closed-summary</summary><p>hidden-closed</p></details>', '',
-    '<p>Visible black text, <span style="color:red">visible-red</span> and <span style="color:green">visible-green</span>.</p>'
+    '<p>Visible black text, <span style="color:red">visible-red</span> and <span style="color:green">visible-green</span>.</p>', '',
+    '<div style="white-space:pre-wrap">  Materialized  spaces\n  Next  line <b> bold  text </b></div>'
   ].join('\n');
   const rendered = await exportRuntime.renderExportHtmlDocument({
     readingSnapshot: { snapshotId: 'docx-html-visibility', text, appearance: 'light', uiLanguage: 'en',
@@ -87,6 +88,10 @@ async function checkHtmlVisibility(): Promise<void> {
   for (const visible of ['visible-override', 'visible-colored', 'visible-sized', 'closed-summary', 'Visible black text', 'visible-red', 'visible-green']) {
     assert.ok(xml.includes(visible), `Visible HTML text must remain: ${visible}`);
   }
+  assert.match(xml, /<w:t\b[^>]*>  Materialized  spaces<\/w:t>/,
+    'browser materialization must retain consecutive and leading spaces for Word');
+  assert.match(xml, /<w:t\b[^>]*>  Next  line <\/w:t>[^]*<w:t\b[^>]*> bold  text <\/w:t>/,
+    'materialized Word text must retain indentation and spaces across styled runs');
   assert.equal(Object.keys(archive.files).filter(name => name.startsWith('word/media/')).length, 0,
     'hidden HTML images must not be embedded in Word');
   console.log('DOCX HTML visibility and visible-child overrides passed.');

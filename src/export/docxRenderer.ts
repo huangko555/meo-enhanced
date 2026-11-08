@@ -1,9 +1,10 @@
 import * as fs from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { DomUtils, parseDocument } from 'htmlparser2';
-import { Element, Text, type ChildNode } from 'domhandler';
+import { Comment, Element, Text, type ChildNode } from 'domhandler';
 import JSZip from 'jszip';
 import type { UiLanguage } from '../foundation/uiLanguage';
+import { inspectHtmlStyle } from '../shared/htmlStyle';
 import { materializeDocxBodyFromHtmlExport } from './pdfRenderer';
 
 export type WriteDocxExportOptions = {
@@ -121,20 +122,29 @@ function replaceExportRoot(originalHtml: string, replacementRootHtml: string): s
 
 function normalizeHtmlFragments(root: Element): void {
   const inlineAliases = new Set(['abbr', 'kbd', 'small', 'q', 'ruby', 'rt', 'rp']);
-  const visit = (element: Element, preserveWhitespace = false): void => {
+  const visit = (element: Element, inheritedWhitespace = 'normal'): void => {
     if (classNames(element).includes('meo-export-code-block')) return;
-    const whitespace = /(?:^|;)\s*white-space\s*:\s*([\w-]+)/i.exec(element.attribs.style ?? '')?.[1]?.toLowerCase();
-    const preserve = whitespace ? /^(?:pre|pre-wrap|pre-line|break-spaces)$/.test(whitespace)
-      : element.name === 'pre' || preserveWhitespace;
+    const declaredWhitespace = inspectHtmlStyle(element.attribs.style ?? '').properties['white-space']?.toLowerCase();
+    const whitespace = declaredWhitespace === 'inherit' || declaredWhitespace === 'unset' ? inheritedWhitespace
+      : declaredWhitespace === 'initial' ? 'normal'
+      : declaredWhitespace ?? (element.name === 'pre' ? 'pre' : inheritedWhitespace);
+    const preserve = /^(?:pre|pre-wrap|pre-line|break-spaces)$/.test(whitespace);
+    const preserveSpaces = /^(?:pre|pre-wrap|break-spaces)$/.test(whitespace);
     for (const child of [...element.children]) {
-      if (isElement(child)) visit(child, preserve);
-      else if (child.type === 'text' && preserve && child.data.includes('\n')) {
-        const parts = child.data.split(/\r?\n/);
+      if (isElement(child)) visit(child, whitespace);
+      else if (child.type === 'text' && preserve) {
+        const parts = child.data.split(/\r\n?|\n/);
         child.data = parts[0];
         let previous: ChildNode = child;
         for (const part of parts.slice(1)) {
           const br = new Element('br', {}), text = new Text(part);
           DomUtils.append(previous, br); DomUtils.append(br, text); previous = text;
+        }
+        if (preserveSpaces) {
+          // The converter minifies HTML without resolving CSS white-space. Its
+          // ignore directives retain ordinary spaces, including at inline boundaries.
+          DomUtils.prepend(child, new Comment(' htmlmin:ignore '));
+          DomUtils.append(previous, new Comment(' htmlmin:ignore '));
         }
       }
     }
