@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import exportRuntime from '../src/export/runtime';
+import { assessLargeDocument } from '../src/foundation/largeDocument';
+import { createPreviewDocument } from '../src/export/previewDocument';
+import type { PreviewDocumentOperation } from '../src/foundation/previewDocument';
 import { closeTestBrowser, launchTestBrowser } from './browser-test-helpers';
 
 const build = await Bun.build({ entrypoints: ['scripts/test-preview-code-update-entry.ts'], target: 'browser', format: 'iife' });
@@ -18,6 +21,7 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => {
 } });
 const origin = `http://127.0.0.1:${server.port}`;
 const browser = await launchTestBrowser();
+const documents = new Map<string, ReturnType<typeof createPreviewDocument>>();
 let primaryError: unknown;
 try {
   await browser.defaultBrowserContext().overridePermissions(origin, ['clipboard-read', 'clipboard-write', 'clipboard-sanitized-write']);
@@ -30,22 +34,43 @@ try {
   await page.evaluate(href => { document.body.dataset.meoKatexSrc = href; }, origin + '/katex-embedded.css');
   await page.addScriptTag({ path: 'node_modules/mermaid/dist/mermaid.min.js' });
   await page.addScriptTag({ content: script });
+  await page.exposeFunction('__runActionPreviewDocument', async (message: {
+    requestId: string; documentId: string; operation: PreviewDocumentOperation;
+  }) => ({ type: 'previewDocumentResult', requestId: message.requestId, documentId: message.documentId,
+    result: { ok: true, value: await documents.get(message.documentId)!.run(message.operation) } }));
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__previewHostMessage = (message: any) => {
+      if (message.type === 'requestPreviewDocument') void scope.__runActionPreviewDocument(message)
+        .then((response: any) => scope.__previewController.acceptDocumentResponse(response));
+    };
+    const write = navigator.clipboard.write.bind(navigator.clipboard);
+    (window as any).__imageClipboardWrites = 0;
+    Object.defineProperty(navigator.clipboard, 'write', { configurable: true, value: (...args: Parameters<typeof write>) => {
+      (window as any).__imageClipboardWrites++;
+      return write(...args);
+    } });
+  });
   const diagram = 'flowchart LR\nA[中文节点] --> B[Complete diagram]';
   const formula = String.raw`\begin{pmatrix} a & b \\ c & d \end{pmatrix} + \frac{x^2}{\sqrt{y}} + \text{中文}`;
   const aliases = ['math', 'latex', 'tex', 'katex'];
   const markdown = ['# Rendered actions', 'Inline $a^2$ stays unchanged.', '```mermaid\n' + diagram + '\n```',
     '$$\n' + formula + '\n$$', ...aliases.map(alias => '```' + alias + '\nx^2 + \\frac{1}{y}\n```'),
     '```latex\n\\invalidcommand{\n```', '```ts\nconst x = 1;\n```', ...Array.from({ length: 12 }, (_, index) => `Paragraph ${index}.`)].join('\n\n');
-  const render = async (text: string, language: 'en' | 'zh-CN', appearance: 'light' | 'dark') => {
-    const value = exportRuntime.renderPreviewDocument({ markdownText: text, sourceDocumentPath: 'C:/rendered-actions.md', uiLanguage: language });
-    await page.evaluate(({ text, language, appearance, value }) => {
+  const render = async (text: string, language: 'en' | 'zh-CN', appearance: 'light' | 'dark', preserveFrame = false) => {
+    const options = { markdownText: text, latexDelimiters: true, sourceDocumentPath: 'C:/rendered-actions.md', uiLanguage: language };
+    const id = `actions-${documents.size}`;
+    const parsed = assessLargeDocument(text).windowedPreview ? createPreviewDocument(id, options) : undefined;
+    if (parsed) documents.set(id, parsed);
+    const value = parsed ? parsed.open(1) : exportRuntime.renderPreviewDocument(options);
+    await page.evaluate(({ text, language, appearance, value, preserveFrame }) => {
       const scope = window as any;
       const controller = scope.__previewController;
       controller.setUiLanguage(language); controller.setAppearance(appearance); controller.setVisible(true);
-      void controller.requestRender(text, { preserveViewport: true });
+      void controller.requestRender(text, { preserveViewport: true, preserveFrame });
       const message = scope.__previewMessages.filter((item: any) => item.type === 'requestPreviewRender').at(-1);
       controller.acceptRenderResponse({ type: 'previewRenderResult', requestId: message.requestId, result: { ok: true, value } });
-    }, { text, language, appearance, value });
+    }, { text, language, appearance, value, preserveFrame });
     await page.waitForFunction(() => {
       const doc = document.querySelector<HTMLIFrameElement>('iframe')?.contentDocument;
       return doc?.querySelector('.meo-export-mermaid.is-rendered svg')
@@ -91,6 +116,48 @@ try {
     fs.writeFileSync(path.join(output, filename + '.png'), Buffer.from(result.data, 'base64'));
     return result;
   };
+  for (const large of [false, true]) for (const appearance of ['light', 'dark'] as const) {
+    const language = appearance === 'light' ? 'en' : 'zh-CN';
+    const initial = '# Formula update\n\n\\[\n\\int \\!\\!\\! \\int \\!\\!\\! \\int_V46666\n\\]\n\n'
+      + '```mermaid\n' + diagram + '\n```\n\n'
+      + (large ? 'Ordinary paragraph.\n\n'.repeat(4_100) : 'After the formula.');
+    assert.equal(assessLargeDocument(initial).windowedPreview, large);
+    await render(initial, language, appearance);
+    await page.evaluate(() => {
+      const scope = window as any;
+      const doc = document.querySelector<HTMLIFrameElement>('iframe')!.contentDocument!;
+      scope.__formulaRoot = doc.querySelector('.meo-export-math-display');
+    });
+    await render(initial.replace('46666', '46667'), language, appearance, true);
+    const before = await page.evaluate(() => {
+      const scope = window as any;
+      const doc = document.querySelector<HTMLIFrameElement>('iframe')!.contentDocument!;
+      const root = doc.querySelector('.meo-export-math-display')!;
+      return { html: root.querySelector('.katex-display')!.innerHTML, writes: scope.__imageClipboardWrites,
+        retainedRoot: root === scope.__formulaRoot,
+        large: doc.documentElement.dataset.meoPreviewLargeDocument === 'true',
+        windowed: doc.documentElement.dataset.meoPreviewWindowed === 'true',
+        requestedWindow: !!scope.__previewMessages.filter((message: any) => message.type === 'requestPreviewRender').at(-1).window,
+        mounted: doc.querySelectorAll('[data-meo-preview-block]').length };
+    });
+    assert.equal(before.retainedRoot, true, 'The regression must exercise an incrementally updated formula root');
+    assert.equal(before.large, large);
+    assert.equal(before.windowed, large, 'The large fixture must use the actual windowed Preview path');
+    assert.equal(before.requestedWindow, large, 'The controller must request its production size policy');
+    if (large) assert.ok(before.mounted > 0 && before.mounted < 100, 'Windowed formulas keep mounted work bounded');
+    await frame().click('.meo-export-math-display .katex-html');
+    const after = await page.evaluate(() => {
+      const doc = document.querySelector<HTMLIFrameElement>('iframe')!.contentDocument!;
+      const root = doc.querySelector('.meo-export-math-display')!;
+      return { html: root.querySelector('.katex-display')!.innerHTML, writes: (window as any).__imageClipboardWrites,
+        statusInFormula: !!root.querySelector('.katex-display .meo-preview-action-status') };
+    });
+    assert.equal(after.html, before.html, 'Clicking an updated formula must preserve its rendered content');
+    assert.equal(after.writes, before.writes, 'Formula text must never inherit a copy button listener');
+    assert.equal(after.statusInFormula, false);
+    await copyImage('.meo-export-math-display', `${appearance}-${large ? 'windowed' : 'ordinary'}-updated-math`);
+    await page.screenshot({ path: path.join(output, `${appearance}-${large ? 'windowed' : 'ordinary'}-updated-formula.png`) });
+  }
   for (const appearance of ['light', 'dark'] as const) {
     for (const language of ['en', 'zh-CN'] as const) {
       await render(markdown, language, appearance);
@@ -145,6 +212,7 @@ try {
   console.log('Preview rendered actions: native PNG clipboard, formulas, ordering, fullscreen lifecycle and bilingual light/dark checks passed');
 } catch (error) { primaryError = error; }
 finally {
+  for (const parsed of documents.values()) parsed.dispose();
   server.stop(true);
   if (primaryError === undefined) await closeTestBrowser(browser);
   else await closeTestBrowser(browser, primaryError);

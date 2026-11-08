@@ -1670,6 +1670,14 @@ browser-protocol key synthesis does not establish this OS boundary.
 
 ## Document-scale coverage
 
+`scripts/test-preview-rendered-actions.ts` updates a LaTeX-delimited formula in
+the retained Preview document, then clicks its rendered text. Ordinary and
+actually windowed light/dark fixtures require unchanged formula HTML and no
+clipboard write from that click, bounded mounted blocks, and working PNG copy
+through the separate control. This catches action nodes being reused as formula
+text while retaining their old event listeners. The contract belongs to
+`test:browser` and the rendered targeted plan.
+
 After changes to packaged syntax engines or Webview resource loading, run
 `scripts/test-vscode-resource-loading.ps1 -CodePath <Code.exe>` against the
 production build. Its disposable native profile checks real VS Code resource

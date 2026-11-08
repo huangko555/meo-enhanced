@@ -364,6 +364,8 @@ function morphPreviewMain(
   const updates: PreviewCodeBlockUpdate[] = pendingCodeBlocks ? [...pendingCodeBlocks] : [];
   let presentationKeys = new WeakMap<Node, string>();
   let sourceKeys = new WeakMap<Node, string>();
+  const actionKeys = new WeakMap<Node, string>();
+  let nextActionKey = 0;
   if (!pendingCodeBlocks) {
     const nextMain = frameDocument.createElement('main');
     nextMain.className = 'meo-export-doc';
@@ -416,6 +418,16 @@ function morphPreviewMain(
         if (overlay) return overlay;
         const presentation = presentationKeys.get(node);
         if (presentation) return presentation;
+        if (element.classList.contains('meo-preview-code-actions')) {
+          // Controls carry listeners and must never become rendered content.
+          // Reuse them only when their direct block has a proven identity pair.
+          const owner = element.parentElement;
+          const ownerKey = owner && (presentationKeys.get(owner) ?? sourceKeys.get(owner));
+          const key = ownerKey ? `preview-actions:${ownerKey}`
+            : actionKeys.get(node) ?? `preview-actions:unmatched:${nextActionKey += 1}`;
+          actionKeys.set(node, key);
+          return key;
+        }
         if (element.id) return element.id;
         const source = sourceKeys.get(node);
         if (source) return source;
