@@ -1,5 +1,5 @@
 import { type HighlightStyle, syntaxTree } from '@codemirror/language';
-import { RangeSetBuilder, type Extension, type Text } from '@codemirror/state';
+import { RangeSetBuilder, type Extension, type StateField, type Text } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view';
 import { MountedTree, NodeProp, Tree } from '@lezer/common';
 import { highlightTree } from '@lezer/highlight';
@@ -47,8 +47,14 @@ export function syntaxHighlightWindow(tree: Tree, from: number, to: number): Tre
 }
 
 /** A palette owned by this surface, using the public Lezer highlighter and
- * CodeMirror's actual visible ranges. Small documents keep the stock extension. */
-export function viewportSyntaxHighlighting(style: HighlightStyle): Extension {
+ * CodeMirror's actual visible ranges. Small documents keep the stock extension.
+ * An accepted presentation field can already own or hide token ink; exclude
+ * those named marks using the current state, including source-reveal changes. */
+export function viewportSyntaxHighlighting(style: HighlightStyle, unhighlighted?: {
+  readonly field: StateField<DecorationSet>;
+  readonly classes: readonly string[];
+}): Extension {
+  const excludedClasses = new Set(unhighlighted?.classes);
   return [style.module ? EditorView.styleModule.of(style.module) : [], ViewPlugin.fromClass(class {
     decorations: DecorationSet;
     private tree: Tree;
@@ -59,9 +65,12 @@ export function viewportSyntaxHighlighting(style: HighlightStyle): Extension {
     private deferred = false;
     private destroyed = false;
     private repaintQueued = false;
+    private excluded: DecorationSet | undefined;
+    private publishedEmpty = false;
 
     constructor(view: EditorView) {
       this.tree = syntaxTree(view.state);
+      this.excluded = unhighlighted && view.state.field(unhighlighted.field, false);
       this.decorations = this.build(view);
       this.decoratedTo = view.viewport.to;
       this.measureBand(view);
@@ -69,6 +78,9 @@ export function viewportSyntaxHighlighting(style: HighlightStyle): Extension {
 
     update(update: ViewUpdate) {
       const tree = syntaxTree(update.state);
+      const excluded = unhighlighted && update.state.field(unhighlighted.field, false);
+      const exclusionsChanged = excluded !== this.excluded;
+      this.excluded = excluded;
       const to = update.changes.mapPos(this.decoratedTo, 1);
       const placeholder = tree.type.isAnonymous && !tree.type.isTop;
       if (this.band && update.docChanged) this.band = { doc: update.state.doc,
@@ -81,7 +93,7 @@ export function viewportSyntaxHighlighting(style: HighlightStyle): Extension {
         || tree.length < update.view.viewport.to && tree.type === this.tree.type && to >= update.view.viewport.to) {
         this.decorations = this.decorations.map(update.changes);
         this.decoratedTo = to;
-      } else if (tree !== this.tree || update.viewportChanged || this.deferred || this.bandDirty) {
+      } else if (tree !== this.tree || update.viewportChanged || this.deferred || this.bandDirty || exclusionsChanged) {
         this.tree = tree;
         this.decorations = this.build(update.view);
         this.decoratedTo = update.view.viewport.to;
@@ -115,9 +127,15 @@ export function viewportSyntaxHighlighting(style: HighlightStyle): Extension {
             if (this.destroyed || this.band?.doc !== view.state.doc || !this.bandDirty) return;
             if (isLiveInputDerivedWorkPending(view.state) || view.composing) { this.deferred = true; return; }
             this.tree = syntaxTree(view.state);
-            this.decorations = this.build(view);
+            const decorations = this.build(view);
             this.decoratedTo = view.viewport.to;
             this.deferred = this.bandDirty = false;
+            // With all token ink owned by Live, moving this reading band has
+            // no palette to publish. Keep nonempty palettes on the normal
+            // CodeMirror update path, including their layout/viewport handoff.
+            const unchanged = unhighlighted && this.publishedEmpty && decorations.size === 0;
+            this.decorations = decorations;
+            if (unchanged) return;
             view.update([]);
           });
         }
@@ -125,6 +143,7 @@ export function viewportSyntaxHighlighting(style: HighlightStyle): Extension {
     }
 
     onScroll(_event: Event, view: EditorView) { this.measureBand(view); }
+    readDecorations() { this.publishedEmpty = this.decorations.size === 0; return this.decorations; }
     destroy() { this.destroyed = true; }
 
     private build(view: EditorView): DecorationSet {
@@ -133,14 +152,34 @@ export function viewportSyntaxHighlighting(style: HighlightStyle): Extension {
         const from = Math.max(range.from, this.band?.from ?? range.from);
         const to = Math.min(range.to, this.band?.to ?? range.to);
         if (from >= to) continue;
-        highlightTree(syntaxHighlightWindow(this.tree, from, to), style, (start, end, classes) => {
+        const excluded: Array<{ from: number; to: number }> = [];
+        this.excluded?.between(from, to, (start, end, decoration) => {
+          if (start < end && decoration.spec.class?.split(/\s+/).some((name: string) => excludedClasses.has(name))) {
+            excluded.push({ from: Math.max(from, start), to: Math.min(to, end) });
+          }
+        });
+        excluded.sort((a, b) => a.from - b.from || a.to - b.to);
+        let cursor = 0;
+        const add = (start: number, end: number, classes: string) => {
+          if (start >= end) return;
           let mark = this.marks.get(classes);
           if (!mark) { mark = Decoration.mark({ class: classes }); this.marks.set(classes, mark); }
           builder.add(start, end, mark);
+        };
+        highlightTree(syntaxHighlightWindow(this.tree, from, to), style, (start, end, classes) => {
+          while (cursor < excluded.length && excluded[cursor]!.to <= start) cursor++;
+          let position = start;
+          for (let index = cursor; index < excluded.length && excluded[index]!.from < end; index++) {
+            const hidden = excluded[index]!;
+            add(position, Math.min(end, hidden.from), classes);
+            position = Math.max(position, hidden.to);
+            if (position >= end) break;
+          }
+          add(position, end, classes);
         }, from, to);
       }
       return builder.finish();
     }
-  }, { decorations: plugin => plugin.decorations,
+  }, { decorations: plugin => plugin.readDecorations(),
     eventObservers: { scroll(event, view) { this.onScroll(event, view); } } })];
 }

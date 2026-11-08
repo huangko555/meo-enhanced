@@ -778,6 +778,12 @@ function createSanitizedHtml(
   const template = document.createElement('template');
   template.innerHTML = rendered;
   sanitizeElementTree(template.content);
+  // Color inheritance depends on authored HTML, not the virtual editor's
+  // changing inline styles. A [style] ancestor selector invalidates the entire
+  // reading viewport whenever CodeMirror adjusts its virtual padding.
+  for (const element of template.content.querySelectorAll('[style], [data-meo-html-styled]')) {
+    element.toggleAttribute('data-meo-html-styled', element.hasAttribute('style'));
+  }
   rememberHtmlNativeContent(template.content);
   annotateHtmlSourceLines(template.content, masked.source, sourceStartLine);
   if (view && masked.comments.length) {

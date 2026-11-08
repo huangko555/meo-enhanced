@@ -135,11 +135,6 @@
       "command": "bun scripts/test-live-gutter-read-budget.ts",
       "reason": "Production Live caret movement with a ready Git baseline must not enumerate every source line in an unchanged large document."
     },
-    "scripts/test-viewport-syntax-highlighting.ts": {
-      "kind": "targeted",
-      "command": "bun scripts/test-viewport-syntax-highlighting.ts",
-      "reason": "Exact mixed-language and ancestor-style parity; actual Editor limits palette DOM to the physical viewport while retaining overscan, handles intra-buffer scrolling, deferred input, resize, modes and disposal."
-    },
     "scripts/test-table-source-geometry.ts": {
       "kind": "targeted",
       "command": "bun scripts/test-table-source-geometry.ts",
@@ -598,6 +593,7 @@
       "scripts/test-kbd-appearance.ts",
       "scripts/test-large-document-adaptation.ts",
       "scripts/test-large-document-work-budget.ts",
+      "scripts/test-scroll-style-budget.ts",
       "scripts/test-large-table-gutter-budget.ts",
       "scripts/test-large-table-row-window.ts",
       "scripts/test-line-number-layout-contract.ts",

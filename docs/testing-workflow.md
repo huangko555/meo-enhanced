@@ -2507,6 +2507,26 @@ bottlenecks and recheck adjacent behavior so work is not merely moved to the
 next interaction. Preserve deterministic regression tests for excess work or
 incorrect scheduling; do not turn noisy millisecond samples into CI assertions.
 
+`bun scripts/test-scroll-style-budget.ts` drives trusted continuous wheel input
+in Live, Source, Source + Preview and Preview with ordinary and actually optimized
+large documents. It then brackets virtual-padding style mutations in a Chromium
+trace and checks the number of restyled elements, excluding unrelated frames and
+background tasks. Inline virtual-scroll geometry must not invalidate the whole
+reading subtree through authored HTML color selectors. It belongs to
+`test:large-document-budget`; `--capture` also saves viewport screenshots under
+`.local/scroll-style-budget/`. This bounded work check does not certify native
+wheel-to-paint latency or whole-document scroll integrity. Authored HTML colors,
+nested strong, links and headings remain covered by `test-html-styles-browser.ts`.
+
+`bun scripts/test-viewport-syntax-highlighting.ts` also belongs to
+`test:large-document-budget`. Besides exact mixed-language colors and the existing
+physical viewport budget, it checks that accepted Live markers and link labels do
+not allocate a duplicate syntax layer. Fine trusted wheels through an empty Live
+palette must not submit palette-only view updates. Entering a link restores URL
+colors from the current presentation even without a new parse; real typing,
+Undo/Redo and Source/Live roundtrips retain text, focus and caret. Palette work
+outside the physical band keeps its original budget.
+
 ## Auto-save verification
 
 Auto-save concurrency is part of `bun run test:quick` and the broad regression. The focused save checks are:

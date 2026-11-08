@@ -69,7 +69,8 @@ const build = await Bun.build({ entrypoints: ['scripts/test-live-decoration-hist
       const source = await Bun.file(path).text(), marker = '    private build(view: EditorView): DecorationSet {';
       assert.equal(source.split(marker).length, 2);
       return { loader: 'ts', contents: source.replace(marker, marker
-        + '\n      (globalThis as any).__paletteBuilds = ((globalThis as any).__paletteBuilds ?? 0) + 1;') };
+        + '\n      (globalThis as any).__paletteBuilds = ((globalThis as any).__paletteBuilds ?? 0) + 1;')
+        .replace('            view.update([]);', '            (globalThis as any).__paletteCommits = ((globalThis as any).__paletteCommits ?? 0) + 1; view.update([]);') };
     });
   } }] });
 assert.ok(build.success, build.logs.map(String).join('\n'));
@@ -82,8 +83,18 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
 } });
 const browser = await launchTestBrowser().catch(error => { server.stop(true); throw error; });
 let primaryError: unknown;
+let phase = 'source palette';
+let diagnose: (() => Promise<unknown>) | undefined;
 try {
   const page = await browser.newPage(); await page.setViewport({ width: 920, height: 380 });
+  diagnose = () => page.evaluate(() => {
+    const editor = (window as any).__paletteEditor;
+    if (!editor) return null;
+    const actual = editor.getText(), original = (window as any).__paletteSource;
+    let first = 0; while (first < actual.length && actual[first] === original[first]) first++;
+    return { position: editor.view.state.selection.main.head, focused: editor.hasFocus(),
+      history: editor.getHistoryDepth(), firstDifference: first, fragment: actual.slice(Math.max(0, first - 20), first + 40) };
+  });
   const errors: string[] = []; page.on('pageerror', error => errors.push(String(error)));
   await page.goto(server.url.href);
   assert.deepEqual(errors, [], 'the production Editor fixture must load');
@@ -136,9 +147,94 @@ try {
   assert.ok(exact, 'palette work must preserve exact text across mode reconfiguration');
   await verifyBand();
   await page.evaluate(() => (window as any).__paletteEditor.destroy()); await settle();
+  phase = 'Live palette';
+  await page.evaluate(() => {
+    const scope = window as any;
+    scope.__paletteSource = '# Reading heading\n\nParagraph **strong** and [link](https://example.test/path) with `code`.\n\n'.repeat(1_200);
+    scope.__paletteEditor = scope.__liveHistory.create({ parent: document.getElementById('app'), text: scope.__paletteSource, initialMode: 'live' });
+    scope.__liveHistory.parse(scope.__paletteEditor);
+    scope.__paletteEditor.scrollToLine(400, 'center');
+  });
+  await settle();
+  const redundantPalette = await page.evaluate(() => {
+    const view = (window as any).__paletteEditor.view;
+    const owned = [...view.contentDOM.querySelectorAll<HTMLElement>('.meo-md-marker, .meo-md-code-marker, .meo-md-link-url-hidden, .meo-md-link')];
+    const isPalette = (element: Element) => [...element.classList].some(name => !name.startsWith('meo-') && !name.startsWith('cm-'));
+    return { owned: owned.length, redundant: owned.flatMap(element => [...element.querySelectorAll('span[class]')]).filter(isPalette).length };
+  });
+  assert.ok(redundantPalette.owned > 20, 'exercise actual Live-owned markers and link text');
+  assert.equal(redundantPalette.redundant, 0, 'hidden markers and Live-styled link text must not allocate redundant syntax spans');
+  const wheelPoint = await page.evaluate(() => {
+    (window as any).__paletteCommits = 0;
+    const view = (window as any).__paletteEditor.view;
+    const bounds = view.scrollDOM.getBoundingClientRect();
+    return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2, before: view.scrollDOM.scrollTop };
+  });
+  await page.mouse.move(wheelPoint.x, wheelPoint.y);
+  for (let step = 0; step < 12; step++) {
+    await page.mouse.wheel({ deltaY: 17 });
+    await page.evaluate(async () => { for (let frame = 0; frame < 2; frame++) await new Promise(requestAnimationFrame); });
+  }
+  await settle();
+  const unchangedPalette = await page.evaluate(() => ({ commits: (window as any).__paletteCommits,
+    top: (window as any).__paletteEditor.view.scrollDOM.scrollTop,
+    text: (window as any).__paletteEditor.getText() === (window as any).__paletteSource }));
+  assert.ok(unchangedPalette.top > wheelPoint.before + 100 && unchangedPalette.text, 'trusted fine scrolling must move the actual unchanged document');
+  assert.equal(unchangedPalette.commits, 0, 'scrolling an unchanged empty syntax palette must not submit redundant view updates');
+  const reveal = await page.evaluate(() => {
+    const editor = (window as any).__paletteEditor, view = editor.view;
+    const from = view.state.doc.toString().indexOf('https://example.test/path', view.viewport.from);
+    editor.scrollToLine(view.state.doc.lineAt(from).number, 'center');
+    view.dispatch({ selection: { anchor: from + 10 } });
+    return from;
+  });
+  await settle();
+  const revealed = await page.evaluate(from => {
+    const view = (window as any).__paletteEditor.view, dom = view.domAtPos(from).node;
+    const line = (dom instanceof Element ? dom : dom.parentElement)!.closest('.cm-line')!;
+    const spans = [...line.querySelectorAll('span[class]')].filter(element =>
+      [...element.classList].some(name => !name.startsWith('meo-') && !name.startsWith('cm-')));
+    return { hidden: !!line.querySelector('.meo-md-link-url-hidden'),
+      colored: spans.some(element => element.textContent?.includes('https://example.test/path')),
+      selection: view.state.selection.main.head, text: view.state.doc.toString() === (window as any).__paletteSource };
+  }, reveal);
+  assert.equal(revealed.hidden, false, 'entering a link reveals its native URL');
+  assert.ok(revealed.colored, 'revealed URL regains its original syntax palette without a new parse');
+  assert.equal(revealed.selection, reveal + 10);
+  assert.ok(revealed.text);
+  const beforeInput = await page.evaluate(() => {
+    const editor = (window as any).__paletteEditor; editor.focus();
+    return { text: editor.getText(), position: editor.view.state.selection.main.head };
+  });
+  phase = 'Live URL typing';
+  await page.keyboard.type('x');
+  const edited = beforeInput.text.slice(0, beforeInput.position) + 'x' + beforeInput.text.slice(beforeInput.position);
+  await page.waitForFunction(text => (window as any).__paletteEditor.getText() === text, {}, edited);
+  phase = 'Live URL undo';
+  await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control');
+  await page.waitForFunction(text => (window as any).__paletteEditor.getText() === text, {}, beforeInput.text);
+  phase = 'Live URL redo';
+  await page.keyboard.down('Control'); await page.keyboard.press('y'); await page.keyboard.up('Control');
+  await page.waitForFunction(text => (window as any).__paletteEditor.getText() === text, {}, edited);
+  await settle();
+  const finalInput = await page.evaluate(() => ({ focused: (window as any).__paletteEditor.hasFocus(),
+    position: (window as any).__paletteEditor.view.state.selection.main.head }));
+  assert.ok(finalInput.focused);
+  assert.equal(finalInput.position, beforeInput.position + 1, 'redo keeps the edited URL caret');
+  await page.evaluate(async () => {
+    const editor = (window as any).__paletteEditor;
+    await editor.setMode('source'); await editor.setMode('live');
+  });
+  assert.equal(await page.evaluate(() => (window as any).__paletteEditor.getText()), edited);
+  await page.evaluate(() => (window as any).__paletteEditor.destroy()); await settle();
   assert.deepEqual(errors, [], 'scrolling, input, resize, modes and disposal must not dispatch during a view update');
   console.log('Physical palette: visible colors, unchanged DOM overscan, intra-buffer scrolling, deferred input, resize, modes and disposal passed');
-} catch (error) { primaryError = error; throw error; }
+  console.log('Live palette: no redundant marker/link spans, no empty-band commits, revealed URL colors, typing, undo/redo and mode roundtrip passed');
+} catch (error) {
+  primaryError = error;
+  console.error(phase, diagnose ? await diagnose().catch(() => null) : null);
+  throw error;
+}
 finally {
   try { if (primaryError === undefined) await closeTestBrowser(browser); else await closeTestBrowser(browser, primaryError); }
   finally { server.stop(true); }

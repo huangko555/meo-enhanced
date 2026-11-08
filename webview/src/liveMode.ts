@@ -4980,7 +4980,13 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean; 
     ...mergeConflictSourceExtensions(),
     ...(options.largeDocument ? liveViewportPresentationExtensions() : []),
     options.language ?? editorMarkdownLanguage,
-    options.largeDocument ? viewportSyntaxHighlighting(liveHighlightStyle) : syntaxHighlighting(liveHighlightStyle),
+    options.largeDocument ? viewportSyntaxHighlighting(liveHighlightStyle, {
+      // Accepted Live presentation already hides markers and styles link text.
+      // Recoloring those ranges only creates nested spans and remounts controls
+      // when the physical palette band moves. Revealed source keeps its palette.
+      field: liveDecorationField,
+      classes: ['meo-md-marker', 'meo-md-code-marker', 'meo-md-link-url-hidden', 'meo-md-link']
+    }) : syntaxHighlighting(liveHighlightStyle),
     markdownTagField,
     livePointerSelectionActiveField,
     liveDocumentIdleField,

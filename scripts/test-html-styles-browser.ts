@@ -12,6 +12,16 @@ import { htmlCompatibilityFixture, htmlCompatibilityImage, htmlCompatibilityDoub
 const fixture = `Before witness.
 ${htmlCompatibilityFixture}
 
+<div id="strong-colors">
+<strong id="strong-default">Default strong</strong>
+<span id="strong-authored-context" style="color:rgb(12,90,140)"><strong id="strong-authored">Inherited authored ink</strong></span>
+<strong id="strong-own" style="color:rgb(140,30,80)">Own authored ink</strong>
+<span style="padding:1px"><strong id="strong-styled-context">Styled context</strong></span>
+<h3><strong id="strong-heading">Heading ink</strong></h3>
+<a href="https://example.test"><strong id="strong-link">Link ink</strong></a>
+<strong><strong id="strong-nested">Nested strong ink</strong></strong>
+</div>
+
 <section id="styled-box" style="border:3px solid #3b82f6;border-left:7px dashed #a855f7;border-radius:12px;padding:12px 16px;margin:8px auto;width:360px;max-width:95%;box-sizing:border-box;background:rgba(59,130,246,.12)">
 <p id="styled-type" style="font-family:'Example; Family',serif;font-size:18px;font-weight:450;line-height:1.6;letter-spacing:.5px;word-spacing:2px;text-indent:1em;text-transform:uppercase;text-decoration:underline wavy #3b82f6 2px;text-underline-offset:3px;overflow-wrap:anywhere;tab-size:4">Document formatting</p>
 <ul id="styled-list" style="list-style:square inside;padding-inline-start:20px"><li>First item</li><li>Second item</li></ul>
@@ -256,6 +266,27 @@ export async function checkHtmlStyleRendering(): Promise<void> {
           if (surface !== 'preview') assert.equal(await page.evaluate(() =>
             (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view.state.doc.toString()),text,
           `${label}: filtering must not modify the editor document`);
+          if (surface === 'live') {
+            const strongColors = await page.evaluate(() => {
+              const read = (id: string) => {
+                const element = document.getElementById(id)!;
+                return { color: getComputedStyle(element).color,
+                  parentColor: getComputedStyle(element.parentElement!).color };
+              };
+              const expected = document.createElement('span');
+              expected.style.color = 'color-mix(in srgb, currentColor 40%, #fff 60%)';
+              document.getElementById('strong-colors')!.append(expected);
+              const defaultDark = getComputedStyle(expected).color;
+              expected.remove();
+              return { own: read('strong-own'), authored: read('strong-authored'),
+                contexts: ['strong-styled-context', 'strong-heading', 'strong-link', 'strong-nested'].map(read),
+                plain: read('strong-default'), defaultDark };
+            });
+            assert.equal(strongColors.own.color, 'rgb(140, 30, 80)', label);
+            assert.equal(strongColors.authored.color, 'rgb(12, 90, 140)', label);
+            for (const context of strongColors.contexts) assert.equal(context.color, context.parentColor, label);
+            assert.equal(strongColors.plain.color, appearance === 'dark' ? strongColors.defaultDark : strongColors.plain.parentColor, label);
+          }
           if (!large) await page.screenshot({path:`.local/html-style-audit/${surface}-${appearance}.png`});
           // A prose edit uses the same production adapter; unchanged HTML DOM must survive it.
           if (surface !== 'preview') {
@@ -292,6 +323,21 @@ export async function checkHtmlStyleRendering(): Promise<void> {
               const node = doc?.getElementById('compat-structure');
               return node && doc!.defaultView!.getComputedStyle(node).display === 'block';
             },{},surface === 'live');
+            if (surface === 'live') for (const color of ['rgb(90, 30, 140)', '']) {
+              await page.evaluate(color => {
+                const view = (document.querySelector('.editor-host .cm-content') as any).cmTile.root.view;
+                const text = view.state.doc.toString(), id = text.indexOf('id="strong-authored-context"');
+                const from = text.lastIndexOf('<span', id), to = text.indexOf('>', id) + 1;
+                if (id < 0 || from < 0 || to <= from) throw new Error('Missing authored color context');
+                const insert = `<span id="strong-authored-context"${color ? ` style="color:${color}"` : ''}>`;
+                view.dispatch({changes:{from,to,insert},selection:{anchor:0},userEvent:'input.type'});
+              }, color);
+              await page.waitForFunction(color => {
+                const element = document.getElementById('strong-authored'), context = document.getElementById('strong-authored-context');
+                if (!element || !context || context.hasAttribute('data-meo-html-styled') !== Boolean(color)) return false;
+                return getComputedStyle(element).color === (color || getComputedStyle(document.getElementById('strong-default')!).color);
+              }, {}, color);
+            }
           }
           assert.deepEqual(errors,[],label);
           console.log(`PASS HTML styles ${label}: computed styles, empty paint, source preservation and unrelated DOM reuse`);
