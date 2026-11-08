@@ -555,11 +555,15 @@ whitespace, invalid input and late-result protection. Its trusted-wheel scenario
 places rendered HTML above the viewport and checks every frame of HTML and math
 expansion, preventing unrelated reading-anchor restoration from shifting earlier content.
 Word HTML acceptance uses `scripts/test-docx-export-runtime.ts` for inline text,
-figure captions and explicit pre-wrap line breaks, and
+figure captions, explicit line breaks and exact whitespace in `pre`, `pre-wrap`
+and `break-spaces`, including leading/trailing spaces, blank lines, inline runs,
+inheritance and overrides. Negative controls keep `normal`, `nowrap` and
+`pre-line` space collapsing, while Markdown source stays unchanged. Use
 `scripts/test-docx-export-browser.ts` for hidden attributes, CSS visibility,
-transparent/zero-size text, closed details and visible child overrides. Inspect
+transparent/zero-size text, closed details, visible child overrides and whitespace
+after browser materialization. Inspect
 the final Word document in Word as well: its HTML converter retains editable
-text but approximates browser typography, repeated spaces, ruby and custom list
+text but approximates browser typography, ruby and custom list
 numbering. Deliberately unclosed tags can still affect following HTML content.
 The preset browser owner also checks the painted bounds of long unbroken,
 Chinese and wrapped Mermaid labels in both GitHub appearances. The DOCX browser

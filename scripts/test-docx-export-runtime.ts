@@ -3,9 +3,36 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import JSZip from 'jszip';
+import { DomUtils, parseDocument } from 'htmlparser2';
 import exportRuntime from '../src/export/runtime';
 
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-docx-export-'));
+const whitespaceCases = [
+  { html: '<div style="white-space:pre-wrap">  First  preserved line\n  Second preserved line</div>',
+    marker: 'First preserved line', expected: '  First  preserved line\n  Second preserved line' },
+  { html: '<pre>  Preformatted  text\n  Indented  line</pre>',
+    marker: 'Preformatted text', expected: '  Preformatted  text\n  Indented  line' },
+  { html: '<p style="white-space:break-spaces">  Break  spaces  &#10;    &#10;  Last  line  </p>',
+    marker: 'Break spaces', expected: '  Break  spaces  \n    \n  Last  line  ' },
+  { html: '<div style="white-space:pre"><p>  Inherited  text <b> bold  text </b>  tail</p></div>',
+    marker: 'Inherited text', expected: '  Inherited  text  bold  text   tail' },
+  { html: '<p><span style="white-space:pre-wrap">  Inline  text</span></p>',
+    marker: 'Inline text', expected: '  Inline  text' },
+  { html: '<div style="white-space:pre-wrap"><p style="white-space:inherit">  Explicit  inheritance</p><p style="white-space:unset">  Unset  inheritance</p></div>',
+    marker: 'Explicit inheritance', expected: '  Explicit  inheritance' },
+  { html: '<p style="white-space:normal;white-space:pre-wrap">  Later  preservation</p>',
+    marker: 'Later preservation', expected: '  Later  preservation' },
+  { html: '<p style="white-space:pre-wrap">  Escaped  &amp; &lt;text&gt;&nbsp;end</p>',
+    marker: 'Escaped', expected: '  Escaped  & <text>\u00a0end' },
+  { html: '<p style="white-space:pre-line">  Preline  text\n  Collapsed  spaces</p>',
+    marker: 'Preline text', expected: 'Preline text\nCollapsed spaces' },
+  { html: '<div style="white-space:pre-wrap"><p style="white-space:normal">  Normal  override</p><p style="white-space:initial">  Initial  override</p></div>',
+    marker: 'Normal override', expected: 'Normal override' },
+  { html: '<p style="white-space:pre-wrap;white-space:normal">  Later  collapse</p>',
+    marker: 'Later collapse', expected: 'Later collapse' },
+  { html: '<p style="white-space:nowrap">  Nowrap  text</p>',
+    marker: 'Nowrap text', expected: 'Nowrap text' }
+];
 const markdown = [
   '---',
   'title: MEO Enhanced',
@@ -44,7 +71,7 @@ const markdown = [
   '',
   '<figure><figcaption>Figure caption</figcaption></figure>',
   '',
-  '<div style="white-space:pre-wrap">First preserved line\n  Second preserved line</div>',
+  ...whitespaceCases.flatMap(({ html }) => [html, '']),
   '',
   '![pixel](pixel.png)'
 ].join('\n');
@@ -91,7 +118,23 @@ const tableContaining = (xml: string, text: string): string => {
   return table!;
 };
 
+const paragraphText = (xml: string, text: string): string => DomUtils.findAll(
+  (element) => ['w:t', 'w:br', 'w:tab'].includes(element.name),
+  parseDocument(paragraphContaining(xml, text), { xmlMode: true }).children
+).map((element) => element.name === 'w:br' ? '\n'
+  : element.name === 'w:tab' ? '\t' : DomUtils.textContent(element)).join('');
+
+const assertWhitespace = (xml: string): void => {
+  for (const { marker, expected } of whitespaceCases) {
+    assert.equal(paragraphText(xml, marker), expected, `Word must follow authored whitespace semantics: ${marker}`);
+  }
+  assert.equal(paragraphText(xml, 'Unset inheritance'), '  Unset  inheritance');
+  assert.equal(paragraphText(xml, 'Initial override'), 'Initial override');
+  assert.doesNotMatch(xml, /htmlmin:ignore/, 'HTML whitespace protection must not leak into Word text');
+};
+
 try {
+  fs.writeFileSync(path.join(fixtureRoot, 'document.md'), markdown);
   fs.writeFileSync(
     path.join(fixtureRoot, 'pixel.png'),
     Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAFAgIACwB7WQAAAABJRU5ErkJggg==', 'base64')
@@ -147,6 +190,7 @@ try {
   }
   assert.match(paragraphContaining(coloredXml, 'First preserved line'), /<w:br\b[^>]*\/>[^]*Second preserved line/,
     'authored pre-wrap must retain explicit line breaks');
+  assertWhitespace(coloredXml);
   assert.doesNotMatch(coloredXml, /__MEO_EXPORT_READY__/, 'export runtime scripts must not leak into DOCX text');
   const coloredCodeParagraph = paragraphContaining(coloredXml, 'const answer = 42;');
   assert.match(coloredCodeParagraph, /<w:rFonts\b[^>]*w:ascii="Consolas"[^>]*w:hAnsi="Consolas"/, 'Word code must keep the Consolas override');
@@ -178,6 +222,9 @@ try {
     puppeteerRuntimeModulePath: ''
   });
   const plainXml = await readArchiveXml(plainPath, 'word/document.xml');
+  assertWhitespace(plainXml);
+  assert.equal(fs.readFileSync(path.join(fixtureRoot, 'document.md'), 'utf8'), markdown,
+    'Word export must leave the Markdown source unchanged');
   assert.doesNotMatch(plainXml, /Review comment for DOCX/, 'hidden Preview comments must stay out of DOCX');
   const plainStyles = await readArchiveXml(plainPath, 'word/styles.xml');
   assert.doesNotMatch(plainXml, /<w:instrText[^>]*>TOC/);
