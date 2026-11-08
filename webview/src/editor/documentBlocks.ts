@@ -9,6 +9,8 @@ export interface DocumentBlockInput {
   readonly camera?: { value?: { scale: number; x: number; y: number } };
 }
 export interface DocumentBlocksPort {
+  /** Immutable renderer-availability receipt; absent ports stay state-local. */
+  readonly revision?: object;
   supports(language: string): boolean;
   mount(container: HTMLElement, input: DocumentBlockInput): {
     update(input: DocumentBlockInput): void;

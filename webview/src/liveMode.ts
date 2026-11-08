@@ -3973,10 +3973,14 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
     || merged.some(range => range.from < band.from || range.to > band.to))) {
     const window = nextWindow ?? livePresentationWindow(state, tree);
     if (window) {
-      const ranges: Range<Decoration>[] = [];
-      for (const cursor = result.iter(); cursor.value; cursor.next()) ranges.push(cursor.value.range(cursor.from, cursor.to));
-      result = prepareLiveWidgetPositions(filterDecorationsOutsideMergeConflicts(state,
-        Decoration.set(window.project(ranges, decorations), true)), true);
+      const advanced = onlyWindow && previousWindow ? window.advance(result, previousWindow, decorations) : undefined;
+      if (advanced) result = prepareLiveWidgetPositions(filterDecorationsOutsideMergeConflicts(state, advanced), true);
+      else {
+        const ranges: Range<Decoration>[] = [];
+        for (const cursor = result.iter(); cursor.value; cursor.next()) ranges.push(cursor.value.range(cursor.from, cursor.to));
+        result = prepareLiveWidgetPositions(filterDecorationsOutsideMergeConflicts(state,
+          Decoration.set(window.project(ranges, decorations), true)), true);
+      }
     }
   }
   if (!changedBlockContext) localLiveSelectionUpdates.add(state);

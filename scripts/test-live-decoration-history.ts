@@ -38,6 +38,15 @@ const build = await Bun.build({ entrypoints: [path.join(root, 'scripts/test-live
         .replace(rangeBoundary, rangeBoundary + ' if ((globalThis as any).__windowBuildReads) (globalThis as any).__windowBuildReads.push(scope ? { ...scope } : null);') };
     });
     for (const [file, boundary, counter] of [
+      ['livePresentationWindow', 'function blockBounds(state: EditorState, block: LiveRenderedBlock): Bounds {', 'bounds'],
+      ['liveViewportPresentation', 'export function createLiveViewportPlaceholder(estimatedHeight: number, previous?: WidgetType, preview = false): WidgetType {', 'placeholders']
+    ]) builder.onLoad({ filter: new RegExp(`webview[\\\\/]src[\\\\/]helpers[\\\\/]${file}\\.ts$`) }, async ({ path }) => {
+      const source = await Bun.file(path).text();
+      assert.equal(source.split(boundary).length, 2);
+      return { loader: 'ts', contents: source.replace(boundary,
+        `${boundary} if ((globalThis as any).__windowIndexWork) (globalThis as any).__windowIndexWork.${counter}++;`) };
+    });
+    for (const [file, boundary, counter] of [
       ['liveRenderedBlocks', 'function discoverRenderedBlocks(state: EditorState, tree: Tree): DiscoveredBlock[] {', '__renderedDiscoveries'],
       ['math', 'export function renderLatexMathToHtml(content: string, mode: LatexMathMode): string | null {', '__mathFormats'],
       ['gitDiffGutter', 'function buildCoalescedDiffLineFlags(state: EditorState, baseline: BaselineSnapshot | null): (MarkerFlags | undefined)[] | null {', '__diffBuilds']
@@ -81,33 +90,40 @@ try {
   await page.addStyleTag({ path: path.join(root, 'webview/src/styles.css') });
   await page.addScriptTag({ path: path.join(directory, 'bundle.js') });
   await installGitDiffWorker(page);
-  await page.evaluate(async () => {
+  for (const sectionCount of [120, 1_200]) {
+  await page.evaluate(async sectionCount => {
     const scope = window as any, api = scope.__liveHistory;
-    const text = Array.from({ length: 1_200 }, (_, i) => `## Window ${i}\n\n${'A paragraph with **formatted text** and a [link](https://example.test). '.repeat(6)}\n\n`
+    const text = Array.from({ length: sectionCount }, (_, i) => `## Window ${i}\n\n${'A paragraph with **formatted text** and a [link](https://example.test). '.repeat(6)}\n\n`
       + (i % 8 === 0 ? '| A | B |\n| --- | --- |\n| cell | value |\n\n$$\nx^2 + 1\n$$\n\n' : '')).join('');
     const editor = scope.__windowEditor = api.create({ parent: document.getElementById('editor'), text, initialMode: 'source' });
     await editor.prepareLiveSyntax(() => true); await editor.setMode('live');
     if (!api.largeBudget(editor)) throw Error('Window overlap fixture must use the real bounded Live presentation');
     scope.__windowText = text;
-  });
+  }, sectionCount);
   const windowFrames = () => page.evaluate(async () => { for (let i = 0; i < 3; i++) await new Promise(requestAnimationFrame); });
   await windowFrames();
   const windowPoint = await page.$eval('.cm-scroller', element => { const r = element.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
   await page.mouse.move(windowPoint.x, windowPoint.y);
   let windowChanges = 0;
   const windowDirections = new Set<number>();
+  const maximumWindowWork = { bounds: 0, placeholders: 0 };
   for (const direction of [1, -1]) for (let index = 0; index < 18; index++) {
-    const before = await page.evaluate(() => { const scope = window as any; scope.__windowBuildReads = []; return scope.__liveHistory.presentationScope(scope.__windowEditor); });
+    const before = await page.evaluate(() => { const scope = window as any; scope.__windowBuildReads = []; scope.__windowIndexWork = { bounds: 0, placeholders: 0 }; return scope.__liveHistory.presentationScope(scope.__windowEditor); });
     await page.mouse.wheel({ deltaY: direction * 180 }); await windowFrames();
     const result = await page.evaluate(() => {
       const scope = window as any, api = scope.__liveHistory, editor = scope.__windowEditor;
-      const reads = scope.__windowBuildReads; delete scope.__windowBuildReads;
-      return { next: api.presentationScope(editor), reads, text: editor.getText() === scope.__windowText };
+      const reads = scope.__windowBuildReads, next = api.presentationScope(editor), indexWork = scope.__windowIndexWork;
+      delete scope.__windowBuildReads; delete scope.__windowIndexWork;
+      return { next, reads, indexWork, text: editor.getText() === scope.__windowText };
     });
     assert.equal(result.text, true);
     if (before.from === result.next.from && before.to === result.next.to) continue;
     windowChanges++;
     windowDirections.add(direction);
+    maximumWindowWork.bounds = Math.max(maximumWindowWork.bounds, result.indexWork.bounds);
+    maximumWindowWork.placeholders = Math.max(maximumWindowWork.placeholders, result.indexWork.placeholders);
+    assert.ok(result.indexWork.bounds < 100, `Reading must query the current index instead of re-indexing distant blocks (${result.indexWork.bounds} bounds)`);
+    assert.ok(result.indexWork.placeholders < 100, `Reading must preserve distant geometry instead of recreating ${result.indexWork.placeholders} placeholders`);
     for (const range of result.reads) {
       assert.ok(range, 'Reading window updates must not rebuild the full document');
       const overlap = Math.max(0, Math.min(before.to, range.to) - Math.max(before.from, range.from));
@@ -120,7 +136,8 @@ try {
   assert.ok(windowChanges >= 2, 'Trusted reading gestures must cross actual presentation windows');
   assert.deepEqual([...windowDirections].sort(), [-1, 1], 'Both forward and reverse gestures must change actual presentation windows');
   await page.evaluate(() => (window as any).__windowEditor.destroy());
-  console.log(`Live reading reuses semantic overlap through ${windowChanges} actual window changes`);
+  console.log(`Live reading (${sectionCount} sections): ${windowChanges} actual window changes, maximum indexed work ${JSON.stringify(maximumWindowWork)}`);
+  }
   const windowConstruction = await page.evaluate(async () => {
     const scope = window as any, api = scope.__liveHistory;
     const text = '# First reading window\n\n' + 'Visible prose.\n\n'.repeat(120)

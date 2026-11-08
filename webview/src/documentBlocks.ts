@@ -266,7 +266,7 @@ export function createDocumentBlocks(host: Host) {
       previewBlocks.set(block, { source: text, element: holder, dispose() { unregister(); rendered.dispose(); holder.remove(); block.classList.remove('meo-export-graph'); originals.forEach((child, i) => { child.style.display = displays[i]; }); } });
     }
   }
-  const port: DocumentBlocksPort = { supports: language => !!descriptor(language), mount };
+  const port: DocumentBlocksPort = { get revision() { return views; }, supports: language => !!descriptor(language), mount };
   return {
     port, refreshPreview,
     getDescriptors: () => views.filter(view => view.codeBlockLanguages?.length),

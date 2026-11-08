@@ -11,7 +11,7 @@ import { getTableSourceBounds } from './tables';
 import { collectRenderableHtmlBlocks, getHtmlEditingRange } from './htmlContent';
 import { markdownStructureIdentity } from '../editor/markdownStructure';
 import type { MarkdownBlockKind, MarkdownBlock, DiscoveredMarkdownBlock } from '../../../src/foundation/markdownDocumentContext';
-import { documentBlocksFacet } from '../editor/documentBlocks';
+import { documentBlocksFacet, type DocumentBlocksPort } from '../editor/documentBlocks';
 import { readCodeFenceSource } from './codeFenceSource';
 
 type LineFlagLike = {
@@ -36,6 +36,10 @@ export interface LiveCollapsedGitBlock {
 }
 
 const renderedBlockCache = new WeakMap<EditorState, { tree: any; blocks: LiveRenderedBlock[] }>();
+const renderedSourceCache = new WeakMap<EditorState['doc'], {
+  tree: Tree; source: DiscoveredMarkdownBlock[]; renderer: DocumentBlocksPort | undefined;
+  rendererRevision: object | undefined; htmlFrom: number | undefined; blocks: LiveRenderedBlock[];
+}>();
 type DiscoveredBlock = DiscoveredMarkdownBlock;
 // Discovery depends on text and the resolved parse. Selection and HTML editing
 // only filter that discovery; they must not invalidate its whole-document scans.
@@ -230,7 +234,7 @@ function selectionTouchesLineRange(state: EditorState, startLine: number, endLin
 export function getLiveRenderedBlocks(
   state: EditorState,
   options: { includeSelectedMath?: boolean; tree?: Tree } = {}
-): LiveRenderedBlock[] {
+): readonly LiveRenderedBlock[] {
   const tree = options.tree ?? resolvedSyntaxTree(state);
   const cached = renderedBlockCache.get(state);
   if (!options.includeSelectedMath && cached && markdownStructureIdentity(cached.tree) === markdownStructureIdentity(tree)) {
@@ -245,25 +249,38 @@ export function getLiveRenderedBlocks(
     discoveredBlockCache.set(state.doc, discovered);
   }
   const htmlEditingRange = getHtmlEditingRange(state);
-  const blocks = discovered.blocks.filter(({ block, htmlFrom }) => {
-    if (block.kind === 'html' && htmlEditingRange?.from === htmlFrom) return false;
-    return block.kind !== 'math' || options.includeSelectedMath
+  const renderers = state.facet(documentBlocksFacet), rendererRevision = renderers?.revision;
+  const sourceCached = renderedSourceCache.get(state.doc);
+  const structure = markdownStructureIdentity(tree);
+  let sourceBlocks: LiveRenderedBlock[];
+  if (sourceCached?.tree === structure && sourceCached.source === discovered.blocks
+    && sourceCached.renderer === renderers && sourceCached.rendererRevision === rendererRevision
+    && (!renderers || rendererRevision !== undefined)
+    && sourceCached.htmlFrom === htmlEditingRange?.from) sourceBlocks = sourceCached.blocks;
+  else {
+    sourceBlocks = discovered.blocks.filter(({ block, htmlFrom }) => block.kind !== 'html' || htmlEditingRange?.from !== htmlFrom)
+      .map(({ block }) => ({ ...block }));
+    if (renderers) {
+      // Availability has a separate receipt from the text/parse. Unversioned
+      // integrations keep their conservative state-local projection.
+      for (const fence of readCodeFenceSource(state, tree)) {
+        if (!renderers.supports(fence.language)) continue;
+        const block = createRenderedBlock('mermaid', state.doc.lineAt(fence.start).number,
+          state.doc.lineAt(Math.max(fence.start, fence.end - 1)).number, null);
+        if (block) sourceBlocks.push(block);
+      }
+      sourceBlocks.sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
+    }
+    renderedSourceCache.set(state.doc, { tree: structure, source: discovered.blocks, renderer: renderers,
+      rendererRevision, htmlFrom: htmlEditingRange?.from, blocks: sourceBlocks });
+  }
+  if (options.includeSelectedMath) return sourceBlocks;
+  const blocks = sourceBlocks.filter(block => {
+    return block.kind !== 'math'
       || block.lineNumberHiddenTo < block.lineNumberHiddenFrom
       || !selectionTouchesLineRange(state, block.startLine, block.endLine);
-  }).map(({ block }) => ({ ...block }));
-  const renderers = state.facet(documentBlocksFacet);
-  if (renderers) {
-    // Worker facts describe source only. Renderer availability is a local projection,
-    // so installing/removing a companion never invalidates the shared parse cache.
-    for (const fence of readCodeFenceSource(state, tree)) {
-      if (!renderers.supports(fence.language)) continue;
-      const block = createRenderedBlock('mermaid', state.doc.lineAt(fence.start).number,
-        state.doc.lineAt(Math.max(fence.start, fence.end - 1)).number, null);
-      if (block) blocks.push(block);
-    }
-    blocks.sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
-  }
-  if (!options.includeSelectedMath) renderedBlockCache.set(state, { tree, blocks });
+  });
+  renderedBlockCache.set(state, { tree, blocks });
   return blocks;
 }
 

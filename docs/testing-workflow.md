@@ -753,6 +753,12 @@ Its forward/reverse trusted-wheel slice crosses real Live presentation windows,
 rejects rebuilding their unchanged semantic overlap, and compares every changed
 window with a complete authoritative render. Lists, tables and other multi-line
 roots use semantically expanded bounds; raw line-band overlap is insufficient.
+The same gestures run over small-complex and larger documents with the same
+reading prefix. Warm window changes bound rich-block boundary reads and new
+placeholders independently of distant content. Source projections reuse the
+immutable text/structure and renderer-availability receipt; the discovery
+contract checks HTML editing, selected math, changed renderer receipts and the
+conservative path for integrations without such a receipt.
 `test-live-scan-budget.ts` also checks the actual CodeMirror height-comparison mode
 (`minPointSize=0`): shared offscreen widgets must not pull ordinary marks into that
 comparison. Preserve point semantics and the combined height summary when mapping

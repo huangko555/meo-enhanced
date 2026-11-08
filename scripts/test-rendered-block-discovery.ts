@@ -41,6 +41,10 @@ try {
   assert.deepEqual(sample('restored-parse').kinds, sample('initial').kinds);
   assert.equal(sample('changed-document').scans, 1, 'A changed Document must be rediscovered');
   assert.notDeepEqual(sample('changed-document').kinds, sample('initial').kinds);
+  const projection = await page.evaluate(() => (globalThis as any).RenderedBlockDiscoveryHarness.sourceProjection());
+  assert.deepEqual(projection, { shared: true, projectionReads: 0, selectedMathHidden: true, rendererInvalidated: true,
+    htmlInvalidated: true, htmlRestored: true, initialDynamic: true, dynamicInvalidated: true },
+  'Stable source projections must reuse discovery while renderer receipts, HTML editing and math selection retain their invalidation rules');
   const budget = await page.evaluate(() => (globalThis as any).RenderedBlockDiscoveryHarness.fallbackBudget());
   console.log('Fallback table discovery', JSON.stringify({ seeks: budget.seeks, tables: budget.tables }));
   assert.equal(budget.tables, 400, 'Fenced, quoted and indented table examples stay literal');
