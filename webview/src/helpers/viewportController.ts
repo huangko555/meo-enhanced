@@ -433,6 +433,7 @@ export class ViewportController {
   private linkedViewportMapRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private linkedInteractionUntil = Number.NEGATIVE_INFINITY;
   private linkedPreviewAttentionHeld = false;
+  private linkedAttentionPosition: LinkedViewportPoint | null = null;
   private linkedSemanticOrigin: {
     sourceTop: number;
     point?: { sourceOffset: number; previewOffset: number };
@@ -497,7 +498,10 @@ export class ViewportController {
   // Source lines synchronously. Project once after it, using matching geometry
   // and scrollTop, while the capture listener still owns Live layout retention.
   private readonly onLinkedSourceScroll = () => {
-    if (this.getMode() === 'source') this.projectLinkedViewport('editor');
+    if (this.getMode() === 'source') {
+      this.rememberLinkedAttentionPosition();
+      this.projectLinkedViewport('editor');
+    }
   };
   private readonly onPointerDown = (event: PointerEvent) => this.handlePotentialLayoutInteraction(event);
   private readonly nativeInputViewport: NativeInputViewport;
@@ -959,7 +963,7 @@ export class ViewportController {
     this.linkedSemanticOrigin = null;
     this.linkedProjectionPending = false;
     this.pendingLinkedSourceReveal = null;
-    if (!enabled) this.linkedPreviewAttentionHeld = false;
+    if (!enabled) { this.linkedPreviewAttentionHeld = false; this.linkedAttentionPosition = null; }
     if (enabled) {
       this.linkedViewportPosition = null;
       this.linkedViewportDriver = activationOwner === 'last-interaction'
@@ -981,13 +985,14 @@ export class ViewportController {
   }
 
   markPreviewInteraction(): void {
-    this.releaseLinkedPreviewAttention(true);
+    this.releaseLinkedPreviewAttention(true, 'preview');
     this.markInteraction('preview');
   }
 
   holdLinkedPreviewAttention(): void {
     if (this.destroyed || !this.linkedPreviewEnabled) return;
     this.linkedPreviewAttentionHeld = true;
+    this.rememberLinkedAttentionPosition();
     this.linkedSemanticOrigin = null;
     this.linkedProjectionPending = false;
     this.pendingLinkedSourceReveal = null;
@@ -1012,7 +1017,12 @@ export class ViewportController {
     if (reveal.started) return;
     if (this.previewSurface?.isCurrentDocument?.() === false) return;
     reveal.started = true;
-    const complete = () => { if (this.pendingLinkedSourceReveal === reveal) this.pendingLinkedSourceReveal = null; };
+    const complete = () => {
+      if (this.pendingLinkedSourceReveal === reveal) {
+        this.pendingLinkedSourceReveal = null;
+        this.rememberLinkedAttentionPosition();
+      }
+    };
     const completion = this.previewSurface?.revealSourcePosition?.(reveal.line, reveal.isCurrent);
     if (completion && typeof completion.then === 'function') void completion.then(complete, complete);
     else complete();
@@ -1078,10 +1088,12 @@ export class ViewportController {
   }
 
   editorViewportChanged(): void {
+    this.rememberLinkedAttentionPosition();
     this.projectLinkedViewport('editor');
   }
 
   previewViewportChanged(): void {
+    this.rememberLinkedAttentionPosition();
     this.projectLinkedViewport('preview');
   }
 
@@ -1104,6 +1116,7 @@ export class ViewportController {
       // onRendered can run inside mutate(). Its explicit click must be applied
       // after the transaction restores its old reading witness, never before.
       this.presentLinkedSourceReveal();
+      this.rememberLinkedAttentionPosition();
     }
   }
 
@@ -1327,7 +1340,13 @@ export class ViewportController {
     this.linkedInteractionUntil = this.readClock() + WHEEL_GESTURE_IDLE_MS;
   }
 
-  private releaseLinkedPreviewAttention(resumeReadingFlow = false): void {
+  private rememberLinkedAttentionPosition(): void {
+    if (this.linkedPreviewAttentionHeld && this.previewSurface?.readScrollTop) this.linkedAttentionPosition = {
+      source: this.view.scrollDOM.scrollTop, preview: this.previewSurface.readScrollTop()
+    };
+  }
+
+  private releaseLinkedPreviewAttention(resumeReadingFlow = false, owner?: ViewportAnchorOwner): void {
     if (resumeReadingFlow) this.pendingLinkedSourceReveal = null;
     if (!this.linkedPreviewAttentionHeld) return;
     this.linkedPreviewAttentionHeld = false;
@@ -1335,23 +1354,33 @@ export class ViewportController {
     this.linkedViewportMapDirty = true;
     // Resume from the pair the user was actually reading. Releasing an input
     // hold is not itself a new scroll and must not snap to the pre-edit map.
-    if (this.previewSurface?.readScrollTop) this.linkedViewportPosition = {
-      source: this.view.scrollDOM.scrollTop, preview: this.previewSurface.readScrollTop()
-    };
-    this.rebaseLinkedSemanticOrigin(this.view.scrollDOM.scrollTop);
-    this.rebuildLinkedViewportMap(true);
+    const previous = this.linkedAttentionPosition;
+    this.linkedAttentionPosition = null;
+    // Passive input can arrive after compositor movement. The driver's last
+    // accepted position, rather than its already advanced DOM offset, owns the
+    // release origin. The follower retains any accepted resource/click layout.
+    const origin = this.previewSurface?.readScrollTop ? {
+      source: owner === 'editor' && previous ? previous.source : this.view.scrollDOM.scrollTop,
+      preview: owner === 'preview' && previous ? previous.preview : this.previewSurface.readScrollTop()
+    } : undefined;
+    if (origin) this.linkedViewportPosition = origin;
+    this.rebaseLinkedSemanticOrigin(origin?.source ?? this.view.scrollDOM.scrollTop, origin?.preview);
+    // An incoming owner has not claimed the pair yet. Projecting the outgoing
+    // owner here would undo compositor progress before that claim can arrive.
+    this.rebuildLinkedViewportMap(owner === undefined || owner === this.linkedViewportDriver, origin);
   }
 
   /** Windowed Preview has no exact global pixel map. Retain the current pair
    * using one measured semantic point, instead of restarting at both tops. */
-  private rebaseLinkedSemanticOrigin(sourceTop: number): void {
+  private rebaseLinkedSemanticOrigin(sourceTop: number, previewTop?: number): void {
     this.linkedSemanticOrigin = { sourceTop };
     if (this.previewSurface?.isCurrentDocument?.() === false) return;
-    const point = this.previewSurface?.captureLinkedPosition?.() ?? this.previewSurface?.captureTopVisiblePosition();
+    const offset = previewTop === undefined ? 0 : previewTop - (this.previewSurface?.readScrollTop?.() ?? previewTop);
+    const point = this.previewSurface?.captureLinkedPosition?.(offset) ?? this.previewSurface?.captureTopVisiblePosition(offset);
     if (!point) return;
     this.linkedSemanticOrigin.point = {
       sourceOffset: this.linkedEditorDocumentTop(point.line, point.editorLineOffset ?? point.lineOffset, point.sourceRange) - sourceTop,
-      previewOffset: point.viewportOffset ?? 0
+      previewOffset: (point.viewportOffset ?? 0) - offset
     };
   }
 
@@ -1444,7 +1473,7 @@ export class ViewportController {
     };
   }
 
-  private rebuildLinkedViewportMap(project: boolean): void {
+  private rebuildLinkedViewportMap(project: boolean, acceptedPosition?: LinkedViewportPoint): void {
     if (this.destroyed || !this.linkedPreviewEnabled || !this.linkedViewportMapDirty) return;
     if (this.previewSurface?.isCurrentDocument?.() === false) return;
     const currentPosition = this.previewSurface?.readScrollTop ? {
@@ -1456,14 +1485,14 @@ export class ViewportController {
         ? currentPosition.source - this.linkedViewportPosition.source
         : currentPosition.preview - this.linkedViewportPosition.preview
     ) <= POSITION_EPSILON;
-    if (project && this.linkedSemanticOrigin?.point && !this.linkedProjectionPending && driverPositionUnchanged) {
+    if (!acceptedPosition && project && this.linkedSemanticOrigin?.point && !this.linkedProjectionPending && driverPositionUnchanged) {
       this.rebaseLinkedSemanticOrigin(this.view.scrollDOM.scrollTop);
     }
     // A timer may run before the driver's native scroll event. Pinning that
     // new position to its old follower would freeze a real scroll into the map.
-    const pinnedPoint = project && !this.linkedProjectionPending && this.linkedViewportMap && driverPositionUnchanged
+    const pinnedPoint = acceptedPosition ?? (project && !this.linkedProjectionPending && this.linkedViewportMap && driverPositionUnchanged
       ? currentPosition ?? undefined
-      : undefined;
+      : undefined);
     const linkedMap = this.measureLinkedViewportMap(pinnedPoint);
     if (this.linkedViewportMap && !linkedMap) this.linkedViewportPosition = null;
     this.linkedViewportMap = linkedMap;
@@ -2631,7 +2660,7 @@ export class ViewportController {
 
   private handleWheel(event: WheelEvent): void {
     if (event.ctrlKey || (!event.deltaX && !event.deltaY)) return;
-    this.releaseLinkedPreviewAttention(true);
+    this.releaseLinkedPreviewAttention(true, 'editor');
     if (this.getMode() !== 'live') {
       this.markInteraction();
       return;

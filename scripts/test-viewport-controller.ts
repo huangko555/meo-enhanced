@@ -3544,6 +3544,55 @@ for (const [insert, removed, expectedLine] of [['x', 0, 3], ['x\n', 0, 4], ['', 
   } finally { controller.destroy(); }
 }
 
+// A passive wheel can reach JavaScript after the compositor already moved its
+// driver. Releasing an edit hold must not pin that new position to the old
+// follower and discard the first delta. Pair exact and windowed maps, both ways.
+for (const windowed of [false, true]) for (const owner of ['editor', 'preview'] as const) {
+  const run = (alreadyMoved: boolean) => {
+    const doc = Text.of(Array.from({ length: 100 }, () => 'line'));
+    const scroll = { scrollTop: 200, scrollLeft: 0, scrollHeight: 2000, clientHeight: 400 };
+    let previewTop = 400;
+    const controller = createTestViewportController({ dom: {}, state: { doc }, scrollDOM: scroll,
+      ...uniformLineGeometry(doc), contentHeight: 2000
+    } as any, { attachInteractions: false, getMode: () => 'source', previewSurface: {
+      readScrollTop: () => previewTop, writeScrollTop: top => { previewTop = top; },
+      captureLinkedGeometry: () => windowed ? null : ({ maximumScrollTop: 3600,
+        regions: Array.from({ length: 100 }, (_, index) => ({ startLine: index + 1, endLine: index + 1,
+          top: index * 40, bottom: (index + 1) * 40 })) }),
+      captureTopVisiblePosition: (viewportOffset = 0) => {
+        const point = previewTop + viewportOffset, line = Math.floor(point / 40) + 1;
+        return { line, lineOffset: 0, viewportOffset, sourceRange: { startLine: line, endLine: line, progress: point % 40 / 40 } };
+      },
+      restoreTopVisiblePosition: (point, isCurrent) => {
+        if (isCurrent()) previewTop = (point.line - 1) * 40 + (point.sourceRange?.progress ?? 0) * 40 - (point.viewportOffset ?? 0);
+      }
+    } });
+    try {
+      controller.setLinkedPreviewEnabled(true);
+      controller.holdLinkedPreviewAttention();
+      // Native caret scrolling during input is accepted without moving Preview.
+      scroll.scrollTop = 300; controller.editorViewportChanged();
+      if (previewTop !== 400) throw Error('Input hold must keep the follower still');
+      if (owner === 'editor') {
+        if (!alreadyMoved) (controller as any).onWheel({ ctrlKey: false, deltaX: 0, deltaY: 10 });
+        scroll.scrollTop = 310;
+        if (alreadyMoved) (controller as any).onWheel({ ctrlKey: false, deltaX: 0, deltaY: 10 });
+        controller.editorViewportChanged();
+      } else {
+        if (!alreadyMoved) controller.markPreviewInteraction();
+        previewTop = 420;
+        if (alreadyMoved) controller.markPreviewInteraction();
+        controller.previewViewportChanged();
+      }
+      return { source: scroll.scrollTop, preview: previewTop };
+    } finally { controller.destroy(); }
+  };
+  const beforeMovement = run(false), afterMovement = run(true);
+  if (JSON.stringify(beforeMovement) !== JSON.stringify(afterMovement)
+    || (owner === 'editor' ? afterMovement.preview <= 400 : afterMovement.source <= 300))
+    throw Error(`Passive ${owner} wheel changed with compositor order (windowed=${windowed}): ${JSON.stringify({beforeMovement, afterMovement})}`);
+}
+
 // Source attention can sit below a late chart/image. Its visible source row is
 // the presentation witness; a new Preview gesture and content edits keep their
 // own existing reading policies.
