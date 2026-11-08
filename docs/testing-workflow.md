@@ -510,6 +510,13 @@ screenshots are saved under `.local/html-table-update-audit/`.
 The HTML content checks
 verify pasted HTML opens source without reformatting or moving the native caret,
 including trailing blank lines, hidden fragments, sibling blocks and history.
+For ordinary and optimized trailing-line pastes, formatting Undo and paste Redo
+must restore both the accepted state and native DOM caret before the next input.
+`test-code-mirror-history-selection-adapter.ts` keeps formatter before/after
+selections in the same native history event, including later caret moves,
+nonhistorical rebasing and explicit selection precedence. The block-formatting
+owner also verifies a formula caret beyond the minimum text difference; a change
+boundary must not replace a valid formatter history selection.
 Source/Live transitions continue to respect the caret; inline HTML and code keep
 their own input paths. `bun scripts/test-html-content.ts --pointer-only` runs only
 the HTML layout/gutter alignment with hidden trailing nodes and nested containers,
@@ -1509,6 +1516,12 @@ logical/native ranges, wrong focus, missing observation and missing receipts.
 After the replayed text is accepted, every observed frame must already carry
 its expected document selection and native caret; a later correct final frame
 does not clear an intermediate wrong-line selection.
+Start logical-selection observations at the ViewUpdate that accepts the native
+Undo/Redo transaction, and inspect that update's final state. Configuration and
+preparation updates can still carry the earlier document/selection; individual
+subtransactions in one atomic native-plus-semantic batch are not separately
+published states. Observe every subsequent accepted update and rendered frame,
+including a newer input taking ownership while presentation is still pending.
 `test-command-history-production.ts` applies it to the shared inline-format
 catalogue in Live/Source and actual ordinary/optimized Worker paths, including
 compositor frames. Its `--text-only` subset covers task and paragraph input,
@@ -1597,6 +1610,12 @@ selections, focus and viewport in each accepted Undo/Redo frame; subsequent inpu
 must reach the exact Host source. Both contracts run in the targeted history and
 default browser suites. Browser IME/platform fixtures do not certify native OS
 candidate windows or macOS itself.
+Installed Windows acceptance also exercises real OS Ctrl+Left/Right,
+Ctrl+Shift+Left/Right and Ctrl+Backspace/Delete on ordinary and optimized
+documents. Require complete trusted press/release delivery to the owned editor,
+exact text/directed selection through Undo/Redo, the next input and a stable
+reading viewport. Restore the disposable document on failure as well as success;
+browser-protocol key synthesis does not establish this OS boundary.
 
 ## Document-scale coverage
 

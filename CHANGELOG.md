@@ -32,6 +32,8 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Reduced repeated language-setting reads, metadata transfers and tree rebuilding when presenting large native outlines, while keeping language changes immediate.
 - Kept formula undo and redo pending until deferred source presentation is ready, without exhausting focus recovery while background work is still pending.
 - Kept task toggles, list-prefix backspace and text undo/redo on their intended caret and reading position, including intermediate frames and optimized documents.
+- Preserved HTML and formula formatting selections through undo/redo, including unchanged trailing text and blank lines, keeping subsequent typing at its restored position.
+- Restored the initial editor focus after returning from a Workbench menu during loading, retaining the current reading viewport and subsequent input-control ownership.
 - Preserved the next complete search match through replacement history, including native table-cell focus, subsequent typing and navigation across table boundaries.
 - Reported successful large-document saves correctly when their optional saved comparison exceeds its size budget, while retaining real save and revision-mismatch errors.
 - Preserved pending local edits across closing and Webview recreation, and kept external revisions unchanged when a separate recovery copy is required.
