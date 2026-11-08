@@ -24,6 +24,11 @@ unresolved failure or a skipped package check on the other platform.
 
 ## Release acceptance sequence
 
+Use the [evidence checklist and native continuation tools](release-acceptance-tools.md)
+to prepare per-check reuse decisions, parse native owners before setup, and retain
+one native checkpoint instead of cloning temporary continuation scripts. Their
+reports support this sequence; they do not replace its coverage or approval rules.
+
 Acceptance has one executor and a recorded candidate. Keep a small ledger of
 required behaviors, commands, artifact/environment identities, results and unresolved
 failures. The ledger coordinates work; it does not replace the runner's report.
@@ -93,6 +98,18 @@ the candidate to another agent:
    still rejects changed inputs and recorded failures.
 
 ### Continue until acceptance is complete
+
+For unattended acceptance, authorization covers continuous execution to the final
+verified VSIX, complete coverage conclusion, release notes and stated limitations.
+Prove required application permissions and native capabilities early, before
+expensive work. A stage result or a failed controller is progress to interpret,
+not a final handoff: read its authoritative checkpoint, diagnose ordinary failures,
+repair within scope and continue the remaining requirements. Keep one responsible
+executor across continuations; do not wait for another stage approval or a reviewer
+when the executor can complete the authorized self-check. A fixed completion time
+is not a reason to waive evidence. If a genuine human dependency remains, finish
+unaffected work and hand back the exact blocker and executable resume point; do
+not imply background work is continuing after execution has stopped.
 
 The executor owns progress through all required coverage, necessary repairs,
 affected validation and final evidence. Finishing a stage, encountering an

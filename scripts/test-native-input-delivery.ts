@@ -23,6 +23,7 @@ if (args.has('--browser-url')) {
     result.frameUrl = frame.url();
     const driver = await createPointerDriver({ frame, page });
     result.delivery = args.has('--dx') ? await driver.drag(selector, Number(args.get('--dx'))) : await driver.click(selector);
+    result.capabilities = { target: true, pointer: true, observation: true };
     result.passed = true;
   } catch (error: any) {
     result.code = error.code; result.stage = error.stage; result.delivery = error.evidence; result.error = String(error);

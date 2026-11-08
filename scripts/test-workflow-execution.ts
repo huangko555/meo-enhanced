@@ -137,9 +137,13 @@ export function readResumeReport(path: string, fingerprint: string, planHash: st
 }
 
 export function saveReport(directory: string, report: WorkflowReport): void {
+  saveWorkflowState(directory, 'report.json', report);
+}
+
+export function saveWorkflowState(directory: string, name: string, value: unknown): void {
   mkdirSync(directory, { recursive: true });
-  const path = join(directory, 'report.json');
-  writeFileSync(`${path}.tmp`, JSON.stringify(report, null, 2) + '\n');
+  const path = join(directory, name);
+  writeFileSync(`${path}.tmp`, JSON.stringify(value, null, 2) + '\n');
   for (let attempt = 0; ; attempt++) {
     try {
       fs.renameSync(`${path}.tmp`, path);

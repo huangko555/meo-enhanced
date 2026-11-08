@@ -771,6 +771,7 @@
       "scripts/test-test-inventory.ts",
       "scripts/test-feature-coverage.ts",
       "scripts/test-feature-coverage-report.ts",
+      "scripts/test-release-acceptance.ts",
       "scripts/test-test-workflow.ts",
       "scripts/test-theme-inheritance.ts",
       "scripts/test-toolbar-input-viewport.ts",
