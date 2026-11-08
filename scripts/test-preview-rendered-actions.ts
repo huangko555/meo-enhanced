@@ -67,13 +67,14 @@ try {
       const scope = window as any;
       const controller = scope.__previewController;
       controller.setUiLanguage(language); controller.setAppearance(appearance); controller.setVisible(true);
-      void controller.requestRender(text, { preserveViewport: true, preserveFrame });
+      scope.__previewRenderedAt = 0;
+      void controller.requestRender(text, { force: true, preserveViewport: true, preserveFrame });
       const message = scope.__previewMessages.filter((item: any) => item.type === 'requestPreviewRender').at(-1);
       controller.acceptRenderResponse({ type: 'previewRenderResult', requestId: message.requestId, result: { ok: true, value } });
     }, { text, language, appearance, value, preserveFrame });
     await page.waitForFunction(() => {
       const doc = document.querySelector<HTMLIFrameElement>('iframe')?.contentDocument;
-      return doc?.querySelector('.meo-export-mermaid.is-rendered svg')
+      return (window as any).__previewRenderedAt && doc?.querySelector('.meo-export-mermaid.is-rendered svg')
         && doc.querySelector('.meo-preview-fullscreen-btn[aria-disabled="false"]');
     });
   };
@@ -116,6 +117,30 @@ try {
     fs.writeFileSync(path.join(output, filename + '.png'), Buffer.from(result.data, 'base64'));
     return result;
   };
+  for (const large of [false, true]) {
+    const suffix = '\n\n```mermaid\n' + diagram + '\n```\n\n'
+      + (large ? 'Ordinary paragraph.\n\n'.repeat(4_100) : 'After the block.');
+    const cases = [
+      { fence: 'mermaid', source: 'flowchart LR; A[First] --> B[Second]', labels: ['View fullscreen', 'Copy as image', 'Copy source'] },
+      { fence: 'math', source: 'x^2+1', labels: ['Copy as image', 'Copy source'] },
+      { fence: 'typescript', source: 'const value = 1;', labels: ['Copy source'] },
+      { fence: 'mermaid', source: 'flowchart LR; A[Third] --> B[Fourth]', labels: ['View fullscreen', 'Copy as image', 'Copy source'] }
+    ];
+    for (const item of cases) {
+      const text = '# Control ownership\n\n```' + item.fence + '\n' + item.source + '\n```' + suffix;
+      await render(text, 'en', 'light', true);
+      const kind = item.fence === 'mermaid' ? 'meo-export-mermaid'
+        : item.fence === 'math' ? 'meo-export-math-display' : 'meo-export-code-block-wrap';
+      await frame().waitForSelector(`[data-source-line="3"].${kind} > .meo-preview-code-actions`);
+      const labels = await frame().$eval('[data-source-line="3"] > .meo-preview-code-actions', node =>
+        Array.from(node.children).filter(child => child.getAttribute('role') === 'button').map(child => child.getAttribute('aria-label')));
+      assert.deepEqual(labels, item.labels, `Changing to ${item.fence} (${large ? 'windowed' : 'ordinary'}) must retire controls from the previous block kind`);
+      await click('[data-source-line="3"] .meo-copy-code-btn');
+      await frame().waitForSelector('[data-source-line="3"] .meo-copy-code-btn.copied');
+      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), item.source,
+        'A replacement control must copy its current source with the correct listener');
+    }
+  }
   for (const large of [false, true]) for (const appearance of ['light', 'dark'] as const) {
     const language = appearance === 'light' ? 'en' : 'zh-CN';
     const initial = '# Formula update\n\n\\[\n\\int \\!\\!\\! \\int \\!\\!\\! \\int_V46666\n\\]\n\n'
@@ -129,6 +154,7 @@ try {
       scope.__formulaRoot = doc.querySelector('.meo-export-math-display');
     });
     await render(initial.replace('46666', '46667'), language, appearance, true);
+    await frame().waitForSelector('.meo-export-math-display > .meo-preview-code-actions .meo-copy-image-btn[aria-disabled="false"]');
     const before = await page.evaluate(() => {
       const scope = window as any;
       const doc = document.querySelector<HTMLIFrameElement>('iframe')!.contentDocument!;

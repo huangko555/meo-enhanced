@@ -13,7 +13,7 @@ import previewPresetBrandIcons from './previewPresetBrandIcons.json';
 import { getExportStyleEnvironment } from './export';
 import { documentSurfaceVariables } from '../../../src/shared/documentSurfaceRoles';
 import { createPreviewMermaidRenderer } from './previewMermaid';
-import { addPreviewCodeCopyControls, previewCopyBlockSelector, closePreviewBlockFullscreen } from './previewBlockActions';
+import { addPreviewCodeCopyControls, previewCopyBlockSelector, previewCopyBlockKind, closePreviewBlockFullscreen } from './previewBlockActions';
 import { setPreviewCodeSources } from './previewCodeSource';
 import { logWebviewRenderError } from './errors';
 import { normalizeDocumentText } from '../../../src/foundation/documentText';
@@ -421,10 +421,12 @@ function morphPreviewMain(
         if (element.classList.contains('meo-preview-code-actions')) {
           // Controls carry listeners and must never become rendered content.
           // Reuse them only when their direct block has a proven identity pair.
+          const acceptedKey = actionKeys.get(node);
+          if (acceptedKey) return acceptedKey;
           const owner = element.parentElement;
           const ownerKey = owner && (presentationKeys.get(owner) ?? sourceKeys.get(owner));
-          const key = ownerKey ? `preview-actions:${ownerKey}`
-            : actionKeys.get(node) ?? `preview-actions:unmatched:${nextActionKey += 1}`;
+          const key = owner && ownerKey ? `preview-actions:${previewCopyBlockKind(owner)}:${ownerKey}`
+            : `preview-actions:unmatched:${nextActionKey += 1}`;
           actionKeys.set(node, key);
           return key;
         }
@@ -444,7 +446,8 @@ function morphPreviewMain(
       },
       onBeforeElUpdated(fromElement, toElement) {
         if (frameDocument.documentElement.dataset.meoPreviewLargeDocument === 'true'
-          && fromElement.matches(previewCopyBlockSelector) && toElement.matches(previewCopyBlockSelector)) {
+          && fromElement.matches(previewCopyBlockSelector) && toElement.matches(previewCopyBlockSelector)
+          && previewCopyBlockKind(fromElement) === previewCopyBlockKind(toElement)) {
           // Match only controls that already exist. Populating the entire
           // detached replacement would undo viewport-scoped initialization.
           for (const selector of [':scope > .meo-preview-code-actions', ':scope > .meo-export-code-language-label']) {

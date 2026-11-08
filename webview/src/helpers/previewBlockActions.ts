@@ -86,6 +86,10 @@ function openPreviewFullscreen(block: HTMLElement, trigger: HTMLElement, pointer
 
 // These reading controls are added only to the iframe DOM, never to shared export HTML.
 export const previewCopyBlockSelector = '.meo-export-code-block-wrap, .meo-export-mermaid, .meo-export-math-display';
+export function previewCopyBlockKind(block: Element): 'code' | 'mermaid' | 'math' {
+  return block.classList.contains('meo-export-code-block-wrap') ? 'code'
+    : block.classList.contains('meo-export-mermaid') ? 'mermaid' : 'math';
+}
 function previewBlocksIn(root: ParentNode): HTMLElement[] {
   return root.nodeType === 1 && (root as HTMLElement).matches(previewCopyBlockSelector)
     ? [root as HTMLElement] : [...root.querySelectorAll<HTMLElement>(previewCopyBlockSelector)];

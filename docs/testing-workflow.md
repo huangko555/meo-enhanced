@@ -1677,6 +1677,9 @@ clipboard write from that click, bounded mounted blocks, and working PNG copy
 through the separate control. This catches action nodes being reused as formula
 text while retaining their old event listeners. The contract belongs to
 `test:browser` and the rendered targeted plan.
+It also changes the same source block between Mermaid, math and ordinary code
+in both document sizes. Each accepted result must expose only its own controls,
+and a trusted source-copy click must copy the current block's exact contents.
 
 After changes to packaged syntax engines or Webview resource loading, run
 `scripts/test-vscode-resource-loading.ps1 -CodePath <Code.exe>` against the
