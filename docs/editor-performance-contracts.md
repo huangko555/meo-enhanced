@@ -17,7 +17,7 @@
 | 阅读位置与分栏同步 | [viewportController.ts](../webview/src/helpers/viewportController.ts)、[interactionContinuity.ts](../webview/src/editor/interactionContinuity.ts) | 通过现有控制器交接定位所有权；新的用户操作使旧的定位任务失效。输入、资源完成与模式切换遵守同一位置规则。 |
 | 块编辑与浮层焦点 | [blockInteraction.ts](../webview/src/editor/blockInteraction.ts)、[livePointerSelection.ts](../webview/src/editor/livePointerSelection.ts) | 按下、拖动、松开及取消构成完整交互；按住鼠标期间保持被操作内容稳定。工具栏与弹窗借用焦点后恢复有效选择，区分操作控件和新的正文选择。 |
 | 表格操作 | [tableCommand.ts](../webview/src/application/tableCommand.ts)、[codeMirrorTableCommandEffectAdapter.ts](../webview/src/editor/internal/codeMirrorTableCommandEffectAdapter.ts) | 待提交单元格输入与结构命令使用现有事务及历史所有者；移动、排序、删除后保持有效焦点、源码位置和撤销重做。 |
-| Preview 与屏外资源 | [preview.ts](../webview/src/helpers/preview.ts)、[previewViewport.ts](../webview/src/helpers/previewViewport.ts)、[previewViewportResources.ts](../webview/src/helpers/previewViewportResources.ts) | 保留已接受的正文，复用有效节点，以当前窗口调度资源与测量；异步完成校验当前版本和生命周期，隐藏或销毁时释放相应工作。 |
+| Preview 与屏外资源 | [preview.ts](../webview/src/helpers/preview.ts)、[previewReadingWork.ts](../webview/src/application/previewReadingWork.ts)、[previewViewport.ts](../webview/src/helpers/previewViewport.ts)、[previewViewportResources.ts](../webview/src/helpers/previewViewportResources.ts) | 保留已接受的正文，复用有效节点，以当前窗口调度资源与测量；异步完成校验当前版本和生命周期，隐藏或销毁时释放相应工作。 |
 | 大文档策略 | [largeDocument.ts](../src/foundation/largeDocument.ts)、[策略证据](large-document-policy-evidence.md) | 打开方式偏好与运行时优化分别处理。普通文档保留轻量路径，同时覆盖小而复杂、巨型单块和编辑后增长的文档。 |
 
 功能优先接入上述所有者；确需替换时，连同取消、失败、历史和销毁语义一起迁移，并移除被替代路径。每项文档状态保持一个权威来源，缓存和展示投影可从它重建。新建缓存、Worker 或调度层应对应已测出的缺口，并定义失效条件、容量和生命周期。

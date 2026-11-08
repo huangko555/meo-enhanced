@@ -78,7 +78,7 @@ try {
   await page.addScriptTag({content:await build.outputs[0]!.text()});
   await page.evaluate(html => new Promise<void>(resolve => {
     (window as any).writeFrame(document.querySelector('iframe'),
-      '<!doctype html><html data-meo-preview-large-document="true"><head><style>body{margin:0}code{display:block;height:100px}.gap{height:3000px}</style></head><body>',html,'</body></html>',()=>true,resolve);
+      '<!doctype html><html data-meo-preview-large-document="true" data-meo-preview-resource-budget="bounded"><head><style>body{margin:0}code{display:block;height:100px}.gap{height:3000px}</style></head><body>',html,'</body></html>',()=>true,resolve);
   }),sandbox);
   await page.evaluate(() => {
     const frame=document.querySelector('iframe')!;

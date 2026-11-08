@@ -8,8 +8,10 @@ import { assessLargeDocument } from '../src/foundation/largeDocument';
 const build = await Bun.build({ entrypoints: ['scripts/test-preview-code-update-entry.ts'], target: 'browser', format: 'iife' });
 assert.ok(build.success, build.logs.map(String).join('\n'));
 let release = () => {}, hold = false, fail = false, recovered = false, tall = false;
+let lateImage = Promise.resolve(), releaseLateImage = () => {};
 const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
   const url = new URL(request.url);
+  if (url.pathname === '/late.svg') await lateImage;
   if (url.searchParams.has('meoReload') && hold) await new Promise<void>(resolve => { release = resolve; });
   if ((url.searchParams.has('meoReload') && fail) || (url.pathname === '/broken.svg' && !recovered)) return new Response('', { status: 404 });
   return new Response(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="${tall ? 420 : 240}"><rect width="640" height="100%" fill="#4579ad"/><text x="32" y="80" fill="white" font-size="36">Image detail</text></svg>`,
@@ -212,6 +214,36 @@ try {
     await page.evaluate(() => (window as any).__previewController.setVisible(false));
     assert.equal(await page.$('.meo-md-image-fullscreen'), null);
     await page.evaluate(() => (window as any).__previewController.setVisible(true));
+    if (large && layout === 'full') {
+      // A decoded image can be awaiting the shared reading budget when Preview
+      // is hidden. Cancellation must retain that result for the next reveal.
+      lateImage = new Promise<void>(resolve => { releaseLateImage = resolve; });
+      await page.evaluate(text => {
+        void (window as any).__previewController.requestRender('![late](late.svg)\n\n' + text, { layout: 'full' });
+      }, text);
+      await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
+        .querySelector('img[alt="late"]'));
+      await frame.$eval('img[alt="late"]', image => image.scrollIntoView({ block: 'center' }));
+      await frame.evaluate(() => {
+        const scope = window as any, decode = HTMLImageElement.prototype.decode;
+        scope.__restoreImageDecode = () => { HTMLImageElement.prototype.decode = decode; };
+        HTMLImageElement.prototype.decode = function() {
+          return decode.call(this).then(() => { if (this.alt === 'late') scope.__lateImageDecoded = true; });
+        };
+        document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 71, button: 0, clientX: 30, clientY: 60 }));
+      });
+      releaseLateImage();
+      await page.waitForFunction(() => (document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentWindow as any).__lateImageDecoded,
+        { polling: 10 });
+      assert.equal(await frame.$eval('img[alt="late"]', image => (image as HTMLElement).dataset.meoPreviewImageReady), undefined,
+        'A held reading gesture must defer the decoded image commit');
+      await page.evaluate(() => (window as any).__previewController.setVisible(false));
+      await waitImage('late');
+      await page.evaluate(() => (window as any).__previewController.setVisible(true));
+      await waitImage('late');
+      await frame.evaluate(() => (window as any).__restoreImageDecode());
+      console.log('Pending decoded image survives reading cancellation and reveal');
+    }
     await page.evaluate(() => (window as any).__previewController.dispose());
     assert.equal(await page.$('.meo-md-image-fullscreen'), null);
     assert.deepEqual(errors, []);
@@ -220,6 +252,6 @@ try {
   }
 } catch (error) { primaryError = error; }
 finally {
-  release(); server.stop(true);
+  release(); releaseLateImage(); server.stop(true);
   if (primaryError === undefined) await closeTestBrowser(browser); else await closeTestBrowser(browser, primaryError);
 }

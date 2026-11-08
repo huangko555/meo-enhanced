@@ -13,6 +13,7 @@ import previewPresetBrandIcons from './previewPresetBrandIcons.json';
 import { getExportStyleEnvironment } from './export';
 import { documentSurfaceVariables } from '../../../src/shared/documentSurfaceRoles';
 import { createPreviewMermaidRenderer } from './previewMermaid';
+import { createPreviewReadingWork } from '../application/previewReadingWork';
 import { addPreviewCodeCopyControls, previewCopyBlockSelector, previewCopyBlockKind, closePreviewBlockFullscreen } from './previewBlockActions';
 import { setPreviewCodeSources } from './previewCodeSource';
 import { logWebviewRenderError } from './errors';
@@ -1461,6 +1462,12 @@ export function createPreviewController({
   let paintGeneration = 0;
   let highlightFrame: number | null = null;
   let highlightTimer: number | null = null;
+  let readingBatch = false;
+  const readingKeys = { math: {}, actions: {}, blocks: {}, code: {}, readable: {}, mermaid: {} };
+  type ReadingKind = keyof typeof readingKeys;
+  const readingWork = createPreviewReadingWork({ now: () => performance.now(), batch(run) {
+    withViewportTransaction(() => { readingBatch = true; try { run(); } finally { readingBatch = false; } });
+  } });
   let elementRevealFrame: number | null = null;
   let elementRevealGeneration = 0;
   const cancelElementReveal = () => {
@@ -1478,7 +1485,7 @@ export function createPreviewController({
     // Cold reading enrichment yields between fences. Explicit content/theme
     // commits keep the existing atomic projection with no intermediate palette.
     const budget = reading && hasBoundedPreviewResources(frameDocument)
-      ? { maxBlocks: 2, onPending: () => scheduleViewportHighlight(frameDocument) } : undefined;
+      ? { maxBlocks: 2, onPending: () => scheduleViewportHighlight(frameDocument, 'code') } : undefined;
     if (!applyPreviewCodeHighlight(frameDocument, true, currentCodeHighlight(frameDocument), budget) || !searchQuery) return;
     // Token spans replace text nodes that may own visible Find marks. The
     // existing search owner retains its logical anchor and projects it again.
@@ -1490,9 +1497,48 @@ export function createPreviewController({
     if (highlightTimer !== null) window.clearTimeout(highlightTimer);
     highlightFrame = null;
     highlightTimer = null;
+    readingWork.cancel();
   };
-  const scheduleViewportHighlight = (frameDocument: Document) => {
-    if (highlightFrame !== null || highlightTimer !== null) return;
+  const enqueueReadingCommit = (frameDocument: Document, mutate: () => void,
+    cancelled?: (reason: 'retired' | 'failed') => void): Promise<void> => {
+    const generation = frameGeneration;
+    if (disposed || activeFrameDocument !== frameDocument) return Promise.resolve();
+    const current = () => !disposed && generation === frameGeneration && activeFrameDocument === frameDocument;
+    const ready = readingWork.commit(() => { if (current()) { mutate(); sourceMapDirty = true; } },
+      reason => { if (current()) cancelled?.(reason); });
+    armViewportHighlight(frameDocument);
+    return ready;
+  };
+  const requestReadingWork = (frameDocument: Document, kind: ReadingKind) => {
+    readingWork.request(readingKeys[kind], () => {
+      if (disposed || activeFrameDocument !== frameDocument || host.hidden) return;
+      switch (kind) {
+        case 'math': return flushPreviewMath?.() ?? false;
+        case 'actions': addPreviewCodeCopyControls(frameDocument, uiLanguage); break;
+        case 'blocks': refreshDocumentBlocks?.(frameDocument); break;
+        case 'code': if (currentCodeHighlight(frameDocument)()) applyCodeHighlight(frameDocument, true); break;
+        case 'readable': ensureReadableCode(frameDocument, false); break;
+        case 'mermaid': {
+          if (!latestPayload?.hasMermaid) break;
+          const generation = frameGeneration;
+          void previewMermaidRenderer.render(frameDocument, appearance,
+            () => { sourceMapDirty = true; },
+            () => !disposed && !host.hidden && generation === frameGeneration && activeFrameDocument === frameDocument,
+            mutate => enqueueReadingCommit(frameDocument, mutate));
+          break;
+        }
+      }
+    });
+  };
+  const scheduleViewportHighlight = (frameDocument: Document, kind?: ReadingKind) => {
+    if (disposed || activeFrameDocument !== frameDocument || host.hidden) return;
+    if (hasBoundedPreviewResources(frameDocument)) {
+      for (const step of kind ? [kind] : Object.keys(readingKeys) as ReadingKind[]) requestReadingWork(frameDocument, step);
+    }
+    armViewportHighlight(frameDocument);
+  };
+  const armViewportHighlight = (frameDocument: Document) => {
+    if (highlightFrame !== null || highlightTimer !== null || readingBatch) return;
     highlightFrame = window.requestAnimationFrame(() => {
       highlightFrame = null;
       if (!disposed && activeFrameDocument === frameDocument && !host.hidden) {
@@ -1502,8 +1548,12 @@ export function createPreviewController({
           // underneath the thumb or competing with queued pointer delivery.
           highlightTimer = window.setTimeout(() => {
             highlightTimer = null;
-            scheduleViewportHighlight(frameDocument);
+            armViewportHighlight(frameDocument);
           }, 250);
+          return;
+        }
+        if (hasBoundedPreviewResources(frameDocument)) {
+          if (readingWork.drain()) armViewportHighlight(frameDocument);
           return;
         }
         const moreMath = flushPreviewMath?.() ?? false;
@@ -1585,7 +1635,7 @@ export function createPreviewController({
       return;
     }
     if (!disposed && isSourceColoringEnabled() && activeFrameDocument) {
-      if (hasBoundedPreviewResources(activeFrameDocument)) scheduleViewportHighlight(activeFrameDocument);
+      if (hasBoundedPreviewResources(activeFrameDocument)) scheduleViewportHighlight(activeFrameDocument, 'code');
       else applyCodeHighlight(activeFrameDocument);
     }
   }, 'preview');
@@ -1594,6 +1644,12 @@ export function createPreviewController({
     mutate: (slot: PreviewViewportProjectionSlot) => void,
     documentChange?: { readonly previousText: string; readonly nextText: string }
   ): void => {
+    // Reading result commits in this turn share the accepted anchor. Explicit
+    // document replacement keeps its own source mapping and atomic transaction.
+    if (readingBatch && acceptingViewportProjection && !documentChange) {
+      mutate(acceptingViewportProjection);
+      return;
+    }
     const slot: PreviewViewportProjectionSlot = { restore: null,
       ...(documentChange ? { mapSourceLine: previewSourceLineMapper(documentChange.previousText, documentChange.nextText) } : {}) };
     const previousSlot = acceptingViewportProjection;
@@ -1665,6 +1721,16 @@ export function createPreviewController({
       else withViewportTransaction(() => commit());
     };
     const enqueueCommit = (commit: () => void) => {
+      if (hasBoundedPreviewResources(frameDocument) && !host.hidden) {
+        const publish = () => { if (!abortController.signal.aborted) commit(); };
+        void enqueueReadingCommit(frameDocument, publish, reason => {
+          // Hiding retires reading work, but an accepted decoded image must
+          // survive reopening. Hidden DOM needs no reading-anchor correction.
+          if (host.hidden) { publish(); sourceMapDirty = true; }
+          else if (reason === 'failed') withViewportTransaction(() => { publish(); sourceMapDirty = true; });
+        }).catch(handleWindowError);
+        return;
+      }
       pendingCommits.push(commit);
       if (commitFrame !== null) return;
       commitFrame = frameDocument.defaultView?.requestAnimationFrame(flushCommits) ?? null;
@@ -1925,7 +1991,7 @@ export function createPreviewController({
             previewMathViewports.get(element)?.controller.setActive(false);
           }
         }
-        if (pending.size) scheduleViewportHighlight(frameDocument);
+        if (pending.size) scheduleViewportHighlight(frameDocument, 'math');
       }, { rootMargin: '800px 0px' });
       for (const element of roots) previewMathObserver.observe(element);
     } else {

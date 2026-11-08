@@ -2,7 +2,7 @@ import { StateEffect, StateField, type EditorState, type Range, type Transaction
 import { Decoration, ViewPlugin, WidgetType } from '@codemirror/view';
 import { mapLiveWidgetPositions, liveWidgetPositionsIndependent } from '../editor/liveWidgetPositions';
 import { renderedBlockPreviewHeight, renderedBlockPreview } from './renderedBlockPreview';
-import { isLiveInputDerivedWorkPending } from '../editor/liveInputDerivedWork';
+import { isLiveInputDerivedWorkPending, requestLiveInputDerivedWorkOnFrame, usesLargeDocumentDerivedWorkBudget } from '../editor/liveInputDerivedWork';
 import { getViewportController } from './viewportController';
 
 type Band = { from: number; to: number };
@@ -82,7 +82,20 @@ export function restrictLiveWidgetPresentation(ranges: Range<Decoration>[], stat
 export function liveViewportPresentationExtensions() {
   return [presentationBand, ViewPlugin.define(view => {
     let disposed = false, queued = false;
+    const readingConsumer = {};
     let compositionFrame: number | null = null;
+    const present = () => {
+      if (disposed || view.composing || isLiveInputDerivedWorkPending(view.state)
+        || getViewportController(view)?.hasNativeInputViewportOwner()) return;
+      const band = getLivePresentationBand(view.state)!;
+      const first = view.state.doc.lineAt(view.viewport.from).number, last = view.state.doc.lineAt(view.viewport.to).number;
+      if (view.state.doc.line(Math.max(1, first - 20)).from >= band.from
+        && view.state.doc.line(Math.min(view.state.doc.lines, last + 20)).to <= band.to) return;
+      view.dispatch({ effects: setPresentationBand.of({
+        from: view.state.doc.line(Math.max(1, first - overscanLines)).from,
+        to: view.state.doc.line(Math.min(view.state.doc.lines, last + overscanLines)).to
+      }) });
+    };
     const schedule = () => {
       if (queued || disposed) return;
       queued = true;
@@ -107,10 +120,11 @@ export function liveViewportPresentationExtensions() {
         const innerFrom = view.state.doc.line(Math.max(1, first - 20)).from;
         const innerTo = view.state.doc.line(Math.min(view.state.doc.lines, last + 20)).to;
         if (innerFrom >= band.from && innerTo <= band.to) return;
-        view.dispatch({ effects: setPresentationBand.of({
-          from: view.state.doc.line(Math.max(1, first - overscanLines)).from,
-          to: view.state.doc.line(Math.min(view.state.doc.lines, last + overscanLines)).to
-        }) });
+        // Already accepted content covers this viewport. Prepare its guard band
+        // through the input-prioritized owner; a jump beyond it stays immediate.
+        if (usesLargeDocumentDerivedWorkBudget(view.state) && from >= band.from && to <= band.to)
+          requestLiveInputDerivedWorkOnFrame(view, readingConsumer, present);
+        else present();
       });
     };
     schedule();

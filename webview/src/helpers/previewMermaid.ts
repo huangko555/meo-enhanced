@@ -43,7 +43,7 @@ export function createPreviewMermaidRenderer(
     appearance: PreviewAppearance,
     onDiagramRendered?: () => void,
     isCurrent: () => boolean = () => true,
-    commit: (mutate: () => void) => void = (mutate) => mutate()
+    commit: (mutate: () => void) => void | Promise<void> = (mutate) => mutate()
   ): Promise<void> => {
     const renderGeneration = latestRenderGeneration + 1;
     latestRenderGeneration = renderGeneration;
@@ -117,7 +117,7 @@ async function renderMermaidBlocks(
   appearance: PreviewAppearance,
   onDiagramRendered: (() => void) | undefined,
   isCurrent: () => boolean,
-  commit: (mutate: () => void) => void,
+  commit: (mutate: () => void) => void | Promise<void>,
   isInteracting: () => boolean
 ): Promise<void> {
   if (!isCurrent()) return;
@@ -167,11 +167,14 @@ async function renderMermaidBlocks(
   let renderIndex = 0;
   const prepared: Array<{ block: HTMLElement; source: string; svg: string }> = [];
   const failed: HTMLElement[] = [];
-  const commitPrepared = () => {
+  const commitPrepared = async () => {
     if (!isCurrent() || prepared.length + failed.length === 0) return;
-    commit(() => {
+    // The reading owner may admit this result in a later frame. Keep an
+    // immutable batch until acceptance, and settle only after its DOM commit.
+    const ready = prepared.splice(0), errors = failed.splice(0);
+    await commit(() => {
       if (!isCurrent()) return;
-      for (const { block, source, svg } of prepared) {
+      for (const { block, source, svg } of ready) {
         block.classList.toggle('is-math', isDisplayMathDiagram(source));
         block.classList.add('is-rendered');
         block.classList.remove('is-error');
@@ -186,14 +189,13 @@ async function renderMermaidBlocks(
         if (languageLabel) block.prepend(languageLabel);
         if (copyActions) block.append(copyActions);
       }
-      for (const block of failed) {
+      for (const block of errors) {
         block.classList.add('is-error');
         delete block.dataset.meoPreviewMermaidPending;
       }
+      syncPreviewRenderedActions(frameDocument);
+      onDiagramRendered?.();
     });
-    prepared.length = failed.length = 0;
-    syncPreviewRenderedActions(frameDocument);
-    onDiagramRendered?.();
   };
   for (const { block, documentIndex } of blocks) {
     // Mermaid's promises can resolve in one task. Let input and paint run
@@ -244,10 +246,10 @@ async function renderMermaidBlocks(
     }
     if (hasBoundedPreviewResources(frameDocument) && prepared.length + failed.length >= 2) {
       if (!await waitForPreviewGesture(frameDocument, isCurrent, isInteracting)) return;
-      commitPrepared();
+      await commitPrepared();
     }
   }
-  if (await waitForPreviewGesture(frameDocument, isCurrent, isInteracting)) commitPrepared();
+  if (await waitForPreviewGesture(frameDocument, isCurrent, isInteracting)) await commitPrepared();
 }
 
 function readPreviewMermaidPalette(

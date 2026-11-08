@@ -70,8 +70,12 @@ const mermaidResources = createMermaidDiagramRenderPool({
   const renderer = createPreviewMermaidRenderer(mermaidResources, error => { throw error; });
   const painted = () => doc.querySelectorAll('.meo-export-mermaid.is-rendered svg').length;
   try {
-    await renderer.render(doc, 'dark', undefined, () => true, mutate => {
-      const before = painted(); mutate(); batches.push(painted() - before);
+    await renderer.render(doc, 'dark', undefined, () => true, async mutate => {
+      // A prepared batch can wait for the reading owner's next admitted frame.
+      // render() must retain it and settle only after the accepted DOM commit.
+      const before = painted();
+      await new Promise(requestAnimationFrame);
+      mutate(); batches.push(painted() - before);
     });
     return { batches, painted: painted() };
   } finally { renderer.dispose(); runtime.render = original; frame.remove(); }

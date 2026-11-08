@@ -432,6 +432,7 @@
       "scripts/test-preview-preset-host.ts",
       "scripts/test-preview-preset-preferences.ts",
       "scripts/test-preview-presets.ts",
+      "scripts/test-preview-reading-work.ts",
       "scripts/test-preview-rendering.ts",
       "scripts/test-preview-table-bands.ts",
       "scripts/test-preview-table-layout.ts",

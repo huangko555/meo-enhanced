@@ -1710,6 +1710,22 @@ hidden/reveal behavior and atomic changed-formula commits remain required.
 `test-preview-code-update.ts` adds an actually bounded non-windowed case to the
 pending-token matrix, preserving old code until its replacement tokens are ready.
 
+`scripts/test-preview-reading-work.ts` belongs to `test:large-document-budget`
+as a process-only deterministic contract. It checks one shared admission budget,
+latest-key coalescing, bounded ready-result batches, continuation fairness, atomic
+turns, cancellation, failure cleanup and settled completion promises using a
+virtual clock. The existing Mermaid runtime regression defers accepted commits
+to a later frame and requires complete SVG results before render completion.
+The image-actions regression also holds a decoded windowed image behind an
+active gesture, hides Preview before admission and verifies the accepted image
+survives reopening. These checks supplement ordinary/complex/large math and code
+coverage; they do not certify physical input-to-paint latency.
+
+`test-viewport-controller.ts` compares the first linked gesture after an input
+hold with compositor movement before and after event delivery. Exact and windowed
+maps must produce identical results in both directions, preserving accepted
+native caret scrolling while retaining passive wheel observation.
+
 After changes to packaged syntax engines or Webview resource loading, run
 `scripts/test-vscode-resource-loading.ps1 -CodePath <Code.exe>` against the
 production build. Its disposable native profile checks real VS Code resource
