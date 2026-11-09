@@ -28,6 +28,39 @@ exports.run = async () => {
     fs.writeFileSync(file, headings.map((text, index) => `${'#'.repeat(index + 1)} ${text}\n\n${'Readable content.\n\n'.repeat(35)}`).join('\n'));
     await vscode.workspace.getConfiguration('meoEnhanced').update('language', 'en', vscode.ConfigurationTarget.Global);
     await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(file), 'meoEnhanced.editor');
+    // Admit the editor that supplies this interactive native-tree scenario.
+    // Cold first publication has its own independent production gate.
+    const admissionStarted = performance.now();
+    const expectedText = fs.readFileSync(file, 'utf8');
+    const admissionDeadline = Date.now() + 30000;
+    let admitted;
+    while (!admitted && Date.now() < admissionDeadline) {
+      for (const candidate of page.frames()) {
+        admitted = await candidate.evaluate(({ expectedText, headings }) => {
+          const root = document.querySelector('.editor-root');
+          if (!root || document.visibilityState !== 'visible' || document.querySelector('.meo-preload-toolbar')) return null;
+          const bounds = root.getBoundingClientRect();
+          if (bounds.width <= 0 || bounds.height <= 0) return null;
+          const mode = root.dataset.mode;
+          if (mode === 'preview') {
+            const host = document.querySelector('.preview-host');
+            const doc = document.querySelector('.preview-frame')?.contentDocument;
+            if (!host || host.hidden || host.inert || document.querySelector('.preview-loading')?.hidden !== true
+              || doc?.documentElement.inert !== false || !headings.every(text => doc.querySelector('main.meo-export-doc')?.textContent.includes(text))) return null;
+          } else {
+            const host = document.querySelector('.editor-host');
+            const view = host?.querySelector('.cm-content')?.cmTile?.root?.view;
+            if (!['live', 'source'].includes(mode) || !host || host.hidden || host.inert
+              || document.querySelector('.editor-loading')?.hidden !== true || view?.state.doc.toString() !== expectedText) return null;
+          }
+          return { mode, visible: true, interactive: true, width: bounds.width, height: bounds.height };
+        }, { expectedText, headings }).catch(() => null);
+        if (admitted) break;
+      }
+      if (!admitted) await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.ok(admitted, 'The exact visible, interactive outline fixture must be ready before native controls are tested');
+    result.editorAdmission = { ...admitted, milliseconds: performance.now() - admissionStarted };
     await vscode.commands.executeCommand('meoEnhanced.outline.focus');
     const tree = '.monaco-list[aria-label="MEO Outline"]';
     const rows = `${tree} .monaco-list-rows > .monaco-list-row`;
@@ -48,6 +81,8 @@ exports.run = async () => {
       return;
     }
     await page.waitForFunction(selector => document.querySelectorAll(selector).length === 6, {}, rows);
+    result.initialRowShape = await page.evaluate(({rows,tree}) => ({direct:document.querySelectorAll(rows).length,descendants:document.querySelectorAll(`${tree} .monaco-list-rows .monaco-list-row`).length,labels:[...document.querySelectorAll(rows)].map(row=>row.textContent.trim())}),{rows,tree});
+    assert.deepEqual(result.initialRowShape.labels,headings,'All six actual native rows must expose the exact fixture headings');
     assert.equal(await page.$$eval(`${rows} .codicon-symbol-string, ${rows} .codicon-symbol-number`, icons => icons.length), 0);
     result.cases.push('six native heading rows without symbol icons');
 
