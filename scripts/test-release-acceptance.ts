@@ -103,6 +103,18 @@ try {
   const dryRun = Bun.spawn([process.execPath, path.resolve('scripts/native-acceptance.ts'), `--plan=${planFile}`, `--output=${dryOutput}`, '--dry-run'], { stdout: 'pipe', stderr: 'pipe' });
   const dryError = await new Response(dryRun.stderr).text();
   assert.equal(await dryRun.exited, 0, dryError); assert.equal(fs.existsSync(dryOutput), false, 'Dry run must not execute owners or prepare a session');
+  fs.writeFileSync(path.join(directory, 'fixture.vsix'), 'disposable candidate');
+  fs.writeFileSync(planFile, JSON.stringify({ ...plan, artifact: { file: 'fixture.vsix', sha256: digest('disposable candidate') } }));
+  const init = Bun.spawn(['git', 'init', '--quiet', directory], { stdout: 'ignore', stderr: 'pipe' });
+  const initError = await new Response(init.stderr).text();
+  assert.equal(await init.exited, 0, initError);
+  const dirtyRun = Bun.spawn([process.execPath, path.resolve('scripts/native-acceptance.ts'),
+    `--plan=${planFile}`, `--output=${dryOutput}`, '--confirm-long-run'], { cwd: directory, stdout: 'pipe', stderr: 'pipe' });
+  const dirtyError = await new Response(dirtyRun.stderr).text();
+  assert.notEqual(await dirtyRun.exited, 0);
+  assert.match(dirtyError, /Freeze a clean candidate before native acceptance/,
+    'The executable CLI must read Git state before rejecting an unfrozen candidate');
+  assert.equal(fs.existsSync(dryOutput), false, 'An unfrozen candidate must not start owners or create a native session');
   const badOwner = path.join(directory, 'bad.cjs'); fs.writeFileSync(badOwner, 'function {');
   fs.writeFileSync(planFile, JSON.stringify({ ...plan, steps: plan.steps.map(task => task.id === 'installed'
     ? { ...task, command: { runtime: 'node', script: badOwner } } : task) }));
