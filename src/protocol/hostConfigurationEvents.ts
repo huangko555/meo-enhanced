@@ -1,5 +1,6 @@
 import { decodeUiColors, type UiColors } from '../foundation/uiColors';
 import { normalizeEditorLineHeight } from '../foundation/editorLineHeight';
+import { isUiLanguage, isUiLanguagePreference, type UiLanguage, type UiLanguagePreference } from '../foundation/uiLanguage';
 
 export type CodeThemeDto = {
   readonly name: string;
@@ -15,6 +16,7 @@ export type HostConfigurationEvent =
   | { readonly type: 'editorMouseWheelZoomChanged'; readonly enabled: boolean }
   | { readonly type: 'editorLineHeightChanged'; readonly value: number }
   | { readonly type: 'uiColorsChanged'; readonly colors: UiColors }
+  | { readonly type: 'uiLanguageChanged'; readonly uiLanguage: UiLanguage; readonly uiLanguagePreference: UiLanguagePreference; readonly automaticUiLanguage: UiLanguage }
   | { readonly type: 'toggleMode' }
   | { readonly type: 'developmentStylesChanged'; readonly css: string }
   | { readonly type: 'largeDocumentOptimizationChanged'; readonly enabled: boolean }
@@ -56,6 +58,9 @@ export function decodeCodeTheme(value: unknown): CodeThemeDto | null | undefined
 export function decodeHostConfigurationEvent(value: unknown): HostConfigurationEvent | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
   switch (value.type) {
+    case 'uiLanguageChanged':
+      return isUiLanguage(value.uiLanguage) && isUiLanguagePreference(value.uiLanguagePreference)
+        && isUiLanguage(value.automaticUiLanguage) ? value as HostConfigurationEvent : null;
     case 'uiColorsChanged': {
       const colors = decodeUiColors(value.colors);
       return colors ? { type: value.type, colors } : null;

@@ -163,6 +163,47 @@ try {
       window.dispatchEvent(new MessageEvent('message', { data: global.__initMessage }));
     }, { text, mode, outline });
   };
+  if (process.argv.includes('--host-language-only') || process.argv.length === 2) {
+    for (const text of ['# Language\n\nSelected prose\n', '# Language\n\n' + 'Large document language setting body.\n\n'.repeat(18000)]) {
+      await openFixture(text);
+      await page.waitForFunction(() => document.querySelector('.cm-content') && document.querySelector('.editor-loading')?.hasAttribute('hidden') && !document.querySelector('.editor-host')?.hasAttribute('inert'));
+      await page.evaluate(() => {
+        const view = (window as any).EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+        view.dispatch({ selection: { anchor: 3, head: 9 } });
+        view.scrollDOM.scrollTop = Math.min(1200, view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight);
+      });
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const before = await page.evaluate(() => {
+        const global = window as any;
+        const view = global.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+        global.__languageView = view; global.__languageDocument = view.state.doc;
+        return { selection: view.state.selection.toJSON(), top: view.scrollDOM.scrollTop };
+      });
+      for (const [preference, language] of [['en', 'en'], ['zh-CN', 'zh-CN'], ['auto', 'en'], ['auto', 'zh-CN']] as const) {
+        await page.evaluate(({ preference, language }) => window.dispatchEvent(new MessageEvent('message', { data: {
+          type: 'uiLanguageChanged', uiLanguagePreference: preference, uiLanguage: language, automaticUiLanguage: language
+        } })), { preference, language });
+        await page.waitForFunction(({ preference, language }) => {
+          const input = document.querySelector<HTMLInputElement>('.line-jump-input');
+          return document.documentElement.lang === language && input?.placeholder === (language === 'en' ? 'Lines' : '行号')
+            && input.getAttribute('aria-label') === (language === 'en' ? 'Go to line' : '跳转到行')
+            && document.querySelector(`[data-ui-language="${preference}"]`)?.classList.contains('is-active');
+        }, { timeout: 3000 }, { preference, language });
+        const after = await page.evaluate(() => {
+          const global = window as any;
+          const view = global.EditingSettingsHarness.EditorView.findFromDOM(document.querySelector('.cm-editor'));
+          return { sameView: view === global.__languageView, sameDocument: view.state.doc === global.__languageDocument,
+            selection: view.state.selection.toJSON(), top: view.scrollDOM.scrollTop };
+        });
+        assert.equal(after.sameView, true); assert.equal(after.sameDocument, true);
+        assert.deepEqual(after.selection, before.selection); assert.ok(Math.abs(after.top - before.top) <= 1,
+          'Host language changes preserve the actual document, selection and reading position');
+      }
+      await page.evaluate(() => { delete (window as any).__languageView; delete (window as any).__languageDocument; });
+    }
+    console.log('Host language settings update open ordinary/large Source views, explicit/automatic labels and preference controls without replacing document/view or reading state');
+    if (process.argv.includes('--host-language-only')) { await closeTestBrowser(browser); process.exit(0); }
+  }
   if (process.argv.includes('--latex-only')) {
     await page.exposeFunction('__renderLatexPreview', (request: { text: string; latexDelimiters?: boolean; uiLanguage: 'en' | 'zh-CN'; preset?: PreviewPresetId }) =>
       renderPreviewDocument({ markdownText: request.text, latexDelimiters: request.latexDelimiters, uiLanguage: request.uiLanguage, preset: request.preset, sourceDocumentPath: '' }));

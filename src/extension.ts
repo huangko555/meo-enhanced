@@ -99,7 +99,7 @@ import {
 import type { ExportStyleEnvironment } from './export/runtime';
 import type { ReadingSnapshot } from './protocol/exportSnapshot';
 import type { HostConfigurationEvent } from './protocol/hostConfigurationEvents';
-import { resolveUiLanguage } from './foundation/uiLanguage';
+import { normalizeUiLanguagePreference, resolveUiLanguage } from './foundation/uiLanguage';
 import type { ImageStorageChangedEvent } from './protocol/imageStorage';
 import { createVscodeImageStorage } from './host/vscodeImageStorage';
 import { createVscodeEditingPreferences } from './host/vscodeEditingPreferences';
@@ -567,6 +567,11 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
   }
 
   async handleConfigurationChanged(event: vscode.ConfigurationChangeEvent): Promise<void> {
+    if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.language`)) {
+      const preference = normalizeUiLanguagePreference(vscode.workspace.getConfiguration(EXTENSION_CONFIG_SECTION).get('language', 'auto'));
+      this.broadcast({ type: 'uiLanguageChanged', uiLanguagePreference: preference,
+        uiLanguage: resolveUiLanguage(preference, vscode.env.language), automaticUiLanguage: resolveUiLanguage('auto', vscode.env.language) });
+    }
     if (event.affectsConfiguration(`${EXTENSION_CONFIG_SECTION}.appearance.mouseWheelZoom`)) {
       this.broadcast({ type: 'editorMouseWheelZoomChanged', enabled: this.appearanceSettings.getEditorMouseWheelZoom() });
     }

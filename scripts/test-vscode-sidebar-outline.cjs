@@ -141,6 +141,12 @@ exports.run = async () => {
 
     for (const language of ['zh-CN', 'en']) {
       await vscode.workspace.getConfiguration('meoEnhanced').update('language', language, vscode.ConfigurationTarget.Global);
+      await editorFrame.waitForFunction(language => {
+        const input = document.querySelector('.line-jump-input');
+        return document.documentElement.lang === language
+          && input?.placeholder === (language === 'en' ? 'Lines' : '行号')
+          && input.getAttribute('aria-label') === (language === 'en' ? 'Go to line' : '跳转到行');
+      }, { timeout: 5000 }, language);
       await page.waitForFunction(() => [...document.querySelectorAll('.pane-header')].some(header => header.textContent.includes('MEO Outline')));
       assert.ok(!await page.evaluate(() => [...document.querySelectorAll('.pane-header')].some(header => header.textContent.includes('MEO 大纲'))),
         'the view title remains English when MEO language changes');

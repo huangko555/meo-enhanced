@@ -1367,6 +1367,12 @@ const applyUiLanguage = (language: UiLanguage): void => {
   toolbarOverflowLayoutKey = '';
   syncToolbarOverflow();
 };
+const acceptUiLanguageSettings = (settings: Pick<InitMessage, 'uiLanguage' | 'uiLanguagePreference' | 'automaticUiLanguage'>, initial = false): void => {
+  activeUiLanguagePreference = settings.uiLanguagePreference;
+  automaticUiLanguage = settings.automaticUiLanguage;
+  uiLanguageControl.setActive(activeUiLanguagePreference);
+  if (initial || activeUiLanguage !== settings.uiLanguage) applyUiLanguage(settings.uiLanguage);
+};
 const editorAppearanceRow = document.createElement('div');
 editorAppearanceRow.className = 'more-tools-appearance-row';
 const editorAppearanceLabel = document.createElement('span');
@@ -3606,10 +3612,7 @@ const handleInit = (message: InitMessage) => {
   editorFontWheel.refresh();
   applyEditorLineHeight(message.editorLineHeight ?? DEFAULT_EDITOR_LINE_HEIGHT, { refreshPreview: false });
   acceptEditingPreferences(message.editingPreferences, message.editingPreferencesRevision ?? 0);
-  activeUiLanguagePreference = message.uiLanguagePreference;
-  automaticUiLanguage = message.automaticUiLanguage;
-  uiLanguageControl.setActive(activeUiLanguagePreference);
-  applyUiLanguage(message.uiLanguage);
+  acceptUiLanguageSettings(message, true);
   applyEditorFontSizePreference({
     mode: message.editorFontSizeMode,
     value: message.editorFontSize
@@ -3873,6 +3876,7 @@ window.addEventListener('message', (event) => {
   if (message.type === 'webviewVisibilityResult') { readingLayout.accept(message); return; }
   if (message.type === 'webviewVisibilityChanged') { readingLayout.refresh(); return; }
   if (message.type === 'editorLineHeightChanged') { applyEditorLineHeight(message.value); return; }
+  if (message.type === 'uiLanguageChanged') { acceptUiLanguageSettings(message); return; }
   if (message.type === 'editorMouseWheelZoomChanged') { editorFontWheel.flush(); editorMouseWheelZoom = message.enabled; editorFontWheel.refresh(); return; }
   if (message.type === 'uiColorsResult') { uiColorsTransport.accept(message); return; }
   if (message.type === 'uiColorsChanged') { uiColors = message.colors; refreshUiColors(); return; }

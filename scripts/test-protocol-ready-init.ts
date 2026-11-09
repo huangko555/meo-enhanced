@@ -123,6 +123,12 @@ assert.deepEqual(decodeEditorCommand({ type: 'setEditorMouseWheelZoom', enabled:
 assert.equal(decodeEditorCommand({ type: 'setEditorMouseWheelZoom', enabled: 1 }), null);
 assert.deepEqual(decodeHostConfigurationEvent({ type: 'editorMouseWheelZoomChanged', enabled: false }), { type: 'editorMouseWheelZoomChanged', enabled: false });
 assert.equal(decodeHostConfigurationEvent({ type: 'editorMouseWheelZoomChanged', enabled: 'false' }), null);
+const uiLanguageEvent = { type: 'uiLanguageChanged', uiLanguage: 'zh-CN', uiLanguagePreference: 'auto', automaticUiLanguage: 'zh-CN' } as const;
+assert.deepEqual(decodeHostConfigurationEvent(uiLanguageEvent), uiLanguageEvent);
+for (const field of ['uiLanguage', 'uiLanguagePreference', 'automaticUiLanguage']) {
+  assert.equal(decodeHostConfigurationEvent({ ...uiLanguageEvent, [field]: 'invalid' }), null);
+  assert.equal(decodeHostConfigurationEvent({ ...uiLanguageEvent, [field]: undefined }), null);
+}
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSize: 9 }), null);
 assert.equal(decodeInitMessage({ ...completeInit, editorFontSize: 14.5 }), null);
 assert.equal(decodeInitMessage({ ...completeInit, gitDiffDetailsVisible: 'yes' }), null);
