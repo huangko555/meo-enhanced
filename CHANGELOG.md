@@ -45,6 +45,12 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Used the default cursor over Live images, showing a link cursor only when Ctrl or Meta makes a linked image navigable.
 - Added version details to the feedback menu and kept repeated version-copy feedback stable without a transient copying message.
 - Preserved long Mermaid node labels in Preview and HTML, PDF and Word exports instead of clipping them to a fixed label width.
+- Kept formula content separate from Preview action controls and retired those controls when a block changes between formulas, diagrams and ordinary code.
+- Preserved HTML whitespace in Word exports.
+- Hid the unpublished Extras settings tab.
+- Retained the first linked Source/Preview scroll after editing, including native movement before passive scroll delivery.
+- Reduced repeated outline, syntax and rendered-block work during reading, with visible outline rows, incremental Live windows and shared budgets for nearby Preview resources.
+- Deferred late code-color results and offscreen Live buffer expansion through the existing reading and input owners. Some large documents still show occasional pauses during first layout.
 
 ## 0.3.40
 - Aligned HTML rendering across Live, Preview and exports, including omitted child end tags, native author-defined sizing and supported SVG fill rules, while preserving source-completion boundaries.
