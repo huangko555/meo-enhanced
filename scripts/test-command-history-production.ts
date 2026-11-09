@@ -43,6 +43,12 @@ try {
       }, { ranges: offsetRanges(beforeRanges), mainIndex });
       if (action !== 'native-ranges') await page.waitForSelector('.selection-inline-menu.is-visible');
       await frames(page, 8);
+      // Initial viewport coloring may finish after the lines mount. Measure
+      // history paint from its actual colored witness; cold paint has its own gate.
+      if (mode === 'source') await page.waitForFunction(() => {
+        const witness = [...document.querySelectorAll('.editor-host .cm-line')].find(line => line.textContent?.includes('HISTORY_WITNESS'));
+        return witness && [...witness.querySelectorAll('span')].some(span => Number(getComputedStyle(span).fontWeight) >= 600);
+      }, { timeout: 2000 });
       const clip = await page.evaluate(() => {
         const node = [...document.querySelectorAll<HTMLElement>('.editor-host .cm-line')].find(line => line.textContent?.includes('HISTORY_WITNESS'))!;
         // Keep the unchanged witness on the same compositor text-raster path.

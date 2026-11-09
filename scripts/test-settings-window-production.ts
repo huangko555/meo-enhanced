@@ -858,7 +858,8 @@ try {
   const cursors = await page.$$eval('.settings-radio-input', elements => elements.map(element => [getComputedStyle(element).cursor, getComputedStyle(element.parentElement!).cursor]));
   assert.ok(cursors.every(([input, label]) => input === 'pointer' && label === 'pointer'));
   await page.click('.settings-search'); await page.keyboard.type('空符号');
-  assert.deepEqual(await page.$$eval('.settings-tab-badge', elements => elements.map(element => [element.textContent, (element as HTMLElement).hidden])), [['0', false], ['0', false], ['1', false], ['0', false], ['0', false], ['0', false], ['0', false]]);
+  assert.deepEqual(await page.$$eval('.settings-tab-badge', elements => elements.map(element => [element.textContent, (element as HTMLElement).hidden])), [['0', false], ['0', false], ['1', false], ['0', false], ['0', false], ['0', false]]);
+  assert.equal(await page.$('.settings-tab[data-tab="extensions"]'), null, 'Search keeps the unpublished Extras tab hidden');
   assert.equal(await page.$eval('.settings-searchbox svg', element => getComputedStyle(element).display), 'block');
   await page.click('.settings-tab[data-tab="shortcuts"]');
   assert.equal(await page.$eval('.settings-search-clear', element => (element as HTMLElement).hidden), false);
@@ -1239,7 +1240,7 @@ try {
     await page.click('.settings-search-clear'); await page.keyboard.type('图片 path');
     assert.deepEqual(await page.$$eval('.settings-item', elements => elements.map(element => (element as HTMLElement).dataset.setting)), ['imageStorage']);
     await page.click('.settings-search-clear'); await page.keyboard.type('图片 theme');
-    assert.deepEqual(await page.$$eval('.settings-tab-badge', elements => elements.map(element => element.textContent)), ['0', '0', '0', '0', '0', '0', '0']);
+    assert.deepEqual(await page.$$eval('.settings-tab-badge', elements => elements.map(element => element.textContent)), ['0', '0', '0', '0', '0', '0']);
     assert.ok(await page.$('.settings-empty'));
     await page.click('.settings-search-clear'); await page.keyboard.type('不自动补全');
     assert.deepEqual(await page.$$eval('.settings-item', elements => elements.map(element => (element as HTMLElement).dataset.setting)), ['pairMode'], 'choice labels are searchable in the other UI language');

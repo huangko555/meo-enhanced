@@ -223,6 +223,7 @@ try {
       }, text);
       await page.waitForFunction(() => document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!
         .querySelector('img[alt="late"]'));
+      await page.waitForFunction(() => !document.querySelector('.preview-loading:not([hidden])'));
       await frame.$eval('img[alt="late"]', image => image.scrollIntoView({ block: 'center' }));
       await frame.evaluate(() => {
         const scope = window as any, decode = HTMLImageElement.prototype.decode;
@@ -230,15 +231,36 @@ try {
         HTMLImageElement.prototype.decode = function() {
           return decode.call(this).then(() => { if (this.alt === 'late') scope.__lateImageDecoded = true; });
         };
-        document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 71, button: 0, clientX: 30, clientY: 60 }));
       });
-      releaseLateImage();
-      await page.waitForFunction(() => (document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentWindow as any).__lateImageDecoded,
-        { polling: 10 });
-      assert.equal(await frame.$eval('img[alt="late"]', image => (image as HTMLElement).dataset.meoPreviewImageReady), undefined,
-        'A held reading gesture must defer the decoded image commit');
-      await page.evaluate(() => (window as any).__previewController.setVisible(false));
-      await waitImage('late');
+      // Observe the scriptless Preview frame from the parent's realm, as its
+      // production input callbacks do.
+      await page.evaluate(() => {
+        const scope = window as any;
+        const content = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+        content.addEventListener('pointerdown', event => {
+          scope.__lateImagePointer = { trusted: event.isTrusted, button: event.button };
+        }, { once: true, capture: true });
+        content.addEventListener('pointermove', event => { scope.__lateImageMove = event.isTrusted; }, { once: true, capture: true });
+      });
+      const heldTarget = await frame.$('h1'); assert.ok(heldTarget);
+      const heldBounds = await heldTarget.boundingBox(); assert.ok(heldBounds);
+      await heldTarget.dispose();
+      const heldPoint = { x: heldBounds.x + 20, y: heldBounds.y + heldBounds.height / 2 };
+      await page.bringToFront();
+      await page.mouse.move(heldPoint.x, heldPoint.y);
+      await page.waitForFunction(() => (window as any).__lateImageMove === true, { timeout: 2000 });
+      await page.mouse.down();
+      try {
+        await page.waitForFunction(() => (window as any).__lateImagePointer?.trusted === true, { timeout: 2000 });
+        assert.equal(await page.evaluate(() => (window as any).__lateImagePointer.button), 0);
+        releaseLateImage();
+        await page.waitForFunction(() => (document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentWindow as any).__lateImageDecoded,
+          { polling: 10 });
+        assert.equal(await frame.$eval('img[alt="late"]', image => (image as HTMLElement).dataset.meoPreviewImageReady), undefined,
+          'A held reading gesture must defer the decoded image commit');
+        await page.evaluate(() => (window as any).__previewController.setVisible(false));
+        await waitImage('late');
+      } finally { await page.mouse.up(); }
       await page.evaluate(() => (window as any).__previewController.setVisible(true));
       await waitImage('late');
       await frame.evaluate(() => (window as any).__restoreImageDecode());

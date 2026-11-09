@@ -108,8 +108,11 @@ try {
         await page.click('button[data-mode="source"]');
         await page.waitForFunction(() => document.querySelector<HTMLElement>('.editor-root')?.dataset.mode === 'source');
         if (await page.$eval('.source-preview-button', element => element.getAttribute('aria-pressed') !== 'true')) await page.click('.source-preview-button');
-        await page.waitForFunction(() => document.querySelector('.source-preview-more-panel .preview-preset-control')
-          && !document.querySelector<HTMLElement>('.preview-host')!.inert);
+        await page.waitForFunction(() => {
+          const host = document.querySelector<HTMLElement>('.preview-host');
+          return document.querySelector('.source-preview-more-panel .preview-preset-control')
+            && host && !host.hidden && !host.inert && !host.querySelector('.preview-loading:not([hidden])');
+        });
         await settle();
       }
       assert.equal(requests.some(request => request.type === 'requestPreviewRender' && Boolean(request.window)), large);

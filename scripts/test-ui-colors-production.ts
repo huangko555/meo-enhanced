@@ -90,7 +90,8 @@ try {
   assert.equal(await page.$$eval('.meo-tooltip.is-visible', elements => elements.length), 1, 'color guidance uses the one shared hint');
   await page.mouse.move(0, 0);
   await checkSemanticColors('native dark');
-  assert.deepEqual(await page.$$eval('.settings-tab-label', elements => elements.map(e => e.textContent)), ['常规', '外观', '输入', '预览预设', '快捷键', '扩展功能', '关于']);
+  assert.deepEqual(await page.$$eval('.settings-tab-label', elements => elements.map(e => e.textContent)), ['常规', '外观', '输入', '预览预设', '快捷键', '关于']);
+  assert.equal(await page.$('.settings-tab[data-tab="extensions"]'), null, 'Theme changes keep unpublished Extras hidden');
   await page.click('[data-tab="general"]'); await page.keyboard.press('ArrowLeft');
   assert.equal(await page.$eval('.settings-tab[aria-selected="true"]', e => (e as HTMLElement).dataset.tab), 'about');
   await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight');

@@ -44,17 +44,20 @@ async function observeHandoffPaints(page: Page, frames: (count?: number) => Prom
   return {
     async sample(count: number) {
       expectedFrames = count;
-      rawTops = await page.evaluate(async count => {
-        const tops: Array<number | null> = [];
-        for (let index = 0; index < count; index++) {
+      rawTops = [];
+      for (let index = 0; index < count; index++) {
+        rawTops.push(await page.evaluate(async index => {
           await new Promise(requestAnimationFrame);
           const view = (window as any).nativeEditor.view;
           const target = view.contentDOM.querySelector('[data-handoff-witness]') as HTMLElement | null;
-          tops.push(target?.getBoundingClientRect().top ?? null);
+          const top = target?.getBoundingClientRect().top ?? null;
           document.getElementById('handoff-paint-epoch')!.style.backgroundColor = `rgb(${20 + index * 10},70,90)`;
-        }
-        return tops;
-      }, count);
+          return top;
+        }, index));
+        // Screencast packets can coalesce rAF updates. Keep the continuous
+        // stream, and observe this actual epoch before advancing its marker.
+        paints.push((await client.send('Page.captureScreenshot', { format: 'png', fromSurface: true })).data);
+      }
       return rawTops;
     },
     async finish(label: string, beforeTop: number) {

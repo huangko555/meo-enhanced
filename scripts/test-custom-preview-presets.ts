@@ -245,13 +245,17 @@ for (const base of ['default', 'github-readme'] as const) {
 }
 const preview = exportRuntime.renderPreviewDocument({ markdownText: text, sourceDocumentPath: 'C:/tmp/test.md', uiLanguage: 'en', styleEnvironment: environment, preset: dual.id, presetDefinition: dual });
 assert.equal(preview.presetRevision, dual.custom!.revision);
+const frozenStyles = buildPresetPreviewStyles(dual.id,
+  { ...environment, ...resolvePreviewPresetSettings(dual.id, environment, dual) }, 'dark', 'responsive', dual);
+assert.ok(preview.styles.dark.startsWith(frozenStyles), 'Preview shares the frozen preset styles before its reading controls');
 const options = { readingSnapshot: { snapshotId: 'custom', text, appearance: 'dark' as const, uiLanguage: 'en' as const, environment, preset: dual.id, presetRevision: dual.custom!.revision }, presetDefinition: dual, sourceDocumentPath: 'C:/tmp/test.md', outputFilePath: 'C:/tmp/test.html', target: 'html' as const, mermaidRuntimeSrc: '', baseHref: '', title: 'Test', shikiLanguageAssetsRoot: path.resolve('webview/dist') };
 const exporting = exportRuntime.renderExportHtmlDocument(options);
 const updated = await library.import(JSON.stringify({ ...basic, id: 'paper-notes' }), async () => ':root { --meo-bg: #eeeeee; }');
 assert.ok(!library.diagnostics().some(issue => issue.preset === dual.id), 'Successful updates clear the preset error');
 assert.notEqual(updated.custom!.revision, dual.custom!.revision);
 const html = await exporting;
-assert.ok(html.htmlDocument.includes(preview.styles.dark), 'Export freezes the exact Preview style before updates');
+assert.ok(html.htmlDocument.includes(frozenStyles), 'Export freezes the exact preset style before updates');
+assert.ok(!html.htmlDocument.includes('.meo-preview-code-line::before'), 'Standalone exports omit Preview-only line-number controls');
 assert.ok(!html.htmlDocument.includes('--meo-bg: #eeeeee'));
 const word = await exportRuntime.renderExportHtmlDocument({ ...options, target: 'docx' });
 assert.ok(word.htmlDocument.includes('--meo-bg: #ffffff'));

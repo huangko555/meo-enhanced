@@ -119,7 +119,8 @@ try {
   assert.equal(await page.evaluate(() => (document.activeElement as HTMLElement).dataset.value), 'github-readme', 'Arrow navigation follows preset rows');
   await page.click('.preview-preset-dropdown-panel .preview-dropdown-footer');
   assert.equal(await page.$eval('.settings-tab[data-tab="presets"]', el => el.getAttribute('aria-selected')), 'true');
-  assert.deepEqual(await page.$$eval('.settings-tab', els => els.map(el => (el as HTMLElement).dataset.tab)), ['general', 'appearance', 'typing', 'presets', 'shortcuts', 'extensions', 'about']);
+  assert.deepEqual(await page.$$eval('.settings-tab', els => els.map(el => (el as HTMLElement).dataset.tab)), ['general', 'appearance', 'typing', 'presets', 'shortcuts', 'about']);
+  assert.equal(await page.$('.settings-tab[data-tab="extensions"]'), null, 'Preset management keeps unpublished Extras hidden');
   assert.equal(await page.$eval('.preview-preset-dropdown-panel', el => (el as HTMLElement).hidden), true);
   for (const id of ['default', 'github-readme', 'newsprint', 'whitey', 'obsidian-minimal']) {
     assert.deepEqual(await page.$eval(`[data-preset="${id}"] input`, el => ({ checked: (el as HTMLInputElement).checked, disabled: (el as HTMLInputElement).disabled })), { checked: true, disabled: id === 'default' });
