@@ -49,5 +49,46 @@ try {
   parsedLines = 0;
   assert.deepEqual(await engine.tokenize('javascript', lines.join('\n'), () => true), expected('javascript', lines.join('\n')));
   assert.ok(parsedLines < lines.length, 'The next revision can reuse valid work completed before cancellation');
+
+  // Reproduce a slow cold scanner at the real TextMate/Shiki boundary. The
+  // scope pass stops at its existing 500ms limit while the color pass advances
+  // further, which used to throw before the first visible batch was published.
+  const grammar = highlighter.getLanguage('javascript');
+  const nativeScopeTokens = grammar.tokenizeLine.bind(grammar);
+  for (const source of [
+    'const fixtureAlpha = "fixture value";',
+    ['const fixtureAlpha = "fixture value";', '/* open', ...Array<string>(130).fill('continued'), '*/', 'const tail = "done";'].join('\n')
+  ]) {
+    const baseline = expected('javascript', source);
+    let cold = true, stopped = 0;
+    grammar.tokenizeLine = ((...args: Parameters<typeof nativeScopeTokens>) => {
+      if (!cold) return nativeScopeTokens(...args);
+      cold = false;
+      const clock = Date.now, started = clock();
+      let reads = 0;
+      Date.now = () => started + (++reads > 2 ? 501 : 0);
+      try {
+        const tokens = nativeScopeTokens(...args);
+        stopped += Number(tokens.stoppedEarly);
+        return tokens;
+      } finally { Date.now = clock; }
+    }) as typeof grammar.tokenizeLine;
+    try {
+      assert.deepEqual(await createIncrementalShiki(highlighter).tokenize('javascript', source, () => true), baseline,
+        'A cold scope timeout recovers complete colors, offsets and multiline comment state in the same engine');
+      assert.equal(stopped, 1, 'The regression must actually stop the real scope tokenizer early');
+    } finally { grammar.tokenizeLine = nativeScopeTokens; }
+  }
+
+  const countedCodeToTokens = highlighter.codeToTokens;
+  for (const [error, attempts] of [[new TypeError("Cannot read properties of undefined (reading 'startIndex')"), 2],
+    [new Error('Unrelated tokenizer failure'), 1]] as const) {
+    let calls = 0;
+    highlighter.codeToTokens = (() => { calls++; throw error; }) as typeof highlighter.codeToTokens;
+    try {
+      await assert.rejects(createIncrementalShiki(highlighter).tokenize('javascript', 'const retry = 1;', () => true), value => value === error);
+      assert.equal(calls, attempts, 'Recovery is bounded and unrelated failures keep their original path');
+    } finally { highlighter.codeToTokens = countedCodeToTokens; }
+  }
 } finally { highlighter.dispose(); }
 console.log('Incremental Shiki recomputes only changed grammar ranges');

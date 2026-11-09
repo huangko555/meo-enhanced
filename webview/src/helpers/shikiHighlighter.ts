@@ -3,6 +3,7 @@ import { bundledLanguages, bundledLanguagesInfo } from 'shiki/langs';
 import { createBackgroundShiki } from './backgroundShiki';
 import { toShikiTheme } from './shikiTheme';
 import { createShikiTokenCache } from './shikiTokenCache';
+import { tokenizeShikiCode } from './shikiTokenization';
 import type { RawVscodeTheme, ShikiToken, ShikiTokenLines, ShikiSurface } from './shikiTypes';
 export type { RawVscodeTheme, ShikiToken, ShikiTokenLines, ShikiSurface } from './shikiTypes';
 import { latexMarkdownSyntaxLanguage, mathSyntaxGrammar, withMarkdownSyntax } from '../adapters/markdownSyntaxGrammar';
@@ -386,7 +387,7 @@ function tokenizeInBatches(
     }
     const end = boundary ? boundary.index : code.length;
     const next = lines.lastIndex;
-    const result = highlighter.codeToTokens(code.slice(start, end), {
+    const result = tokenizeShikiCode(highlighter, code.slice(start, end), {
       lang,
       theme: THEME_NAME,
       includeExplanation: 'scopeName',

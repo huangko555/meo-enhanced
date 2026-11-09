@@ -1,5 +1,6 @@
 import { splitLines, type HighlighterCore, type GrammarState } from 'shiki/core';
 import type { ShikiTokenLines } from './shikiTypes';
+import { tokenizeShikiCode } from './shikiTokenization';
 
 type Chunk = { from: number; to: number; before?: GrammarState; after?: GrammarState; lines: ShikiTokenLines };
 type Snapshot = { lang: string; code: string; rows: ReturnType<typeof splitLines>; chunks: Chunk[]; bytes: number; complete: boolean };
@@ -70,7 +71,7 @@ export function createIncrementalShiki(highlighter: HighlighterCore) {
           while (boundary < boundaries.length && boundaries[boundary]! <= from) boundary++;
           const to = Math.min(rows.length, from + 64, boundaries[boundary] ?? Infinity);
           const last = rows[to - 1]!;
-          const result = highlighter.codeToTokens(code.slice(rows[from]![1], last[1] + last[0].length),
+          const result = tokenizeShikiCode(highlighter, code.slice(rows[from]![1], last[1] + last[0].length),
             { lang, theme: 'meo-code-theme', includeExplanation: 'scopeName', grammarState: state });
           chunk = { from, to, before: state, after: result.grammarState,
             lines: result.tokens.map(line => line.map(syntax => ({ offset: syntax.offset, content: syntax.content,
