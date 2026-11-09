@@ -1699,6 +1699,17 @@ browser-protocol key synthesis does not establish this OS boundary.
 
 ## Document-scale coverage
 
+`scripts/test-live-viewport-content-production.ts` samples actual table cells,
+formula HTML, Mermaid SVG, HTML bodies, code actions and task checkboxes during
+continuous trusted wheel input, rather than
+only checking their visible shells after scrolling settles. Ordinary and
+optimized cold/warm cases move the reading band within one retained list root;
+the giant-list and quoted-list cases also bound line reads and iterated rows
+during that movement. The
+contract belongs to the rendered/viewport targeted plans and release browser
+suite. Cached diagrams must fill during the gesture, while offscreen presentation
+continues to use the existing window and resource budgets.
+
 `test-outline-large-startup.ts` protects bounded in-app outline DOM independently
 of the complete heading model. It pairs Live/Source startup, Preview roundtrips,
 ordinary/large replacements and growth across the outline threshold. Trusted

@@ -625,6 +625,7 @@
       "scripts/test-live-rendered-image-copy.ts",
       "scripts/test-live-table-tab-visibility.ts",
       "scripts/test-live-ui-language-switch.ts",
+      "scripts/test-live-viewport-content-production.ts",
       "scripts/test-live-widget-positions.ts",
       "scripts/test-local-links-production.ts",
       "scripts/test-long-code-blocks.ts",

@@ -1,14 +1,14 @@
 import type { EditorState, Range, Text } from '@codemirror/state';
 import { Decoration, type DecorationSet, type WidgetType } from '@codemirror/view';
 import type { Tree } from '@lezer/common';
-import { getLivePresentationBand, createLiveViewportPlaceholder } from './liveViewportPresentation';
+import { getLivePresentationBand, createLiveViewportPlaceholder, isLiveViewportPlaceholder, restrictLiveWidgetPresentation } from './liveViewportPresentation';
 import { getLiveRenderedBlocks, type LiveRenderedBlock } from './liveRenderedBlocks';
 import { getDetailsBlocks } from './detailsBlocks';
 import { getMermaidBlockMode } from './mermaidEditing';
 import { isDisplayMathEditing } from './displayMathEditing';
 import { hasRenderedBlockPreview } from './renderedBlockPreview';
 import { markdownStructureIdentity } from '../editor/markdownStructure';
-import { updateLivePresentationRanges } from '../editor/liveWidgetPositions';
+import { replaceLivePresentationRanges, updateLivePresentationRanges } from '../editor/liveWidgetPositions';
 
 type Bounds = { from: number; to: number };
 type Scope = Bounds & { fromLine: number; toLine: number };
@@ -20,6 +20,8 @@ const detailsIndexes = new WeakMap<readonly object[], RangeIndex<Bounds>>();
 type PresentationWindow = {
   scope: Scope;
   project(ranges: readonly Range<Decoration>[], previous?: DecorationSet): Range<Decoration>[];
+  refreshWidgets(decorations: DecorationSet, previous: EditorState,
+    build: (scope: Scope) => Range<Decoration>[]): DecorationSet | undefined;
   advance(decorations: DecorationSet, previous: PresentationWindow, previousDecorations: DecorationSet): DecorationSet | undefined;
 };
 const windowInputs = new WeakMap<PresentationWindow, { doc: Text; tree: Tree; blocks: object; details: object }>();
@@ -146,6 +148,83 @@ export function livePresentationWindow(state: EditorState, tree: Tree): Presenta
   };
   const result: PresentationWindow = {
     scope,
+    refreshWidgets(decorations, previous, build) {
+      const oldBand = getLivePresentationBand(previous);
+      if (!oldBand || previous.doc !== state.doc) return;
+      const pending: Bounds[] = [];
+      decorations.between(band.from, band.to, (from, to, value) => {
+        if (!isLiveViewportPlaceholder(value.spec.widget)) return;
+        pending.push({ from, to });
+      });
+      pending.sort((left, right) => left.from - right.from || right.to - left.to);
+      const scopes: Scope[] = [];
+      for (const range of pending) {
+        const accepted = scopes.at(-1);
+        if (accepted && range.from >= accepted.from && range.to <= accepted.to) continue;
+        let bounds = { ...range }, closed = false;
+        // A placeholder owns its source block, not the enclosing list/quote.
+        // Reuse the canonical renderer on that closed block without rebuilding
+        // every sibling of a retained, potentially document-sized container.
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const prior = { ...bounds };
+          let richBlock = false;
+          index.between(bounds.from, bounds.to, block => {
+            if (block.from <= bounds.from && block.to >= bounds.to) {
+              bounds.from = block.from; bounds.to = block.to; richBlock = true;
+            }
+          }, true);
+          if (!richBlock) for (const [position, side] of [[bounds.from, 1], [bounds.to, bounds.to === bounds.from ? 1 : -1]] as const) {
+            let node = tree.resolveInner(position, side);
+            if (node.name === 'QuoteMark' || node.name === 'ListMark') continue;
+            // HTML's balanced semantic bounds are indexed above. Its raw
+            // Markdown node can also own unrelated trailing quoted source.
+            while (node.parent && !/^(?:Paragraph|Task|Table|FencedCode|CodeBlock|ATXHeading[1-6]|SetextHeading[12]|HorizontalRule)$/.test(node.name)) node = node.parent;
+            if (node.name !== 'Document') { bounds.from = Math.min(bounds.from, node.from); bounds.to = Math.max(bounds.to, node.to); }
+          }
+          index.extend(bounds); detailsIndex!.extend(bounds);
+          decorations.between(bounds.from, bounds.to, (from, to, value) => {
+            if (value.spec.widget) { bounds.from = Math.min(bounds.from, from); bounds.to = Math.max(bounds.to, to); }
+          });
+          bounds = { from: state.doc.lineAt(bounds.from).from, to: state.doc.lineAt(bounds.to).to };
+          if (bounds.from === prior.from && bounds.to === prior.to) { closed = true; break; }
+        }
+        if (!closed || bounds.from < scope.from || bounds.to > scope.to) return;
+        scopes.push({ ...bounds, fromLine: state.doc.lineAt(bounds.from).number, toLine: state.doc.lineAt(bounds.to).number });
+      }
+      scopes.sort((left, right) => left.from - right.from);
+      const merged: Scope[] = [];
+      for (const part of scopes) {
+        const last = merged.at(-1);
+        if (last && part.from <= last.to) { last.to = Math.max(last.to, part.to); last.toLine = state.doc.lineAt(last.to).number; }
+        else merged.push(part);
+      }
+      let next = decorations;
+      for (const part of merged) {
+        // Ancestor marks outside this block remain accepted; the complete
+        // source context still supplies references, container and list facts.
+        const ranges = build(part).filter(range => range.from >= part.from && range.to <= part.to);
+        next = replaceLivePresentationRanges(next, part.from, part.to, ranges);
+        for (const range of ranges) remember(range);
+      }
+      const retired: Range<Decoration>[] = [];
+      next.between(oldBand.from, oldBand.to, (from, to, value) => {
+        if (value.spec.widget && !isLiveViewportPlaceholder(value.spec.widget)
+          && (to < band.from || from > band.to)) retired.push(value.range(from, to));
+      });
+      if (retired.length) {
+        const originals = new Map<Decoration, Set<string>>();
+        for (const range of retired) {
+          const positions = originals.get(range.value) ?? new Set<string>();
+          positions.add(`${range.from}:${range.to}`); originals.set(range.value, positions);
+        }
+        restrictLiveWidgetPresentation(retired, state);
+        for (const range of retired) remember(range);
+        next = updateLivePresentationRanges(next, { filterFrom: oldBand.from, filterTo: oldBand.to,
+          filter: (from, to, value) => !originals.get(value)?.has(`${from}:${to}`),
+          add: retired, sort: true });
+      }
+      return next;
+    },
     project(ranges: readonly Range<Decoration>[], previous?: DecorationSet): Range<Decoration>[] {
       const projected = ranges.filter(range => intersects(range.from, range.to));
       for (const range of projected) remember(range);

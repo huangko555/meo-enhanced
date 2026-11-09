@@ -22,6 +22,32 @@ import { mergeConflictSourceExtensions, parseMergeConflicts } from '../webview/s
 import { markdownTagField } from '../webview/src/helpers/tags';
 import { getLivePresentationBand, liveViewportPresentationExtensions } from '../webview/src/helpers/liveViewportPresentation';
 import { livePresentationWindow } from '../webview/src/helpers/livePresentationWindow';
+import { collectRenderableHtmlBlocks } from '../webview/src/helpers/htmlContent';
+import { resolvedSyntaxTree } from '../webview/src/helpers/markdownSyntax';
+import { detailsBlockStateExtensions } from '../webview/src/helpers/detailsBlocks';
+
+{
+  let state = EditorState.create({ doc: Array.from({ length: 2_000 }, (_, index) => `<div>HTML block ${index}</div>\n\n`).join(''),
+    extensions: [editorMarkdownLanguage, detailsBlockStateExtensions()] });
+  ensureSyntaxTree(state, state.doc.length, 2_000);
+  state = state.update({}).state;
+  const tree = resolvedSyntaxTree(state), blocks = collectRenderableHtmlBlocks(state, tree);
+  assert.equal(blocks.length, 2_000);
+  const target = blocks[1_000], scope = { from: target.from, to: target.to };
+  let reads = 0;
+  const restore: Array<() => void> = [];
+  for (const block of blocks) for (const key of ['from', 'to'] as const) {
+    const value = block[key];
+    Object.defineProperty(block, key, { configurable: true, get() { reads++; return value; } });
+    restore.push(() => Object.defineProperty(block, key, { configurable: true, writable: true, value }));
+  }
+  try {
+    const scoped = collectRenderableHtmlBlocks(state, tree, scope);
+    assert.equal(scoped.length, 1);
+    assert.equal(scoped[0], target, 'A reading window reuses its complete accepted HTML block');
+    assert.ok(reads < 100, `one scoped HTML read must skip distant accepted blocks (${reads} bound reads)`);
+  } finally { restore.forEach(operation => operation()); }
+}
 
 {
   class AcceptedBlock extends WidgetType {

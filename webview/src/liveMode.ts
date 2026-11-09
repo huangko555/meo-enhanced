@@ -2085,7 +2085,7 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
         // Quote glyphs and list widgets retain their source column widths.
         const initialColumn = countColumn(line.text, state.tabSize, node.from - line.from);
         const lastLine = state.doc.lineAt(Math.max(node.from, node.to - 1)).number;
-        for (let lineNo = line.number; lineNo <= lastLine; lineNo += 1) {
+        for (let lineNo = Math.max(line.number, scope?.fromLine ?? 1); lineNo <= Math.min(lastLine, scope?.toLine ?? lastLine); lineNo += 1) {
           if (depth > 1) {
             quoteDepthByLine.set(lineNo, Math.max(depth, quoteDepthByLine.get(lineNo) ?? 0));
           }
@@ -2103,10 +2103,10 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
         }
         const alertBlock = detectAlertInBlockquote(state, node);
         if (alertBlock) {
-          addAlertBlockDecorations(ranges, state, node, alertBlock, activeLines);
+          addAlertBlockDecorations(ranges, state, node, alertBlock, activeLines, scope);
           return;
         }
-        addLineClass(ranges, state, node.from, node.to, lineStyleDecos.quote);
+        addLineClass(ranges, state, Math.max(node.from, scope?.from ?? 0), Math.min(node.to, scope?.to ?? node.to), lineStyleDecos.quote);
       } else if (node.name === 'Table') {
         const tableInfo = parseTableInfo(state, node);
         parsedTableRanges.push({ from: tableInfo.from, to: tableInfo.to });
@@ -2647,13 +2647,14 @@ function addAlertBlockDecorations(
   state: EditorState,
   node: SyntaxNodeRef,
   alertBlock: AlertBlock,
-  activeLines: Set<number>
+  activeLines: Set<number>,
+  scope?: LiveDecorationScope
 ): void {
   const startLine = state.doc.lineAt(node.from);
   const endLine = state.doc.lineAt(node.to);
   const lineDeco = alertLineDecos[alertBlock.type];
 
-  for (let lineNo = startLine.number; lineNo <= endLine.number; lineNo += 1) {
+  for (let lineNo = Math.max(startLine.number, scope?.fromLine ?? 1); lineNo <= Math.min(endLine.number, scope?.toLine ?? endLine.number); lineNo += 1) {
     const line = state.doc.line(lineNo);
     builder.push(lineDeco.range(line.from));
   }
@@ -3973,6 +3974,12 @@ function rebuildLiveSelectionWithSyntax(decorations: DecorationSet, transaction:
     || merged.some(range => range.from < band.from || range.to > band.to))) {
     const window = nextWindow ?? livePresentationWindow(state, tree);
     if (window) {
+      if (bandChanged) {
+        const refreshed = window.refreshWidgets(result, before,
+          scope => buildDecorationRanges(state, decorations, undefined, scope).ranges);
+        if (!refreshed) return;
+        result = refreshed;
+      }
       const advanced = onlyWindow && previousWindow ? window.advance(result, previousWindow, decorations) : undefined;
       if (advanced) result = prepareLiveWidgetPositions(filterDecorationsOutsideMergeConflicts(state, advanced), true);
       else {

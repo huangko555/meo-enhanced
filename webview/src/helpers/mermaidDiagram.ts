@@ -990,13 +990,13 @@ export class MermaidDiagramWidget extends WidgetType {
       if (refresh) needsPresentation = true;
       if (!needsPresentation || (!nearScreen && !this.fullscreenSession) || this.container !== container || !this.presentationHandle) return;
       if (!refresh && gated && !this.fullscreenSession && getViewportController(view!)?.isUserScrolling()) {
-        // The viewport owns wheel/momentum settlement. Reuse the Editor's
-        // existing frame queue instead of starting layout work in a scroll.
-        // Explicit source/theme updates keep their foreground priority.
+        // Near-screen content cannot wait for a gesture to end. Admit it once
+        // through the existing frame budget, keeping overscan DOM out of the
+        // scroll event and explicit source/theme updates immediate.
         queueMicrotask(() => {
           if (this.container !== container || !container.isConnected) return;
           requestLiveInputDerivedWorkOnFrame(view!, this, () => {
-            if (this.container === container && container.isConnected) this.requestCurrentPresentation();
+            if (needsPresentation && this.container === container && container.isConnected) this.requestCurrentPresentation(true);
           });
         });
         return;

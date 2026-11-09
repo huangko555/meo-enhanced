@@ -59,6 +59,10 @@ class ViewportWidgetPlaceholder extends WidgetType {
   ignoreEvent() { return true; }
 }
 
+export function isLiveViewportPlaceholder(widget: WidgetType | undefined): boolean {
+  return widget instanceof ViewportWidgetPlaceholder;
+}
+
 /** Structural geometry can be retained without constructing the rich widget. */
 export function createLiveViewportPlaceholder(estimatedHeight: number, previous?: WidgetType, preview = false): WidgetType {
   return new ViewportWidgetPlaceholder(previous ?? {

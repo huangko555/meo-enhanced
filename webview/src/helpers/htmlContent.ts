@@ -75,6 +75,7 @@ const renderableHtmlBlockCache = new WeakMap<EditorState['doc'], {
   tabSize: number;
   details: ReturnType<typeof getDetailsBlocks>;
   blocks: RenderableHtmlBlock[];
+  ends: number[];
   styles: string | undefined;
 }>();
 
@@ -308,9 +309,24 @@ export function collectRenderableHtmlBlocks(state: EditorState, tree: Tree = res
   const details = getDetailsBlocks(state);
   const styles = readHtmlDocumentStyles(state.doc, tree) ?? (!usesBackgroundMarkdownStructure(state) && isCompleteMarkdownStructure(tree, state.doc.length)
     ? collectHtmlDocumentStyles(state.doc, tree) : undefined);
-  const cached = scope ? undefined : renderableHtmlBlockCache.get(state.doc);
+  const cached = renderableHtmlBlockCache.get(state.doc);
   if (cached && cached.tree === markdownStructureIdentity(tree) && cached.tabSize === state.tabSize
-    && cached.details === details && cached.styles === styles) return cached.blocks;
+    && cached.details === details && cached.styles === styles) {
+    if (!scope) return cached.blocks;
+    let low = 0, high = cached.blocks.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (cached.ends[middle]! < scope.from) low = middle + 1;
+      else high = middle;
+    }
+    const visible: RenderableHtmlBlock[] = [];
+    for (let index = low; index < cached.blocks.length; index++) {
+      const block = cached.blocks[index]!;
+      if (block.from > scope.to) break;
+      if (block.to >= scope.from) visible.push(block);
+    }
+    return visible;
+  }
   const blocks: RenderableHtmlBlock[] = [];
   let detailsByAnchor: Map<number, ReturnType<typeof getDetailsBlocks>[number]> | undefined;
   const nodes: Array<{ from: number; to: number; standalone?: boolean; bridged?: boolean; tags?: string;
@@ -407,7 +423,11 @@ export function collectRenderableHtmlBlocks(state: EditorState, tree: Tree = res
     }
   }
   blocks.sort((left, right) => left.from - right.from);
-  if (!scope) renderableHtmlBlockCache.set(state.doc, { tree: markdownStructureIdentity(tree), tabSize: state.tabSize, details, blocks, styles });
+  if (!scope) {
+    let maximum = 0;
+    const ends = blocks.map(block => maximum = Math.max(maximum, block.to));
+    renderableHtmlBlockCache.set(state.doc, { tree: markdownStructureIdentity(tree), tabSize: state.tabSize, details, blocks, ends, styles });
+  }
   return blocks;
 }
 
