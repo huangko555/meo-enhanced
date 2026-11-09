@@ -510,6 +510,7 @@ export class ViewportController {
     if (event.type === 'pointerup') this.nativeInputViewport.capture(event.target);
   };
   private readonly onWindowBlur = () => this.finishScrollbarDrag();
+  private readonly onWindowFocus = () => this.windowReturnCorrection?.();
   private readonly onKeyDown = (event: KeyboardEvent) => this.handleKeyDown(event);
   private readonly onKeyUp = (event: KeyboardEvent) => this.handleKeyUp(event);
   private readonly onNativeInput = (event: Event) => {
@@ -563,6 +564,9 @@ export class ViewportController {
       // Capture would also receive the textarea blur caused by grabbing the
       // scrollbar, ending its gesture before the native thumb starts moving.
       view.scrollDOM.ownerDocument.defaultView?.addEventListener('blur', this.onWindowBlur);
+      // Native focus scrolling can finish while the retained Webview is still
+      // unfocused. That scroll could not accept its return correction yet.
+      view.scrollDOM.ownerDocument.defaultView?.addEventListener('focus', this.onWindowFocus);
       view.dom.addEventListener('keydown', this.onKeyDown, true);
       view.dom.addEventListener('keyup', this.onKeyUp, true);
       view.dom.addEventListener('beforeinput', this.onBeforeInput, true);
@@ -2281,6 +2285,7 @@ export class ViewportController {
       this.view.scrollDOM.ownerDocument.removeEventListener('pointerup', this.onPointerUp, true);
       this.view.scrollDOM.ownerDocument.removeEventListener('pointercancel', this.onPointerUp, true);
       this.view.scrollDOM.ownerDocument.defaultView?.removeEventListener('blur', this.onWindowBlur);
+      this.view.scrollDOM.ownerDocument.defaultView?.removeEventListener('focus', this.onWindowFocus);
       this.view.dom.removeEventListener('keydown', this.onKeyDown, true);
       this.view.dom.removeEventListener('keyup', this.onKeyUp, true);
       this.view.dom.removeEventListener('beforeinput', this.onBeforeInput, true);
