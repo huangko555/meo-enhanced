@@ -215,6 +215,169 @@ async function assertListTextSelection(page: import('puppeteer-core').Page): Pro
   }
 }
 
+async function assertListBoundaryDragging(page: import('puppeteer-core').Page): Promise<void> {
+  for (const large of [false, true]) for (const appearance of ['light', 'dark']) for (const prefix of ['1. ', '- ', '   - ']) {
+    const source = '## Heading\n\n' + prefix + '【列表标题】这里是用于拖动选择的正文。\n   - child\n2. After'
+      + (large ? '\n\n' + 'padding text\n'.repeat(8100) : '');
+    const label = `${appearance}/${large ? 'optimized' : 'ordinary'}/${JSON.stringify(prefix)}`;
+    for (const gap of [-2, 1]) {
+      const point = await page.evaluate(async ({ source, appearance, gap }) => {
+        const scope = window as any, harness = scope.ListEditingHarness;
+        harness.applyBuiltInVisualBaseline(appearance);
+        document.documentElement.dataset.editorAppearance = appearance;
+        const editor = scope.__listDragEditor = harness.createEditor({
+          parent: document.getElementById('editor-host')!, text: source, initialMode: 'live', onApplyChanges() {}
+        });
+        editor.focus();
+        for (let i = 0; i < 6; i++) await new Promise(requestAnimationFrame);
+        const view = editor.view;
+        scope.__readListDrag = () => ({
+          anchor: view.state.selection.main.anchor, head: view.state.selection.main.head,
+          markers: view.contentDOM.querySelectorAll('.meo-md-list-marker').length
+        });
+        const walker = document.createTreeWalker(view.contentDOM, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (!node.textContent?.startsWith('【列表标题】')) continue;
+          const range = document.createRange(); range.setStart(node, 0); range.setEnd(node, 1);
+          const rect = range.getBoundingClientRect();
+          return { x: Math.round(rect.left + gap), y: Math.floor((rect.top + rect.bottom) / 2),
+            expected: source.indexOf('【列表标题】'), optimized: harness.usesLargeDocumentDerivedWorkBudget(view.state) };
+        }
+        throw new Error('Missing first list-body glyph');
+      }, { source, appearance, gap });
+      let pointerHeld = false;
+      try {
+        assert.equal(point.optimized, large, label + '/actual budget');
+        await page.mouse.move(point.x, point.y); await page.mouse.down();
+        pointerHeld = true;
+        const baseline = await page.evaluate(() => (window as any).__readListDrag());
+        assert.equal(baseline.anchor, point.expected, label + '/body-gap anchor');
+        for (const delta of [12, 40, 70, 30, -4, -16, -28, 45]) {
+          await page.mouse.move(point.x + delta, point.y, { steps: 3 });
+          const held = await page.evaluate(() => (window as any).__readListDrag());
+          assert.equal(held.anchor, point.expected, label + '/held anchor');
+          assert.equal(held.markers, baseline.markers, label + '/held marker presentation');
+          if (delta >= 30) assert.ok(held.head > held.anchor, label + '/drag selects body text');
+        }
+        const held = await page.evaluate(() => (window as any).__readListDrag());
+        await page.mouse.up();
+        pointerHeld = false;
+        await page.evaluate(async () => { for (let i = 0; i < 5; i++) await new Promise(requestAnimationFrame); });
+        assert.deepEqual(await page.evaluate(() => (window as any).__readListDrag()), held, label + '/release retains selection');
+        assert.equal(await page.evaluate(() => (window as any).__listDragEditor.getText()), source, label + '/source');
+        if (process.env.MEO_TEST_SCREENSHOTS && prefix === '1. ' && gap === -2 && !large) {
+          fs.mkdirSync(process.env.MEO_TEST_SCREENSHOTS, { recursive: true });
+          await page.screenshot({ path: path.join(process.env.MEO_TEST_SCREENSHOTS, `list-boundary-drag-${appearance}.png`) });
+        }
+      } finally {
+        if (pointerHeld) await page.mouse.up();
+        await page.evaluate(() => (window as any).__listDragEditor.destroy());
+      }
+    }
+  }
+  console.log('list boundary dragging passed: prefix gaps, ordered/bullet/nested, both directions, light/dark, ordinary/optimized');
+}
+
+async function assertListContinuationFrames(page: import('puppeteer-core').Page): Promise<void> {
+  const fixtures = [
+    { first: '1. Parent', item: '   - Child', empty: '   - ' },
+    { first: '- Parent', item: '  - Child', empty: '  - ' },
+    { first: '- Parent', item: '\t- Child', empty: '\t- ' },
+    { first: '1. Before', item: '2. Child', empty: '3. ' },
+    { first: '98. Before', item: '99. Child', empty: '100. ' },
+    { first: '- Before', item: '- [x] Child', empty: '- [ ] ' },
+    { first: '> 1. Parent', item: '>    - Child', empty: '>    - ' }
+  ];
+  for (const large of [false, true]) for (const [index, fixture] of fixtures.entries()) {
+    const source = fixture.first + '\n' + fixture.item + '\n\nKEEP NODE'
+      + (large ? '\n\n' + 'padding text\n'.repeat(8100) : '');
+    const label = `${large ? 'optimized' : 'ordinary'}/continuation/${index}`;
+    const before = fixture.first.length + 1 + fixture.item.length;
+    const entered = source.slice(0, before) + '\n' + fixture.empty + source.slice(before);
+    const optimized = await page.evaluate(async ({ source, before }) => {
+      const scope = window as any, harness = scope.ListEditingHarness;
+      const editor = scope.__listContinueEditor = harness.createEditor({
+        parent: document.getElementById('editor-host')!, text: source, initialMode: 'live', onApplyChanges() {}
+      });
+      editor.view.dispatch({ selection: { anchor: before } }); editor.focus();
+      for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame);
+      const view = editor.view, keeper = view.domAtPos(source.indexOf('KEEP NODE')).node;
+      scope.__listContinueFrames = [];
+      scope.__listContinueSample = () => {
+        const text = editor.getText(), line = view.state.doc.lineAt(view.state.selection.main.head);
+        const dom = view.domAtPos(line.to).node;
+        const element = (dom.nodeType === 1 ? dom : dom.parentElement).closest('.cm-line');
+        const marker = element?.querySelector('.meo-md-list-marker, .meo-task-checkbox');
+        const rect = view.coordsAtPos(line.to);
+        return { text, marker: !!marker, markerClass: marker?.className, x: rect?.left, y: rect?.top,
+          keeper: view.domAtPos(text.indexOf('KEEP NODE')).node === keeper };
+      };
+      scope.__armListContinue = () => {
+        scope.__listContinueFrames = [];
+        const sample = () => requestAnimationFrame(() => {
+          scope.__listContinueFrames.push(scope.__listContinueSample());
+          if (scope.__listContinueFrames.length < 12) sample();
+        }); sample();
+      };
+      return harness.usesLargeDocumentDerivedWorkBudget(view.state);
+    }, { source, before });
+    try {
+      assert.equal(optimized, large, label + '/actual budget');
+      await page.evaluate(() => (window as any).__armListContinue());
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(() => (window as any).__listContinueFrames.length === 12);
+      const frames = await page.evaluate(() => (window as any).__listContinueFrames);
+      const accepted = frames.filter((sample: { text: string }) => sample.text === entered);
+      assert.ok(accepted.length > 0, label + '/accepted frames');
+      for (const sample of accepted) {
+        assert.equal(sample.marker, true, label + '/first-frame marker');
+        assert.equal(sample.keeper, true, label + '/unchanged paragraph identity');
+        assert.equal(sample.markerClass, accepted.at(-1).markerClass, label + '/marker appearance');
+        assert.ok(Math.abs(sample.x - accepted.at(-1).x) <= 1, label + '/stable caret x');
+      }
+      await page.evaluate(before => {
+        const view = (window as any).__listContinueEditor.view;
+        view.dispatch({ selection: { anchor: before } });
+      }, before);
+      await page.keyboard.press('Delete');
+      assert.equal(await page.evaluate(() => (window as any).__listContinueEditor.getText()), source, label + '/delete empty prefix');
+      for (const operation of ['undo', 'redo'] as const) {
+        const restored = await page.evaluate(async operation => {
+          const editor = (window as any).__listContinueEditor;
+          await editor[operation]();
+          return { text: editor.getText(), head: editor.view.state.selection.main.head, focused: editor.view.hasFocus };
+        }, operation);
+        assert.equal(restored.text, operation === 'undo' ? entered : source, label + '/' + operation);
+        assert.equal(restored.head, before, label + '/' + operation + '/caret');
+        assert.equal(restored.focused, true, label + '/' + operation + '/focus');
+      }
+    } finally { await page.evaluate(() => (window as any).__listContinueEditor.destroy()); }
+  }
+  console.log('list continuation frames and empty-item Delete passed: nested/tab/ordered/task/quoted, node identity, native history, ordinary/optimized');
+  for (const fixture of [
+    { source: '- Body\n- ', mode: 'source', target: '- Body' },
+    { source: '- Body\n- Next', mode: 'live', target: '- Body' },
+    { source: '```text\n- Body\n- \n```', mode: 'live', target: '- Body' },
+    { source: '<div>\n- Body\n- \n</div>', mode: 'live', target: '- Body' },
+    { source: '---\n- Body\n- \n---', mode: 'live', target: '- Body' }
+  ]) {
+    const before = fixture.source.indexOf(fixture.target) + fixture.target.length;
+    await page.evaluate(async ({ source, mode, before }) => {
+      const scope = window as any;
+      const editor = scope.__listContinueEditor = scope.ListEditingHarness.createEditor({
+        parent: document.getElementById('editor-host')!, text: source, initialMode: mode, onApplyChanges() {}
+      });
+      editor.view.dispatch({ selection: { anchor: before } }); editor.focus();
+      for (let i = 0; i < 6; i++) await new Promise(requestAnimationFrame);
+    }, { ...fixture, before });
+    try {
+      await page.keyboard.press('Delete');
+      assert.equal(await page.evaluate(() => (window as any).__listContinueEditor.getText()),
+        fixture.source.slice(0, before) + fixture.source.slice(before + 1), JSON.stringify(fixture) + '/native deletion');
+    } finally { await page.evaluate(() => (window as any).__listContinueEditor.destroy()); }
+  }
+}
+
 async function assertOrderedMarkerWidths(page: import('puppeteer-core').Page): Promise<void> {
   const fixtures = [
     { initial: '', prefix: '', start: 1, count: 12, suffix: '.', task: false, repeated: 1 },
@@ -394,6 +557,8 @@ async function main(): Promise<void> {
 
     await assertListPasteFrames(page);
     if (process.argv.includes('--paste-only')) return;
+    await assertListBoundaryDragging(page);
+    await assertListContinuationFrames(page);
     await assertListTextSelection(page);
     await assertListPrefixTyping(page);
     await assertOrderedMarkerWidths(page);

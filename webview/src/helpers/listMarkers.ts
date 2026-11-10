@@ -2,6 +2,7 @@ import { documentLines } from './documentLines';
 import { markdownTaskMarkerPattern } from '../../../src/foundation/markdownTaskList';
 import type { ChangeDesc } from '@codemirror/state';
 import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
+import { sourcePresentationSelection } from '../editor/livePointerSelection';
 import { isolateHistory } from '@codemirror/commands';
 import { listHistoryFocusEffect } from '../adapters/codeMirrorListHistoryFocus';
 import {
@@ -523,6 +524,10 @@ class ListMarkerWidget extends WidgetType {
     appendSourceGap();
     return marker;
   }
+
+  ignoreEvent(): boolean {
+    return false;
+  }
 }
 
 export class CheckboxWidget extends UiLanguageSensitiveWidget {
@@ -624,7 +629,7 @@ export function addListMarkerDecoration(
   // A caret or a precise marker-only selection needs editable source. A text
   // selection spanning the item keeps its marker and stable reading geometry.
   // A prefix without a separator also has no room for the widget's trailing gap.
-  const editingMarker = state.selection.ranges.some(range => range.empty
+  const editingMarker = sourcePresentationSelection(state).ranges.some(range => range.empty
     ? range.head > indentEnd && range.head < markerTo
     : range.from >= indentEnd && range.to <= markerTo);
   if (options?.useSourceStyleLiteral || marker.toOffset === marker.markerEndOffset || editingMarker) {
@@ -868,6 +873,28 @@ export function handleBackspaceAtListContentStart(view: EditorView): boolean {
     effects: listHistoryFocusEffect(line.from, selection.head, selectionAnchor),
     annotations: isolateHistory.of('full'),
     userEvent: 'delete.backward'
+  });
+  return true;
+}
+
+export function handleDeleteBeforeEmptyListItem(view: EditorView): boolean {
+  const { state } = view;
+  if (state.readOnly || state.selection.ranges.length !== 1 || !state.selection.main.empty) return false;
+  const position = state.selection.main.head;
+  const line = state.doc.lineAt(position);
+  if (position !== line.to || line.number === state.doc.lines) return false;
+  const marker = listMarkerDataInContainerLine(line.text);
+  if (!marker || lineIsInFrontmatterContent(parseFrontmatter(state), line)) return false;
+  const nextLine = state.doc.line(line.number + 1);
+  const nextMarker = listMarkerDataInContainerLine(nextLine.text);
+  if (!nextMarker || nextLine.text.slice(nextMarker.toOffset).trim()
+    || line.text.slice(0, quotePrefixOffset(line.text)) !== nextLine.text.slice(0, quotePrefixOffset(nextLine.text))) return false;
+  view.dispatch({
+    changes: { from: line.to, to: nextLine.to },
+    selection: { anchor: position },
+    effects: listHistoryFocusEffect(line.from, position, position),
+    annotations: isolateHistory.of('full'),
+    userEvent: 'delete.forward'
   });
   return true;
 }

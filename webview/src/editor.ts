@@ -103,6 +103,7 @@ import {
   handleArrowLeftAtListContentStart,
   handleArrowRightAtListLineStart,
   handleBackspaceAtListContentStart,
+  handleDeleteBeforeEmptyListItem,
   handleEnterAtListContentStart,
   handleEnterOnEmptyListItem,
   handleEnterContinueList,
@@ -2552,6 +2553,10 @@ export function createEditor({
         { key: 'Alt-]', run: indentListByTwoSpaces },
         { key: 'Alt-[', run: outdentListByTwoSpaces },
         { key: 'Backspace', run: deleteBackwardSmart },
+        { key: 'Delete', run: view => isLiveMode(view)
+          && !selectedDisplayMathBody(view.state)
+          && markdownSyntaxContext(view.state, view.state.selection.main.head) !== 'excluded'
+          && handleDeleteBeforeEmptyListItem(view) },
         { key: 'ArrowLeft', run: (view) => tryMoveAcrossRenderedBlockSource(view, false, false) || isLiveMode(view) && handleArrowLeftAtListContentStart(view) },
         { key: 'ArrowRight', run: (view) => tryMoveAcrossRenderedBlockSource(view, true, false) || isLiveMode(view) && handleArrowRightAtListLineStart(view) },
         {
