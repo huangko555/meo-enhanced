@@ -657,7 +657,7 @@ export class MermaidSourcePreviewWidget extends UiLanguageSensitiveWidget {
     // than layout continuously invalidates results, leaving no preview until
     // typing stops. Keep one fixed next checkpoint, read the latest source there,
     // and retain ordinary presentation supersession and lifecycle guards.
-    const interval = acceptedOnly ? 0 : Math.min(1000, Math.max(large && pending ? 120 : 0, preview.widget.updateCostMs(this.source)));
+    const interval = acceptedOnly ? 0 : Math.min(5000, Math.max(large && pending ? 120 : 0, preview.widget.updateCostMs(this.source)));
     const throttle = preview.lastUpdateAt !== undefined && now >= preview.lastUpdateAt
       ? Math.max(0, interval - (now - preview.lastUpdateAt)) : 0;
     preview.timer = window.setTimeout(() => {

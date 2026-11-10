@@ -8,26 +8,27 @@ import { assessLargeDocument } from '../src/foundation/largeDocument';
 export async function checkSlowMermaidInputProgress(browser: Browser, bundle: string): Promise<void> {
   const worker = await Bun.build({ entrypoints: ['webview/src/markdownParseWorker.ts'], target: 'browser', format: 'iife' });
   assert.ok(worker.success);
-  const scenarios = [false, true].flatMap(large => ['stacked', 'side-by-side'].map(layout => ({ large, layout, varying: false })));
-  scenarios.push({ large: false, layout: 'stacked', varying: true }, { large: true, layout: 'side-by-side', varying: true });
-  for (const { large, layout, varying } of scenarios) {
+  const scenarios = [false, true].flatMap(large => ['stacked', 'side-by-side'].map(layout => ({ large, layout, varying: false, delayMs: 220 })));
+  scenarios.push({ large: false, layout: 'stacked', varying: true, delayMs: 220 }, { large: true, layout: 'side-by-side', varying: true, delayMs: 220 },
+    { large: false, layout: 'stacked', varying: false, delayMs: 1100 });
+  for (const { large, layout, varying, delayMs } of scenarios) {
     const page = await browser.newPage();
-    const label = `${large ? 'optimized' : 'ordinary'}/${layout}/${varying ? 'varying' : 'fixed'}`;
+    const label = `${large ? 'optimized' : 'ordinary'}/${layout}/${varying ? 'varying' : delayMs}`;
     try {
       await page.setViewport({ width: 1100, height: 720 });
       await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
       await page.addStyleTag({ path: 'webview/src/styles.css' });
       await page.evaluate(code => { document.body.dataset.meoMarkdownWorkerSrc = URL.createObjectURL(new Blob([code], { type: 'text/javascript' })); }, await worker.outputs[0]!.text());
       await page.addScriptTag({ content: bundle });
-      await page.evaluate(({ large, varying }) => {
+      await page.evaluate(({ large, varying, delayMs }) => {
         const w = window as any;
         w.mermaid = { initialize() {}, async render(_id: string, source: string) {
-          await new Promise(resolve => setTimeout(resolve, varying && !source.includes('[Alpha1]') ? 320 : 220));
+          await new Promise(resolve => setTimeout(resolve, varying && !source.includes('[Alpha1]') ? 320 : delayMs));
           return { svg: `<svg width="240" height="90" data-source="${encodeURIComponent(source)}"><text>${source.match(/Alpha\d*/)?.[0]}</text></svg>` };
         } };
         w.slowEditor = w.MermaidEditingHarness.createEditor({ parent: document.getElementById('app'), initialMode: 'live',
           text: 'Before\n\n```mermaid\nflowchart LR\nA[Alpha] --> B[End]\n```\n\nAfter\n\n' + (large ? 'Background paragraph.\n\n'.repeat(3000) : '') });
-      }, { large, varying });
+      }, { large, varying, delayMs });
       assert.equal(await page.evaluate(() => (window as any).slowEditor.prepareLiveSyntax(() => true)), true);
       assert.equal(await page.evaluate(() => (window as any).MermaidEditingHarness.usesLargeDocumentDerivedWorkBudget((window as any).slowEditor.view.state)), large);
       await page.waitForSelector('.meo-mermaid-block svg'); await page.click('.meo-mermaid-mode-btn');
@@ -55,7 +56,7 @@ export async function checkSlowMermaidInputProgress(browser: Browser, bundle: st
       });
       await page.keyboard.type('1');
       await page.waitForFunction(() => (window as any).slowProbe.paints.some((p: any) => p.value === 'Alpha1' && p.at), { timeout: 5000 });
-      const burst = '234567892345'.repeat(varying ? 2 : 1);
+      const burst = '234567892345'.repeat(delayMs > 1000 ? 4 : varying ? 2 : 1);
       await page.keyboard.type(burst, { delay: 60 });
       await page.waitForFunction(() => { const p = (window as any).slowProbe; return p.paints.some((paint: any) => paint.value === p.accepted && paint.at); }, { timeout: 5000 });
       const result = await page.evaluate(() => {
