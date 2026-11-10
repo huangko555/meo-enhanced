@@ -8933,6 +8933,10 @@ html[data-meo-ui-contrast='high'] .meo-input-suggestion[aria-selected='true'] :i
   cursor: default;
   transition-delay: 0s, 0s, 0s, 200ms;
 }
+.cm-editor .meo-copy-image-btn[aria-disabled="true"][data-meo-transient-unavailable] {
+  opacity: 1;
+  transition-delay: 0s;
+}
 .cm-editor .meo-preview-action-status {
   position: absolute;
   top: 25px;

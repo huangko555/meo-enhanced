@@ -412,21 +412,25 @@ class MermaidToolbarWidget extends UiLanguageSensitiveWidget {
       const current = anchor();
       if (current !== null) selectMermaidSource(view, current);
     }, language);
+    const currentImageRoot = () => {
+      const current = anchor();
+      if (current === null) return null;
+      const owner = chartFor(view, current);
+      const chart = owner && renderedGraphImageRoot(owner);
+      return chart &&
+        !chart.querySelector('.meo-mermaid-error-badge') &&
+        chart.querySelector('svg')
+        ? chart
+        : null;
+    };
     const image = createRenderedBlockImageButton(
       () => {
-        const current = anchor();
-        if (current === null) return null;
-        const owner = chartFor(view, current);
-        const chart = owner && renderedGraphImageRoot(owner);
-        return chart &&
-          !chart.closest('[data-meo-mermaid-rendering="true"]') &&
-          !chart.querySelector('.meo-mermaid-error-badge') &&
-          chart.querySelector('svg')
-          ? chart
-          : null;
+        const chart = currentImageRoot();
+        return chart && !chart.closest('[data-meo-mermaid-rendering="true"]') ? chart : null;
       },
       language,
-      toolbar.ownerDocument
+      toolbar.ownerDocument,
+      () => !!currentImageRoot()?.closest('[data-meo-mermaid-rendering="true"]')
     );
     image.classList.add('meo-code-block-pill');
     const copy = createCopyCodeButton(() => {

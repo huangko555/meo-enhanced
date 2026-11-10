@@ -359,24 +359,31 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   let lastInputAt: number | null = null;
   let lastChangeWasInput = false;
   let previewFrameId: number | null = null;
+  let previewTaskId: number | null = null;
   const hasEditingPreview = (): boolean => view.state.facet(liveInputEditingPreview).some(read => read(view.state));
   const cancelPreviewFrame = (): void => {
     if (previewFrameId !== null) window.cancelAnimationFrame(previewFrameId);
+    if (previewTaskId !== null) window.clearTimeout(previewTaskId);
     previewFrameId = null;
+    previewTaskId = null;
   };
   const scheduleEditingPreview = (): void => {
-    if (previewFrameId !== null || disposed || !hasEditingPreview()
+    if (previewFrameId !== null || previewTaskId !== null || disposed || !hasEditingPreview()
       || view.state.field(liveInputDerivedWorkPhaseField, false)?.phase !== 'pending-input') return;
     // Do not restart this checkpoint on every key: continuous typing must make
     // progress too. Each checkpoint reads the current state, never an old edit.
     previewFrameId = window.requestAnimationFrame(() => {
-      previewFrameId = window.requestAnimationFrame(() => {
-        previewFrameId = null;
+      previewFrameId = null;
+      // Run after this paint opportunity instead of waiting for another frame.
+      // On a busy renderer, that extra frame can postpone the first preview
+      // through several more inputs before its render is even admitted.
+      previewTaskId = window.setTimeout(() => {
+        previewTaskId = null;
         const phase = view.state.field(liveInputDerivedWorkPhaseField, false)?.phase;
         if (!disposed && phase === 'pending-input' && hasEditingPreview()) {
           run(() => view.dispatch({ effects: refreshLiveInputEditingPreviewEffect.of(true) }));
         }
-      });
+      }, 0);
     });
   };
   const remainingQuietTime = (delayMs: number): number => lastInputAt === null

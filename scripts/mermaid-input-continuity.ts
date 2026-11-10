@@ -4,6 +4,58 @@ import sharp from 'sharp';
 import type { Browser } from 'puppeteer-core';
 import { assessLargeDocument } from '../src/foundation/largeDocument';
 
+/** A busy compositor must not add a second frame before local work is admitted. */
+export async function checkEditingPreviewPaintCheckpoint(browser: Browser, bundle: string): Promise<void> {
+  const worker = await Bun.build({ entrypoints: ['webview/src/markdownParseWorker.ts'], target: 'browser', format: 'iife' });
+  assert.ok(worker.success);
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1100, height: 720 });
+    await page.setContent('<style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+    await page.addStyleTag({ path: 'webview/src/styles.css' });
+    await page.evaluate(code => { document.body.dataset.meoMarkdownWorkerSrc = URL.createObjectURL(new Blob([code], { type: 'text/javascript' })); }, await worker.outputs[0]!.text());
+    await page.addScriptTag({ content: bundle });
+    await page.evaluate(() => {
+      const w = window as any;
+      w.mermaid = { initialize() {}, async render(_id: string, source: string) {
+        return { svg: '<svg width="240" height="90"><text>' + source.match(/Alpha\d*/)?.[0] + '</text></svg>' };
+      } };
+      w.checkpointEditor = w.MermaidEditingHarness.createEditor({ parent: document.getElementById('app'), initialMode: 'live',
+        text: 'Before\n\n```mermaid\nflowchart LR\nA[Alpha] --> B[End]\n```\n\nAfter\n\n' + 'Background paragraph.\n\n'.repeat(3000) });
+    });
+    assert.equal(await page.evaluate(() => (window as any).checkpointEditor.prepareLiveSyntax(() => true)), true);
+    assert.equal(await page.evaluate(() => (window as any).MermaidEditingHarness.usesLargeDocumentDerivedWorkBudget((window as any).checkpointEditor.view.state)), true);
+    await page.waitForSelector('.meo-mermaid-block svg'); await page.click('.meo-mermaid-mode-btn');
+    await page.waitForSelector('.meo-mermaid-editing-preview svg');
+    await page.evaluate(() => (window as any).checkpointEditor.whenVisiblePresentationReady(3000));
+    const result = await page.evaluate(async () => {
+      const view = (window as any).checkpointEditor.view;
+      view.dispatch({ selection: { anchor: view.state.doc.toString().indexOf('Alpha') + 5 } }); view.focus();
+      await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame);
+      const raf = window.requestAnimationFrame, caf = window.cancelAnimationFrame, timer = window.setTimeout;
+      const queue = new Map<number, FrameRequestCallback>(); let next = 0;
+      window.requestAnimationFrame = callback => { queue.set(--next, callback); return next; };
+      window.cancelAnimationFrame = id => { if (id < 0) queue.delete(id); else caf(id); };
+      const source = () => (document.querySelector('.meo-mermaid-editing-preview') as any)?.mermaidPreview?.source as string;
+      try {
+        const from = view.state.doc.toString().indexOf('Alpha') + 5;
+        view.dispatch({ changes: { from, insert: '1' }, userEvent: 'input.type' });
+        const beforePaint = source(), pending = [...queue.values()]; queue.clear();
+        for (const callback of pending) callback(performance.now());
+        await new Promise(resolve => timer(resolve, 0));
+        return { beforePaint, afterPaint: source(), text: view.state.doc.toString() };
+      } finally {
+        window.requestAnimationFrame = raf; window.cancelAnimationFrame = caf;
+        for (const callback of queue.values()) raf(callback);
+      }
+    });
+    assert.ok(!result.beforePaint.includes('Alpha1'), 'Primary input gets its paint opportunity before derived work');
+    assert.ok(result.afterPaint.includes('Alpha1'), 'Local preview must accept current source without another slow frame');
+    assert.ok(result.text.includes('Alpha1'));
+    console.log('Editing preview checkpoint: primary paint opportunity precedes local admission without an extra frame');
+  } finally { await page.evaluate(() => (window as any).checkpointEditor?.destroy()); await page.close(); }
+}
+
 /** Reproduce layout slower than typing without depending on machine speed. */
 export async function checkSlowMermaidInputProgress(browser: Browser, bundle: string): Promise<void> {
   const worker = await Bun.build({ entrypoints: ['webview/src/markdownParseWorker.ts'], target: 'browser', format: 'iife' });

@@ -164,7 +164,8 @@ async function renderBlockPng(block: HTMLElement): Promise<Blob> {
 export function createRenderedBlockImageButton(
   target: HTMLElement | (() => HTMLElement | null),
   language: UiLanguage,
-  ownerDocument: Document = typeof target === 'function' ? document : target.ownerDocument
+  ownerDocument: Document = typeof target === 'function' ? document : target.ownerDocument,
+  isTransientlyUnavailable?: () => boolean
 ): HTMLElement {
   const getBlock = typeof target === 'function' ? target : () => target;
   const button = ownerDocument.createElement('span');
@@ -198,6 +199,7 @@ export function createRenderedBlockImageButton(
     if (typeof target === 'function') {
       const disabled = String(getBlock() === null);
       if (button.getAttribute('aria-disabled') !== disabled) button.setAttribute('aria-disabled', disabled);
+      button.toggleAttribute('data-meo-transient-unavailable', disabled === 'true' && isTransientlyUnavailable?.() === true);
     }
   };
   if (typeof target === 'function') imageButtonAvailability.set(button, refreshAvailability);
