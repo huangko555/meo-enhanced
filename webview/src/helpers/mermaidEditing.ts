@@ -166,10 +166,19 @@ export const mermaidEditingStateField = StateField.define<MermaidEditingState>({
 /** A pending diagram delays source refresh only while that edit session owns
  * presentation. A completed navigation must not wait on the retired preview. */
 export const mermaidEditingReadiness = liveInputDerivedWorkReadiness.of((state, view) => {
-  const anchor = state.field(mermaidEditingStateField, false)?.activeAnchor;
+  const editing = state.field(mermaidEditingStateField, false), anchor = editing?.activeAnchor;
   if (!view || anchor == null) return true;
-  const preview = `.meo-mermaid-editing-preview[data-meo-mermaid-anchor="${anchor}"]`;
-  return !view.dom.querySelector(`${preview}[data-meo-mermaid-rendering="true"], ${preview} [data-meo-mermaid-rendering="true"]`);
+  const root = view.dom.querySelector<PreviewElement>(`.meo-mermaid-editing-preview[data-meo-mermaid-anchor="${anchor}"]`);
+  if (!root) return true;
+  if (root.dataset.meoMermaidRendering === 'true' || root.querySelector('[data-meo-mermaid-rendering="true"]')) return false;
+  const preview = root.mermaidPreview;
+  if (!preview || preview.sourceDoc === state.doc || editing?.activeTo == null || editing.activeTo - anchor > 32_768) return true;
+  // Text changes before the local paint checkpoint installs DOM wait markers.
+  // Do not let a document-wide rebuild enter that gap and compete with layout.
+  // Unknown/changed fences remain the authoritative parser's responsibility.
+  const current = boundedMermaidEditingSource(state, anchor, editing.activeTo);
+  return !current || current.language !== root.dataset.meoGraphLanguage?.split(/\s+/)[0].toLowerCase()
+    || current.source === preview.source;
 });
 
 export function getMermaidBlockViewport(state: EditorState, anchor: number): MermaidViewportState {

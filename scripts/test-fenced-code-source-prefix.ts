@@ -8,6 +8,8 @@ import { getFencedCodeContent } from '../webview/src/helpers/mermaidDiagram';
 import { applySourceLinePrefix, outerOffsetToSourceOffset, sourceOffsetToOuterOffset } from '../webview/src/helpers/sourceLinePrefix';
 import { mathFenceBodyRange } from '../src/shared/mathFence';
 import { boundedMermaidEditingSource, mermaidSourceForAnchor } from '../webview/src/helpers/mermaidSource';
+import { boundedDisplayMathRange, collectDocumentMathRanges, getDisplayMathCopySource, getDisplayMathSource } from '../webview/src/helpers/displayMathBlocks';
+import { latexDelimitersFacet } from '../webview/src/editor/mathSyntaxPreference';
 
 for (const fence of ['```', '~~~', '````', '~~~~']) {
   for (const [suffix, expected] of [
@@ -124,3 +126,28 @@ for (const [doc, kind, line] of [
   } finally { delete (state.doc as any).line; }
 }
 console.log('Fenced code container-prefix round trips passed');
+
+for (const language of ['math', 'latex', 'tex', 'katex']) for (const latex of [false, true]) {
+  for (const { parent, prefix } of [
+    { parent: 'Paragraph', prefix: '' }, { parent: '- Item', prefix: '  ' },
+    { parent: '- Parent\n  - Child', prefix: '    ' }, { parent: '> Paragraph', prefix: '> ' },
+    { parent: '> - Item', prefix: '>   ' }, { parent: '[^note]: Definition', prefix: '    ' }
+  ]) {
+    const payload = ['\\[', '  x = 1', '', '  + y', '\\]'];
+    const text = [parent, prefix.trimEnd(), prefix + '```' + language, ...payload.map(line => prefix + line), prefix + '```'].join('\n');
+    const state = EditorState.create({ doc: text, extensions: [markdown({ extensions: [footnoteMarkdownExtension] }), latexDelimitersFacet.of(latex)] });
+    const ranges = collectDocumentMathRanges(state).filter(range => range.fenceSource);
+    assert.equal(ranges.length, 1);
+    const authoritative = ranges[0]!, anchor = state.doc.lineAt(authoritative.from).from;
+    const owned = boundedDisplayMathRange(state, anchor, authoritative.to);
+    assert.ok(owned, `${language}/${JSON.stringify(prefix)}: closed owned formula remains locally readable`);
+    assert.equal(owned.content, authoritative.content, 'Owned formulas retain delimiter settings');
+    assert.deepEqual(getDisplayMathSource(state, owned), getDisplayMathSource(state, authoritative), 'Owned source retains container prefixes and positions');
+    assert.deepEqual(getDisplayMathCopySource(state, owned), getDisplayMathCopySource(state, authoritative), 'Copy/select boundaries match authoritative formulas');
+  }
+}
+for (const doc of ['```math\nx=1', '```math\nx=1\n```\nAfter', '```js\nx=1\n```', '```math\n' + 'x'.repeat(32_768) + '\n```']) {
+  const state = EditorState.create({ doc });
+  assert.equal(boundedDisplayMathRange(state, 0, state.doc.length), null, 'Unknown, changed, open or oversized formula bounds stay with authoritative parsing');
+}
+console.log('Owned formula projections match authoritative aliases, settings, containers and source operations');

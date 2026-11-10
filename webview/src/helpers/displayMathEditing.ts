@@ -1,8 +1,9 @@
-import { ChangeSet, EditorSelection, StateField, Transaction, type EditorState } from '@codemirror/state';
+import { ChangeSet, EditorSelection, Facet, StateField, Transaction, type EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { isolateHistory } from '@codemirror/commands';
 import { renderLatexMathToHtml } from './math';
-import { collectDocumentMathRanges, getDisplayMathCopySource, getDisplayMathSource } from './displayMathBlocks';
+import { collectDocumentMathRanges, getDisplayMathCopySource, getDisplayMathSource, type DocumentMathRange } from './displayMathBlocks';
+import { markdownStructureAvailable } from '../editor/markdownStructure';
 import { createCopyCodeButton, createSelectAllCodeButton } from './codeBlockControls';
 import { createRenderedBlockImageButton } from './renderedBlockImage';
 import { uiLanguageFacet } from '../editor/uiLanguage';
@@ -16,11 +17,24 @@ import { getViewportController } from './viewportController';
 import { isBlockReading } from '../editor/blockInteraction';
 import { insertLiteralSourceNewline } from '../editor/indentedCodeEditing';
 
+/** The existing presentation owner supplies mapped bounds, without publishing
+ * its bounded editing projection as document syntax. */
+export const displayMathPresentationRange = Facet.define<
+  (state: EditorState, position: number) => DocumentMathRange | null,
+  ((state: EditorState, position: number) => DocumentMathRange | null) | null
+>({ combine: values => values.at(-1) ?? null });
+
+function currentDisplayMathRange(state: EditorState, position: number) {
+  if (!markdownStructureAvailable(state)) return state.facet(displayMathPresentationRange)?.(state, position) ?? null;
+  return collectDocumentMathRanges(state).find(range => range.fencedDisplay
+    && position >= state.doc.lineAt(range.from).from && position <= range.to) ?? null;
+}
+
 function activeMathSource(state: EditorState) {
   if (state.readOnly || state.selection.ranges.length !== 1) return null;
   const selection = state.selection.main;
-  const range = collectDocumentMathRanges(state).find(range => range.fencedDisplay
-    && selection.from >= range.from && selection.to <= range.to);
+  const candidate = currentDisplayMathRange(state, selection.from);
+  const range = candidate && selection.to <= candidate.to ? candidate : null;
   const body = range && getDisplayMathCopySource(state, range);
   const source = range && getDisplayMathSource(state, range);
   return range && body && source ? { range, body, prefix: source.prefix } : null;
@@ -133,9 +147,9 @@ export function getPreviousDisplayMathResult(state: EditorState, from: number, t
 
 export function selectedDisplayMathBody(state: EditorState) {
   const selection = state.selection.main;
-  const range = collectDocumentMathRanges(state).find(range => range.fencedDisplay
-    && selection.from >= state.doc.lineAt(range.from).to + 1
-    && selection.to < state.doc.lineAt(range.to - 1).from);
+  const candidate = currentDisplayMathRange(state, selection.from);
+  const range = candidate && selection.from >= state.doc.lineAt(candidate.from).to + 1
+    && selection.to < state.doc.lineAt(candidate.to - 1).from ? candidate : null;
   if (!range) return null;
   const source = getDisplayMathSource(state, range);
   return source ? { first: source.first.number, last: source.last.number, prefix: source.prefix } : null;
@@ -181,9 +195,8 @@ export function createDisplayMathActions(view: EditorView, anchor: () => number,
   actions.className = 'meo-math-copy-actions';
   actions.contentEditable = 'false';
   const body = () => {
-    const range = collectDocumentMathRanges(view.state)
-      .find(range => range.fencedDisplay && view.state.doc.lineAt(range.from).from === anchor());
-    return range ? getDisplayMathCopySource(view.state, range) : null;
+    const range = currentDisplayMathRange(view.state, anchor());
+    return range && view.state.doc.lineAt(range.from).from === anchor() ? getDisplayMathCopySource(view.state, range) : null;
   };
   const language = view.state.facet(uiLanguageFacet);
   const select = createSelectAllCodeButton(() => {

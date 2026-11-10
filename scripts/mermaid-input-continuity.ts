@@ -4,6 +4,70 @@ import sharp from 'sharp';
 import type { Browser } from 'puppeteer-core';
 import { assessLargeDocument } from '../src/foundation/largeDocument';
 
+/** An owned math fence must refresh while document structure is still pending. */
+export async function checkFencedMathPendingStructure(browser: Browser, bundle: string): Promise<void> {
+  const worker = await Bun.build({ entrypoints: ['webview/src/markdownParseWorker.ts'], target: 'browser', format: 'iife' });
+  assert.ok(worker.success);
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1100, height: 720 });
+    await page.setContent('<style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+    await page.addStyleTag({ path: 'webview/src/styles.css' });
+    await page.evaluate(code => {
+      const w = window as any, NativeWorker = Worker;
+      document.body.dataset.meoMarkdownWorkerSrc = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+      w.mathHeldMessages = 0;
+      window.Worker = class extends NativeWorker {
+        constructor(url: string | URL, options?: WorkerOptions) {
+          super(url, options);
+          this.addEventListener('message', event => { if (w.mathHoldStructure) { w.mathHeldMessages++; event.stopImmediatePropagation(); } });
+        }
+      };
+    }, await worker.outputs[0]!.text());
+    await page.addScriptTag({ content: bundle });
+    await page.evaluate(() => {
+      const w = window as any;
+      w.mathPendingEditor = w.MermaidEditingHarness.createEditor({ parent: document.getElementById('app'), initialMode: 'live',
+        text: 'Reading paragraph.\n\n'.repeat(800) + 'Before\n\n```math\nx=42\n```\n\nAfter\n\n' + 'Background paragraph.\n\n'.repeat(1200) });
+    });
+    assert.equal(await page.evaluate(() => (window as any).mathPendingEditor.prepareLiveSyntax(() => true)), true);
+    assert.equal(await page.evaluate(() => (window as any).MermaidEditingHarness.usesLargeDocumentDerivedWorkBudget((window as any).mathPendingEditor.view.state)), true);
+    await page.evaluate(() => {
+      const view = (window as any).mathPendingEditor.view;
+      view.dispatch({ effects: view.constructor.scrollIntoView(view.state.doc.toString().indexOf('```math'), { y: 'start', yMargin: 80 }) });
+    });
+    await page.waitForSelector('.meo-md-math-fenced-display .katex'); await page.click('.meo-md-math-fenced-display .katex');
+    await page.waitForSelector('.meo-math-live-result .katex-html');
+    await page.evaluate(() => {
+      const w = window as any, view = w.mathPendingEditor.view;
+      view.dispatch({ selection: { anchor: view.state.doc.toString().indexOf('x=42') + 4 } }); view.focus();
+      w.mathHoldStructure = true;
+      document.addEventListener('input', event => { if ((event.target as Element).closest('.cm-content')) w.mathPendingTrusted = event.isTrusted; }, true);
+    });
+    await page.keyboard.type('123', { delay: 60 });
+    await page.waitForFunction(() => document.querySelector('.meo-math-live-result .katex-html')?.textContent?.includes('42123'), { timeout: 1500 });
+    assert.equal(await page.evaluate(() => (window as any).mathPendingTrusted), true);
+    assert.ok(await page.evaluate(() => (window as any).mathHeldMessages > 0), 'The fixture must hold actual Worker publications');
+    assert.ok(await page.evaluate(() => (window as any).mathPendingEditor.getText().includes('x=42123')));
+    await page.evaluate(() => {
+      const w = window as any; w.mathCopiedSource = [];
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { w.mathCopiedSource.push(text); } } });
+    });
+    await page.click('.meo-math-source-actions .meo-copy-code-btn');
+    assert.deepEqual(await page.evaluate(() => (window as any).mathCopiedSource), ['x=42123'], 'Copy must read the same current source as the early preview');
+    await page.click('.meo-math-source-actions .meo-select-all-code-btn');
+    assert.equal(await page.evaluate(() => {
+      const state = (window as any).mathPendingEditor.view.state;
+      return state.sliceDoc(state.selection.main.from, state.selection.main.to);
+    }), 'x=42123', 'Select source must share the mapped owned bounds');
+    await page.keyboard.sendCharacter('\\frac{');
+    await page.waitForFunction(() => document.querySelector('.meo-math-live-result')?.getAttribute('data-meo-math-stale') === 'true', { timeout: 1500 });
+    assert.ok(await page.evaluate(() => document.querySelector('.meo-math-live-result .katex-html')?.textContent?.includes('42123')),
+      'Incomplete input must retain the latest valid local result while structure is pending');
+    console.log('Fenced math: trusted input refreshes the owned result while Worker structure is pending');
+  } finally { await page.evaluate(() => (window as any).mathPendingEditor?.destroy()); await page.close(); }
+}
+
 /** The renderer, rather than each consumer, acknowledges its SVG's paint. */
 export async function checkMermaidPresentationPaintCompletion(browser: Browser, bundle: string): Promise<void> {
   const page = await browser.newPage();
@@ -85,21 +149,37 @@ export async function checkEditingPreviewPaintCheckpoint(browser: Browser, bundl
       window.requestAnimationFrame = callback => { queue.set(--next, callback); return next; };
       window.cancelAnimationFrame = id => { if (id < 0) queue.delete(id); else caf(id); };
       const source = () => (document.querySelector('.meo-mermaid-editing-preview') as any)?.mermaidPreview?.source as string;
+      const readiness = () => (window as any).MermaidEditingHarness.mermaidEditingReadiness.value(view.state, view);
       try {
+        const wasReady = readiness();
         const from = view.state.doc.toString().indexOf('Alpha') + 5;
         view.dispatch({ changes: { from, insert: '1' }, userEvent: 'input.type' });
+        const inputReady = readiness();
         const beforePaint = source(), pending = [...queue.values()]; queue.clear();
         for (const callback of pending) callback(performance.now());
         await new Promise(resolve => timer(resolve, 0));
-        return { beforePaint, afterPaint: source(), text: view.state.doc.toString() };
+        return { wasReady, inputReady, beforePaint, afterPaint: source(), text: view.state.doc.toString() };
       } finally {
         window.requestAnimationFrame = raf; window.cancelAnimationFrame = caf;
         for (const callback of queue.values()) raf(callback);
       }
     });
     assert.ok(!result.beforePaint.includes('Alpha1'), 'Primary input gets its paint opportunity before derived work');
+    assert.equal(result.wasReady, true);
+    assert.equal(result.inputReady, false, 'An edited source must block document rebuilds before DOM pending markers arrive');
     assert.ok(result.afterPaint.includes('Alpha1'), 'Local preview must accept current source without another slow frame');
     assert.ok(result.text.includes('Alpha1'));
+    await page.waitForFunction(() => !document.querySelector('[data-meo-mermaid-rendering="true"]'));
+    const boundaries = await page.evaluate(() => {
+      const w = window as any, view = w.checkpointEditor.view;
+      const ready = () => w.MermaidEditingHarness.mermaidEditingReadiness.value(view.state, view);
+      view.dispatch({ changes: { from: view.state.doc.length, insert: 'Outside the active graph.\n' }, userEvent: 'input.type' });
+      const outside = ready(), closing = view.state.doc.toString().lastIndexOf('```');
+      view.dispatch({ changes: { from: closing, to: closing + 3, insert: '' }, userEvent: 'input.delete' });
+      return { outside, unknownFence: ready() };
+    });
+    assert.ok(boundaries.outside, 'Unchanged active source must not block unrelated document work');
+    assert.ok(boundaries.unknownFence, 'An unproven fence must return to authoritative parsing');
     console.log('Editing preview checkpoint: primary paint opportunity precedes local admission without an extra frame');
   } finally { await page.evaluate(() => (window as any).checkpointEditor?.destroy()); await page.close(); }
 }

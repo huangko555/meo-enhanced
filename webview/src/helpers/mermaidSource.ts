@@ -1,9 +1,8 @@
-import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
-import { markdownLanguage } from '@codemirror/lang-markdown';
+import { EditorSelection, Transaction, type EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { getCodeBlockSourceLines, parseBlockLinePrefix } from './blockIndent';
-import { getFencedCodeInfo, currentSyntaxTree } from './markdownSyntax';
+import { getFencedCodeInfo, currentSyntaxTree, parseOwnedMarkdownSpan } from './markdownSyntax';
 import { insertLiteralSourceNewline } from '../editor/indentedCodeEditing';
 import { completedBackgroundMarkdownStructure } from '../editor/backgroundMarkdownStructure';
 import { isGraphBlockLanguage } from '../editor/documentBlocks';
@@ -23,16 +22,9 @@ export function boundedMermaidEditingSource(state: EditorState, anchor: number, 
   let value: EditingSource | null = null;
   const opening = state.doc.lineAt(anchor), closing = state.doc.lineAt(to - 1);
   if (opening.from === anchor && closing.to === to && closing.number > opening.number) {
-    // Remove whole CommonMark indentation units. Keeping the remaining one to
-    // three spaces preserves physical tab stops in quote/list payload prefixes.
-    const leading = /^ */.exec(opening.text)![0];
-    const indentation = leading.slice(0, Math.floor(leading.length / 4) * 4);
-    const lines = state.doc.sliceString(anchor, to).split('\n');
-    if ((!indentation || indentation.length % state.tabSize === 0 || !lines.some(line => line.includes('\t')))
-      && lines.every(line => line.startsWith(indentation) || !line.trim())) {
-      const text = lines.map(line => line.startsWith(indentation) ? line.slice(indentation.length) : '').join('\n');
-      const local = EditorState.create({ doc: text, extensions: EditorState.tabSize.of(state.tabSize) });
-      const tree = markdownLanguage.parser.parse(text);
+    const parsed = parseOwnedMarkdownSpan(state, anchor, to);
+    if (parsed) {
+      const { state: local, tree } = parsed;
       let fence: SyntaxNode | null = null;
       tree.iterate({ enter(node) { if (node.name === 'FencedCode' && !fence) { fence = node.node; return false; } } });
       if (fence) {

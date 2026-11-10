@@ -1,5 +1,5 @@
 import { readDocumentTextProjection } from '../application/documentTextProjection';
-import type { EditorState } from '@codemirror/state';
+import { EditorState } from '@codemirror/state';
 import type { Tree } from '@lezer/common';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { parseFrontmatterCandidate } from './frontmatter';
@@ -9,13 +9,35 @@ import { isMathFenceLanguage, mathFenceBodyRange, mathFenceContent } from '../..
 import { getCodeBlockSourceLines, parseBlockLinePrefix } from './blockIndent';
 import { collectLatexMathRanges, findFencedDisplayMathEnd } from './math';
 import { collectMarkdownLiteralRanges } from './markdownLiteralRanges';
-import { getFencedCodeInfo, resolvedSyntaxTree } from './markdownSyntax';
+import { getFencedCodeInfo, resolvedSyntaxTree, parseOwnedMarkdownSpan } from './markdownSyntax';
 import { markdownStructureIdentity } from '../editor/markdownStructure';
 import type { MarkdownMathRange } from '../../../src/foundation/markdownDocumentContext';
 import { latexDelimitersFacet } from '../editor/mathSyntaxPreference';
 import { mathDelimiterLength } from './math';
 
 export type DocumentMathRange = MarkdownMathRange;
+
+/** Project only a previously owned, closed display span while document facts
+ * are pending. Do not seed the authoritative document-range cache. */
+export function boundedDisplayMathRange(state: EditorState, anchor: number, to: number): DocumentMathRange | null {
+  if (anchor < 0 || to > state.doc.length || to <= anchor || to - anchor > 32_768) return null;
+  const closing = state.doc.lineAt(to - 1);
+  if (closing.to - anchor > 32_768 || state.doc.sliceString(to, closing.to).trim()) return null;
+  const parsed = parseOwnedMarkdownSpan(state, anchor, closing.to);
+  if (!parsed) return null;
+  const local = EditorState.create({ doc: parsed.state.doc, extensions: [EditorState.tabSize.of(state.tabSize),
+    latexDelimitersFacet.of(state.facet(latexDelimitersFacet))] });
+  const range = collectDocumentMathRanges(local, parsed.tree, [], { from: 0, to: local.doc.length }).find(candidate =>
+    candidate.fencedDisplay && candidate.mode === 'display' && local.doc.lineAt(candidate.from).number === 1
+    && local.doc.lineAt(candidate.to - 1).number === local.doc.lines && parsed.originalPosition(candidate.to) === to);
+  if (!range) return null;
+  const from = parsed.originalPosition(range.from);
+  return { ...range, from, to, raw: state.doc.sliceString(from, to), ...(range.fenceSource ? { fenceSource: {
+    ...range.fenceSource, from: parsed.originalPosition(range.fenceSource.from),
+    prefix: parsed.indentation + range.fenceSource.prefix
+  } } : {}) };
+}
+
 const fullRangeCache = new Map<EditorState['doc'], { tree: Tree; tabSize: number; ranges: readonly DocumentMathRange[]; bytes: number }>();
 let fullRangeBytes = 0;
 const copyRanges = (ranges: readonly DocumentMathRange[]) => ranges.map(range => ({ ...range,

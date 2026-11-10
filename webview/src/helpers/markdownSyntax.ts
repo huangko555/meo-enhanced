@@ -1,10 +1,40 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorState, type Transaction } from '@codemirror/state';
+import { markdownLanguage } from '@codemirror/lang-markdown';
 import { IterMode, type SyntaxNode, type Tree } from '@lezer/common';
 import { isInsideFrontmatter, parseFrontmatter } from './frontmatter';
 import { isCompleteMarkdownStructure, markdownStructureIdentity } from '../editor/markdownStructure';
 import { completedBackgroundMarkdownStructure, isBackgroundMarkdownPreparationPending } from '../editor/backgroundMarkdownStructure';
 import type { MarkdownDetailsBlock } from '../../../src/foundation/markdownDocumentContext';
+
+type OwnedMarkdownSpan = { state: EditorState; tree: Tree; indentation: string; originalPosition(position: number): number };
+const ownedSpanCache = new WeakMap<EditorState['doc'], { from: number; to: number; tabSize: number; value: OwnedMarkdownSpan | null }>();
+
+/** A bounded editing projection, never published as document syntax. Shared
+ * CommonMark parsing preserves whole indentation units and physical tab stops. */
+export function parseOwnedMarkdownSpan(state: EditorState, from: number, to: number): OwnedMarkdownSpan | null {
+  if (from < 0 || to > state.doc.length || to <= from || to - from > 32_768) return null;
+  const cached = ownedSpanCache.get(state.doc);
+  if (cached?.from === from && cached.to === to && cached.tabSize === state.tabSize) return cached.value;
+  let value: OwnedMarkdownSpan | null = null;
+  const opening = state.doc.lineAt(from), closing = state.doc.lineAt(to - 1);
+  if (opening.from === from && closing.to === to) {
+    const leading = /^ */.exec(opening.text)![0], indentation = leading.slice(0, Math.floor(leading.length / 4) * 4);
+    const lines = state.doc.sliceString(from, to).split('\n');
+    if ((!indentation || indentation.length % state.tabSize === 0 || !lines.some(line => line.includes('\t')))
+      && lines.every(line => line.startsWith(indentation) || !line.trim())) {
+      const text = lines.map(line => line.startsWith(indentation) ? line.slice(indentation.length) : '').join('\n');
+      const local = EditorState.create({ doc: text, extensions: EditorState.tabSize.of(state.tabSize) });
+      value = { state: local, tree: markdownLanguage.parser.parse(text), indentation, originalPosition(position) {
+        const line = local.doc.lineAt(position), original = state.doc.line(opening.number + line.number - 1);
+        const removed = original.text.startsWith(indentation) ? indentation.length : original.length;
+        return original.from + removed + position - line.from;
+      } };
+    }
+  }
+  ownedSpanCache.set(state.doc, { from, to, tabSize: state.tabSize, value });
+  return value;
+}
 
 /** Returns CodeMirror's published, possibly partial tree without extending the parse synchronously. */
 export function currentSyntaxTree(state: EditorState): ReturnType<typeof syntaxTree> {

@@ -108,7 +108,7 @@ import {
   type LatexMathRange,
   type LatexMathMode
 } from './helpers/math';
-import { collectDocumentMathRanges, getDisplayMathSource, type DocumentMathRange } from './helpers/displayMathBlocks';
+import { boundedDisplayMathRange, collectDocumentMathRanges, getDisplayMathSource, type DocumentMathRange } from './helpers/displayMathBlocks';
 import { isMathFenceLanguage } from '../../src/shared/mathFence';
 import { diagnosticDataField, type EditorDiagnostic } from './helpers/diagnostics';
 import { gitDiffLineFlagsField, isGitDiffPresentationEffect } from './helpers/gitDiffGutter';
@@ -131,7 +131,7 @@ import { attachLatexMathViewport, type LatexMathViewportController } from './hel
 import { createCopyCodeButton } from './helpers/codeBlockControls';
 import { formatSourceLineNumber } from './editor/sourceLineNumbers';
 import { mountProjectedLineNumbers } from './editor/projectedLineNumbers';
-import { createDisplayMathActions, displayMathResultField, getPreviousDisplayMathResult, isDisplayMathEditing } from './helpers/displayMathEditing';
+import { createDisplayMathActions, displayMathPresentationRange, displayMathResultField, getPreviousDisplayMathResult, isDisplayMathEditing } from './helpers/displayMathEditing';
 import {
   addHtmlContentDecorations,
   getHtmlEditingRange,
@@ -2830,13 +2830,16 @@ class LatexMathWidget extends UiLanguageSensitiveWidget {
   get [liveWidgetEditingPreview](): boolean { return this.editing && this.fencedDisplay && this.blockTo - this.anchor <= 32_768; }
   [refreshLiveWidgetPreview](state: EditorState): WidgetType {
     if (!this.editing || !this.fencedDisplay || this.blockTo - this.anchor > 32_768) return this;
-    const range = collectDocumentMathRanges(state, resolvedSyntaxTree(state, 0), [], { from: this.anchor, to: this.blockTo })
-      .find(range => range.fencedDisplay && state.doc.lineAt(range.from).from === this.anchor && range.to === this.blockTo);
+    const tree = preparedMarkdownStructure(state) ?? (markdownStructureAvailable(state) ? resolvedSyntaxTree(state, 0) : null);
+    const range = tree ? collectDocumentMathRanges(state, tree, [], { from: this.anchor, to: this.blockTo })
+      .find(range => range.fencedDisplay && state.doc.lineAt(range.from).from === this.anchor && range.to === this.blockTo)
+      : boundedDisplayMathRange(state, this.anchor, this.blockTo);
     const source = range && getDisplayMathSource(state, range);
     if (!range || !source || source.text === this.sourceText) return this;
     const current = renderLatexMathToHtml(range.content, 'display');
     const invalid = !current || current.includes('class="katex-error"');
-    const previous = invalid && range.content.trim() ? getPreviousDisplayMathResult(state, range.from, range.to) : undefined;
+    const previous = invalid && range.content.trim() ? (this.html.includes('class="katex"') && !this.html.includes('class="katex-error"')
+      ? this.html : getPreviousDisplayMathResult(state, range.from, range.to)) : undefined;
     const html = previous ?? current;
     if (!html) return this;
     const next = new LatexMathWidget(html, this.mode, true, this.startLine, this.endLine,
@@ -5035,6 +5038,17 @@ export function liveModeExtensions(options: { readonly largeDocument?: boolean; 
     // The side canvas already follows native source updates in its own measure
     // pass. Only in-flow editing widgets need an input checkpoint transaction.
     liveInputEditingPreview.of(state => hasLiveWidgetEditingPreview(state.field(liveDecorationField))),
+    displayMathPresentationRange.of((state, position) => {
+      let range: DocumentMathRange | null = null;
+      state.field(liveDecorationField).between(position, Math.min(state.doc.length, position + 32_769), (_from, _to, decoration) => {
+        const widget = decoration.spec.widget;
+        if (!(widget instanceof LatexMathWidget) || !widget.fencedDisplay
+          || position < widget.anchor || position > widget.blockTo) return;
+        range = boundedDisplayMathRange(state, widget.anchor, widget.blockTo);
+        return false;
+      });
+      return range;
+    }),
     liveInputDerivedWorkReadiness.of(state => !deferredLiveLocalInputs.has(state)
       || !!preparedMarkdownStructure(state) || markdownStructureAvailable(state)),
     // Seed changed-line conflict proofs before any Live presentation reader.
