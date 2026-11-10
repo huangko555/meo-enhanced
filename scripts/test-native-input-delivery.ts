@@ -118,6 +118,46 @@ if (args.has('--browser-url')) {
     assert.equal(await frame.$eval('#drag', node => node.getBoundingClientRect().width), 65);
     assert.ok(shadowedDrag.events.some((event: any) => event.type === 'pointerup' && event.trusted));
 
+    // CDP can acknowledge a command before its event arrives. Delivery must not
+    // depend on the next compositor frame after a mode switch.
+    let delayedRelease: Promise<void> | undefined;
+    const withoutFrames = await createPointerDriver({ frame, page, timeoutMs: 300, mouse: {
+      move: (...args: any[]) => (page.mouse.move as any)(...args),
+      down: () => page.mouse.down(),
+      up: async () => {
+        await frame.evaluate(() => {
+          const state = window as any;
+          const originalRaf = window.requestAnimationFrame;
+          state.__meoOriginalRaf = originalRaf;
+          window.requestAnimationFrame = callback => window.setTimeout(() => originalRaf(callback), 1200);
+          state.__meoReleaseStarted = performance.now();
+          window.addEventListener('pointerup', event => {
+            state.__meoReleaseReceipt = { at: performance.now(), trusted: event.isTrusted };
+          }, { once: true });
+        });
+        delayedRelease = new Promise<void>(resolve => setTimeout(resolve, 20)).then(() => page.mouse.up());
+      }
+    } });
+    try {
+      const receipt = await withoutFrames.click('#click');
+      await delayedRelease;
+      const timing = await frame.evaluate(() => {
+        const state = window as any;
+        return { ...state.__meoReleaseReceipt, elapsed: state.__meoReleaseReceipt?.at - state.__meoReleaseStarted };
+      });
+      assert.ok(timing.trusted && timing.elapsed < 300, 'The real release must arrive within the unchanged deadline');
+      assert.ok(receipt.events.some((event: any) => event.type === 'pointerup' && event.trusted));
+    } finally {
+      await delayedRelease;
+      await frame.evaluate(() => {
+        const state = window as any;
+        window.requestAnimationFrame = state.__meoOriginalRaf;
+        delete state.__meoOriginalRaf;
+        delete state.__meoReleaseStarted;
+        delete state.__meoReleaseReceipt;
+      });
+    }
+
     const contentFrame = await frame.frameElement();
     assert.ok(contentFrame, 'The nested content frame must have a CDP owner');
     try {

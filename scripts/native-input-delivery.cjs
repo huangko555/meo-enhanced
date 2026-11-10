@@ -118,7 +118,7 @@ async function createPointerDriver({ frame, page, mouse = page.mouse, timeoutMs 
       await frame.waitForFunction(({ x, y }) => window.__meoInputDelivery.events.some(event =>
         event.type === 'pointermove' && event.trusted && event.targetMatches
         && Math.abs(event.x - x) <= 1 && Math.abs(event.y - y) <= 1),
-      { timeout: timeoutMs }, point.local);
+      { timeout: timeoutMs, polling: 10 }, point.local);
       stage = 'pointerdown';
       held = true;
       await mouse.down();
@@ -126,7 +126,7 @@ async function createPointerDriver({ frame, page, mouse = page.mouse, timeoutMs 
       await frame.waitForFunction(({ x, y }) => window.__meoInputDelivery.events.some(event =>
         event.type === 'pointerdown' && event.trusted && event.button === 0 && event.targetMatches
         && Math.abs(event.x - x) <= 1 && Math.abs(event.y - y) <= 1),
-      { timeout: timeoutMs }, point.local);
+      { timeout: timeoutMs, polling: 10 }, point.local);
       if (delta.x || delta.y) {
         stage = 'pointermove';
         await mouse.move(point.root.x + delta.x, point.root.y + delta.y, { steps: 6 });
@@ -141,7 +141,7 @@ async function createPointerDriver({ frame, page, mouse = page.mouse, timeoutMs 
         const events = window.__meoInputDelivery.events;
         const down = events.find(event => event.type === 'pointerdown' && event.trusted);
         return events.some(event => event.type === 'pointerup' && event.trusted && event.pointerId === down.pointerId);
-      }, { timeout: timeoutMs });
+      }, { timeout: timeoutMs, polling: 10 });
       return evidence;
     } catch (cause) {
       throw new NativeInputCapabilityError(stage, evidence, cause);

@@ -963,6 +963,10 @@ Before using browser-protocol pointer input in an installed Workbench, run
 actual press/move/release receipts, rejects an acknowledged but undelivered press,
 rejects pending/covered frames and removes its observer on failure. It runs separately
 from quick and does not establish Windows OS input coverage.
+Delivery receipt checks use bounded timer polling rather than animation frames:
+a delivered event must remain observable while a mode transition delays drawing.
+The regression delays frames after an acknowledged release and requires the real
+trusted release within the original deadline; dropped-event controls still fail.
 Before pressing, the driver requires trusted pointer movement at the current
 target. A newly admitted Webview may acknowledge a move before its input route
 has delivered it. The dropped-move negative control requires zero press commands;
