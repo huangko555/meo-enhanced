@@ -665,7 +665,8 @@ export function getFencedCodeContent(state: EditorState, node: SyntaxNodeRef): s
 }
 
 export class MermaidDiagramWidget extends WidgetType {
-  private presenting = false;
+  private pendingPresentation: Promise<void> | null = null;
+  private completePendingPresentation: (() => void) | null = null;
   private container: HTMLElement | null = null;
   diagramText: string;
   startLine: number;
@@ -777,9 +778,16 @@ export class MermaidDiagramWidget extends WidgetType {
     );
   }
 
-  /** Wait only for admitted work; an offscreen desired source is not rendering. */
+  private finishPendingPresentation(): void {
+    const complete = this.completePendingPresentation;
+    this.pendingPresentation = null;
+    this.completePendingPresentation = null;
+    complete?.();
+  }
+
+  /** Admitted work owns its paint acknowledgement; callers do not count frames. */
   waitForPendingPresentation(): Promise<void> | null {
-    return this.presenting && this.presentationHandle ? this.presentationHandle.whenIdle() : null;
+    return this.pendingPresentation;
   }
 
   /** Update an embedded split preview without discarding its SVG or camera. */
@@ -804,13 +812,13 @@ export class MermaidDiagramWidget extends WidgetType {
   toDOM(view?: EditorView) {
     const container = document.createElement('div');
     this.container = container;
-    this.presenting = false;
+    this.finishPendingPresentation();
     const gated = !!view && usesLargeDocumentDerivedWorkBudget(view.state) && typeof IntersectionObserver !== 'undefined';
     let nearScreen = !gated;
     let presentationGeneration = 0;
     let releaseBusyAfterLayout = false;
     const finishPresentation = () => {
-      this.presenting = false;
+      this.finishPendingPresentation();
       presentationGeneration += 1;
       releaseBusyAfterLayout = false;
       container.removeAttribute('aria-busy');
@@ -884,7 +892,8 @@ export class MermaidDiagramWidget extends WidgetType {
     this.presentationHandle = this.presentationFactory.create({
       hasDiagram: () => Boolean(container.querySelector('.meo-mermaid-svg-wrapper')),
       showPending: () => {
-        this.presenting = true;
+        this.finishPendingPresentation();
+        this.pendingPresentation = new Promise(resolve => { this.completePendingPresentation = resolve; });
         container.dataset.meoMermaidRendering = 'true';
         presentationGeneration += 1;
         releaseBusyAfterLayout = false;
@@ -924,14 +933,20 @@ export class MermaidDiagramWidget extends WidgetType {
         const presentedWrapper = container.querySelector('.meo-mermaid-svg-wrapper');
         // Let the replacement paint before deferred document work resumes.
         // A newer source/theme or replacement must retain its own wait marker.
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          if (this.container === container && presentationGeneration === generation) this.presenting = false;
-          if (container.isConnected && this.diagramText === presentedSource
-            && this.themeSignature === presentedTheme
-            && container.querySelector('.meo-mermaid-svg-wrapper') === presentedWrapper) {
-            delete container.dataset.meoMermaidRendering;
-          }
-        }));
+        requestAnimationFrame(() => {
+          // The next input may proceed after this SVG has a paint opportunity.
+          // Keep copy/geometry readiness on its existing second-frame guard.
+          window.setTimeout(() => {
+            if (this.container === container && presentationGeneration === generation) this.finishPendingPresentation();
+          }, 0);
+          requestAnimationFrame(() => {
+            if (container.isConnected && this.diagramText === presentedSource
+              && this.themeSignature === presentedTheme
+              && container.querySelector('.meo-mermaid-svg-wrapper') === presentedWrapper) {
+              delete container.dataset.meoMermaidRendering;
+            }
+          });
+        });
       },
       showError: (_source, error) => {
         finishPresentation();
@@ -1443,7 +1458,7 @@ export class MermaidDiagramWidget extends WidgetType {
   }
 
   destroy() {
-    this.presenting = false;
+    this.finishPendingPresentation();
     this.container = null;
     this.visibilityObserver?.disconnect();
     this.visibilityObserver = null;

@@ -4,6 +4,54 @@ import sharp from 'sharp';
 import type { Browser } from 'puppeteer-core';
 import { assessLargeDocument } from '../src/foundation/largeDocument';
 
+/** The renderer, rather than each consumer, acknowledges its SVG's paint. */
+export async function checkMermaidPresentationPaintCompletion(browser: Browser, bundle: string): Promise<void> {
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 1100, height: 720 });
+    await page.setContent('<style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+    await page.addStyleTag({ path: 'webview/src/styles.css' });
+    await page.addScriptTag({ content: bundle });
+    await page.evaluate(() => {
+      const w = window as any;
+      w.mermaid = { initialize() {}, async render() { return { svg: '<svg width="240" height="90"><text>Alpha</text></svg>' }; } };
+      w.paintEditor = w.MermaidEditingHarness.createEditor({ parent: document.getElementById('app'), initialMode: 'live', text: 'Before\n\nAfter' });
+    });
+    assert.equal(await page.evaluate(() => (window as any).paintEditor.prepareLiveSyntax(() => true)), true);
+    const result = await page.evaluate(async () => {
+      const w = window as any, view = w.paintEditor.view, api = w.MermaidEditingHarness;
+      const raf = window.requestAnimationFrame, caf = window.cancelAnimationFrame, timer = window.setTimeout;
+      const queue = new Map<number, FrameRequestCallback>(); let next = 0;
+      window.requestAnimationFrame = callback => { queue.set(--next, callback); return next; };
+      window.cancelAnimationFrame = id => { if (id < 0) queue.delete(id); else caf(id); };
+      const widget = new api.MermaidSourcePreviewWidget(0, 'Alpha', 1, 1, 0, 'en', api.getMermaidBlockViewport(view.state, 0));
+      const root = widget.toDOM(view);
+      root.style.cssText = 'position:absolute;top:0;left:0;width:500px;height:220px'; view.scrollDOM.append(root);
+      const frame = async () => {
+        const callbacks = [...queue.values()]; queue.clear();
+        for (const callback of callbacks) callback(performance.now());
+        await new Promise(resolve => timer(resolve, 0));
+      };
+      try {
+        for (let i = 0; i < 8 && !root.querySelector('.meo-mermaid-block svg'); i++) {
+          await new Promise(resolve => timer(resolve, 10)); await frame();
+        }
+        if (!root.querySelector('.meo-mermaid-block svg')) throw new Error('The actual diagram SVG must be installed first');
+        const pending = root.mermaidPreview.widget.waitForPendingPresentation(); let settled = false;
+        pending?.then(() => { settled = true; }); await new Promise(resolve => timer(resolve, 0));
+        const beforePaint = settled; await frame();
+        return { pending: !!pending, beforePaint, afterPaint: settled };
+      } finally {
+        widget.destroy(root); root.remove(); window.requestAnimationFrame = raf; window.cancelAnimationFrame = caf;
+        for (const callback of queue.values()) raf(callback);
+      }
+    });
+    assert.ok(result.pending && !result.beforePaint && result.afterPaint,
+      'Completion must acknowledge the actual diagram paint without another consumer-owned frame');
+    console.log('Mermaid completion: admitted render includes its first SVG paint opportunity');
+  } finally { await page.evaluate(() => (window as any).paintEditor?.destroy()); await page.close(); }
+}
+
 /** A busy compositor must not add a second frame before local work is admitted. */
 export async function checkEditingPreviewPaintCheckpoint(browser: Browser, bundle: string): Promise<void> {
   const worker = await Bun.build({ entrypoints: ['webview/src/markdownParseWorker.ts'], target: 'browser', format: 'iife' });

@@ -669,9 +669,7 @@ export class MermaidSourcePreviewWidget extends UiLanguageSensitiveWidget {
       const inFlight = lastDocumentChangeWasInput(view) ? preview.widget.waitForPendingPresentation() : null;
       if (inFlight) {
         const waiting = preview.waiting = {};
-        void inFlight.then(() => new Promise<void>(resolve => {
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-        })).then(() => {
+        void inFlight.then(() => {
           if (root.mermaidPreview !== preview || preview.waiting !== waiting || !root.isConnected) return;
           preview.waiting = undefined;
           flush();
