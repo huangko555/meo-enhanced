@@ -968,9 +968,12 @@ a delivered event must remain observable while a mode transition delays drawing
 or runs a long task. Regressions delay frames or run a post-release task and require
 the real trusted release within the original deadline; dropped-event controls still
 fail. Each gesture removes its binding and observer, including failure paths.
-Installed resource fixtures also admit stable target geometry and the large-file
-comparison result before measuring a gesture; editor readiness alone does not
-finish an asynchronous toolbar-width change. They never retry a delivered gesture.
+Installed resource fixtures admit stable target geometry before a gesture; editor
+readiness alone does not finish an asynchronous toolbar-width change. If a trusted
+move reaches the old location and current geometry proves that the target moved,
+the driver admits one fresh position before its first press. An undelivered move,
+unchanged wrong target, failed press or release is never retried. Comparison may
+legitimately be ready or unavailable; resource checks do not require one outcome.
 Before pressing, the driver requires trusted pointer movement at the current
 target. A newly admitted Webview may acknowledge a move before its input route
 has delivered it. The dropped-move negative control requires zero press commands;

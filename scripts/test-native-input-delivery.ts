@@ -118,6 +118,31 @@ if (args.has('--browser-url')) {
     assert.equal(await frame.$eval('#drag', node => node.getBoundingClientRect().width), 65);
     assert.ok(shadowedDrag.events.some((event: any) => event.type === 'pointerup' && event.trusted));
 
+    const previousStyle = await frame.$eval('#click', node => {
+      const style = node.getAttribute('style');
+      node.setAttribute('style', 'position:absolute;left:100px;top:10px;width:40px;height:30px');
+      return style;
+    });
+    const clicksBeforeMove = await frame.evaluate(() => (window as any).clicks);
+    let targetMoves = 0, targetPresses = 0;
+    try {
+      const movingTarget = await createPointerDriver({ frame, page, timeoutMs: 300, mouse: {
+        move: async (...args: any[]) => {
+          if (++targetMoves === 1) await frame.$eval('#click', node => { node.style.left = '260px'; });
+          await (page.mouse.move as any)(...args);
+        },
+        down: async () => { targetPresses++; await page.mouse.down(); },
+        up: () => page.mouse.up()
+      } });
+      const receipt = await movingTarget.click('#click');
+      assert.equal(targetMoves, 2, 'A delivered move plus a proven geometry change admits one fresh position');
+      assert.equal(targetPresses, 1, 'The application gesture is pressed exactly once');
+      assert.ok(receipt.geometryChange);
+      assert.equal(await frame.evaluate(() => (window as any).clicks), clicksBeforeMove + 1);
+    } finally {
+      await frame.$eval('#click', (node, style) => { if (style === null) node.removeAttribute('style'); else node.setAttribute('style', style); }, previousStyle);
+    }
+
     // CDP can acknowledge a command before its event arrives. Delivery must not
     // depend on the next compositor frame after a mode switch.
     for (const presentation of ['frames', 'task'] as const) {

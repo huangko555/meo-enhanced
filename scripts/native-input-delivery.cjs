@@ -107,7 +107,7 @@ async function createPointerDriver({ frame, page, mouse = page.mouse, timeoutMs 
       });
     };
     try {
-      const point = await pointFor(selector);
+      let point = await pointFor(selector);
       evidence.point = point;
       await page.exposeFunction(binding, event => { evidence.events.push(event); notify?.(); });
       bound = true;
@@ -132,9 +132,20 @@ async function createPointerDriver({ frame, page, mouse = page.mouse, timeoutMs 
       await mouse.move(point.root.x, point.root.y);
       evidence.commands.push('move');
       stage = 'pointermove';
-      await waitForReceipt(event =>
-        event.type === 'pointermove' && event.trusted && event.targetMatches
-        && Math.abs(event.x - point.local.x) <= 1 && Math.abs(event.y - point.local.y) <= 1);
+      await waitForReceipt(event => event.type === 'pointermove' && event.trusted);
+      const isCurrentMove = event => event.type === 'pointermove' && event.trusted && event.targetMatches
+        && Math.abs(event.x - point.local.x) <= 1 && Math.abs(event.y - point.local.y) <= 1;
+      if (!evidence.events.some(isCurrentMove)) {
+        const current = await pointFor(selector);
+        if (Math.abs(current.root.x - point.root.x) <= 1 && Math.abs(current.root.y - point.root.y) <= 1) {
+          throw new Error('Delivered movement did not reach the unchanged target');
+        }
+        evidence.geometryChange = { before: point, after: current };
+        point = current; evidence.point = point;
+        await mouse.move(point.root.x, point.root.y);
+        evidence.commands.push('move after observed layout change');
+        await waitForReceipt(isCurrentMove);
+      }
       stage = 'pointerdown';
       held = true;
       await mouse.down();

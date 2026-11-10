@@ -178,12 +178,6 @@ exports.run = async () => {
       await assertExplicitSave('keyboard', original);
       await vscode.commands.executeCommand('workbench.action.files.save');
       assert.equal(fs.readFileSync(file, 'utf8'), original, 'typing and history preserve the complete saved source');
-      if (large) await frame.waitForFunction(() => {
-        const summary = document.querySelector('.changes-review-trigger .changes-review-empty');
-        const label = summary?.closest('button')?.getAttribute('aria-label');
-        // The accepted unavailable summary includes its reason in every language.
-        return summary?.textContent && label?.startsWith(summary.textContent + ': ');
-      }, { timeout: 30000 });
       modeStarted = performance.now();
       await click('button[data-mode="preview"]');
       await frame.waitForFunction(previewReady);
