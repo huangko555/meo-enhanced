@@ -22,8 +22,11 @@ export async function checkSlowMermaidInputProgress(browser: Browser, bundle: st
       await page.addScriptTag({ content: bundle });
       await page.evaluate(({ large, varying, delayMs }) => {
         const w = window as any;
+        w.slowCompletedSources = [];
         w.mermaid = { initialize() {}, async render(_id: string, source: string) {
+          w.slowRenderingSource = source;
           await new Promise(resolve => setTimeout(resolve, varying && !source.includes('[Alpha1]') ? 320 : delayMs));
+          w.slowCompletedSources.push(source);
           return { svg: `<svg width="240" height="90" data-source="${encodeURIComponent(source)}"><text>${source.match(/Alpha\d*/)?.[0]}</text></svg>` };
         } };
         w.slowEditor = w.MermaidEditingHarness.createEditor({ parent: document.getElementById('app'), initialMode: 'live',
@@ -67,6 +70,21 @@ export async function checkSlowMermaidInputProgress(browser: Browser, bundle: st
       assert.equal(result.inputs.length, burst.length + 1); assert.ok(result.inputs.every((input: any) => input.trusted));
       assert.ok(result.source.includes('Alpha1' + burst));
       assert.ok(result.intermediate >= 2, `${label}:slow layout must advance during typing, observed ${result.intermediate} paints`);
+      if (!varying && delayMs === 220 && ((!large && layout === 'stacked') || (large && layout === 'side-by-side'))) {
+        const before = result.source, stale = 'Alpha1' + burst + '6';
+        await page.keyboard.type('6');
+        await page.waitForFunction(stale => (window as any).slowRenderingSource?.includes(stale), {}, stale);
+        await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control');
+        const restored = await page.evaluate(() => (window as any).slowEditor.getText().match(/Alpha\d*/)?.[0]);
+        assert.equal(typeof restored, 'string'); assert.notEqual(restored, stale, 'Undo must actually change the source');
+        await page.waitForFunction(restored => document.querySelector('.meo-mermaid-editing-preview svg text')?.textContent === restored, {}, restored);
+        await page.waitForFunction(stale => (window as any).slowCompletedSources.some((source: string) => source.includes(stale)), {}, stale);
+        assert.equal(await page.$eval('.meo-mermaid-editing-preview svg text', element => element.textContent), restored,
+          'Undo must preempt an input-owned wait and reject the older result');
+        await page.keyboard.down('Control'); await page.keyboard.press('y'); await page.keyboard.up('Control');
+        await page.waitForFunction(stale => document.querySelector('.meo-mermaid-editing-preview svg text')?.textContent === stale, {}, stale);
+        assert.equal(await page.evaluate(() => (window as any).slowEditor.getText()), before.replace('Alpha1' + burst, stale));
+      }
       console.log(`Slow Mermaid ${label}: ${result.intermediate} intermediate paints`);
     } finally { await page.evaluate(() => (window as any).slowEditor?.destroy()); await page.close(); }
   }

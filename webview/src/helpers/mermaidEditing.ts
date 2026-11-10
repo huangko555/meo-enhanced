@@ -14,7 +14,7 @@ import {
 import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { setLivePointerSelectionActiveEffect, sourcePresentationSelection } from '../editor/livePointerSelection';
-import { supersedeLiveInputDerivedWork, isLiveInputDerivedWorkPending, isLiveInputDerivedWorkRefresh, liveInputDerivedWorkReadiness, usesLargeDocumentDerivedWorkBudget, liveInputQuietDelay } from '../editor/liveInputDerivedWork';
+import { supersedeLiveInputDerivedWork, isLiveInputDerivedWorkPending, isLiveInputDerivedWorkRefresh, liveInputDerivedWorkReadiness, usesLargeDocumentDerivedWorkBudget, liveInputQuietDelay, lastDocumentChangeWasInput } from '../editor/liveInputDerivedWork';
 import { isCompleteMarkdownStructure } from '../editor/markdownStructure';
 import { resolvedSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import { isExternalDocumentPresentation } from '../editor/externalDocumentPresentation';
@@ -504,7 +504,7 @@ export function addMermaidToolbar(
 }
 
 type PreviewElement = HTMLElement & {
-  mermaidPreview?: { widget: GraphDiagramWidget; timer?: number; lastUpdateAt?: number; lastUpdateDoc?: EditorState['doc']; sourceDoc?: EditorState['doc']; source: string; startLine: number; endLine: number; viewport: MermaidViewportState };
+  mermaidPreview?: { widget: GraphDiagramWidget; timer?: number; waiting?: object; lastUpdateAt?: number; sourceDoc?: EditorState['doc']; source: string; startLine: number; endLine: number; viewport: MermaidViewportState };
 };
 /** The same preview action is used in document flow and opaque floating chrome. */
 export function createMermaidPreviewHeading(view: EditorView, anchor: number): HTMLElement {
@@ -620,7 +620,7 @@ export class MermaidSourcePreviewWidget extends UiLanguageSensitiveWidget {
       return language && port?.supports(language) ? { language, port } : undefined;
     })());
     root.append(label, widget.toDOM(view));
-    root.mermaidPreview = { widget, source: this.source, sourceDoc: view.state.doc, lastUpdateDoc: view.state.doc, startLine: this.startLine, endLine: this.endLine, viewport: this.viewport };
+    root.mermaidPreview = { widget, source: this.source, sourceDoc: view.state.doc, startLine: this.startLine, endLine: this.endLine, viewport: this.viewport };
     return root;
   }
   updateDOM(root: PreviewElement, view: EditorView): boolean {
@@ -630,49 +630,57 @@ export class MermaidSourcePreviewWidget extends UiLanguageSensitiveWidget {
     if (!preview || preview.viewport !== this.viewport) return false;
     preview.startLine = this.startLine;
     preview.endLine = this.endLine;
+    preview.widget.startLine = this.startLine;
+    preview.widget.endLine = this.endLine;
     root.dataset.meoMermaidAnchor = String(this.anchor);
     root.querySelector<HTMLElement>('.meo-native-source-preview-label')!.dataset.meoMermaidAnchor = String(this.anchor);
     updateMermaidLayoutButton(root.querySelector<HTMLButtonElement>('.meo-mermaid-layout-btn')!, view,
       view.state.field(mermaidEditingStateField).narrow || view.dom.clientWidth < MERMAID_SIDE_MIN_WIDTH);
     if (view.composing) return true;
     const large = usesLargeDocumentDerivedWorkBudget(view.state), pending = isLiveInputDerivedWorkPending(view.state);
-    // A presentation-only publication may flush immediately. A quiet syntax
-    // reply for newer text must not reset the current typing checkpoint.
-    const acceptedOnly = large && !pending && preview.lastUpdateDoc === view.state.doc;
-    if (preview.source === this.source && !(preview.timer !== undefined && acceptedOnly)) {
-      if (preview.timer === undefined) preview.widget.updateSource(this.source, this.startLine, this.endLine);
+    if (preview.waiting && !lastDocumentChangeWasInput(view)) preview.waiting = undefined;
+    if (preview.source === this.source && !(preview.timer !== undefined && large && !pending)) {
+      if (preview.timer === undefined && !preview.waiting) preview.widget.updateSource(this.source, this.startLine, this.endLine);
       return true;
     }
     preview.source = this.source;
     preview.sourceDoc = view.state.doc;
     root.dataset.meoMermaidRendering = 'true';
+    if (preview.waiting) return true;
     if (preview.timer !== undefined) {
-      if (!acceptedOnly) return true;
+      if (!large || pending) return true;
       clearTimeout(preview.timer);
     }
     // Keep single edits prompt, but cap repeated diagram layout during typing.
     // Later input replaces the desired source without moving this deadline.
     const now = performance.now();
-    // Pace requests by a measured successful layout. A fixed interval shorter
-    // than layout continuously invalidates results, leaving no preview until
-    // typing stops. Keep one fixed next checkpoint, read the latest source there,
-    // and retain ordinary presentation supersession and lifecycle guards.
-    const interval = acceptedOnly ? 0 : Math.min(5000, Math.max(large && pending ? 120 : 0, preview.widget.updateCostMs(this.source)));
-    const throttle = preview.lastUpdateAt !== undefined && now >= preview.lastUpdateAt
-      ? Math.max(0, interval - (now - preview.lastUpdateAt)) : 0;
-    preview.timer = window.setTimeout(() => {
-      preview.timer = undefined;
+    const throttle = large && pending && preview.lastUpdateAt !== undefined && now >= preview.lastUpdateAt
+      ? Math.max(0, 120 - (now - preview.lastUpdateAt)) : 0;
+    const flush = (): void => {
       if (root.mermaidPreview !== preview || !root.isConnected) return;
       if (view.composing) {
         delete root.dataset.meoMermaidRendering;
+        return;
+      }
+      const inFlight = lastDocumentChangeWasInput(view) ? preview.widget.waitForPendingPresentation() : null;
+      if (inFlight) {
+        const waiting = preview.waiting = {};
+        void inFlight.then(() => new Promise<void>(resolve => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        })).then(() => {
+          if (root.mermaidPreview !== preview || preview.waiting !== waiting || !root.isConnected) return;
+          preview.waiting = undefined;
+          flush();
+        });
         return;
       }
       if (preview.sourceDoc !== view.state.doc) {
         // A newer input may still be waiting for its syntax publication. Never
         // spend a diagram layout on the superseded source captured by a timer.
         const editing = view.state.field(mermaidEditingStateField, false);
-        const current = editing?.activeAnchor === this.anchor && editing.activeTo !== null && editing.activeTo - this.anchor <= 32_768
-          ? boundedMermaidEditingSource(view.state, this.anchor, editing.activeTo) : null;
+        const anchor = Number(root.dataset.meoMermaidAnchor);
+        const current = editing?.activeAnchor === anchor && editing.activeTo !== null && editing.activeTo - anchor <= 32_768
+          ? boundedMermaidEditingSource(view.state, anchor, editing.activeTo) : null;
         if (!current || current.language !== this.graphLanguage.split(/\s+/)[0].toLowerCase()) {
           delete root.dataset.meoMermaidRendering;
           return;
@@ -683,10 +691,11 @@ export class MermaidSourcePreviewWidget extends UiLanguageSensitiveWidget {
         preview.endLine = current.closing.number;
       }
       preview.lastUpdateAt = performance.now();
-      preview.lastUpdateDoc = view.state.doc;
       preview.widget.updateSource(preview.source, preview.startLine, preview.endLine);
       delete root.dataset.meoMermaidRendering;
-    }, Math.max(throttle, !large || pending ? liveInputQuietDelay(view, 80) : 0));
+    };
+    preview.timer = window.setTimeout(() => { preview.timer = undefined; flush(); },
+      Math.max(throttle, !large || pending ? liveInputQuietDelay(view, 80) : 0));
     return true;
   }
   destroy(root: PreviewElement): void {

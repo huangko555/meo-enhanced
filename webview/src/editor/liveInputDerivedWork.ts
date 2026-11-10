@@ -357,6 +357,7 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   const frameConsumers = new Map<object, FrameConsumerRecord>();
   let disposed = false;
   let lastInputAt: number | null = null;
+  let lastChangeWasInput = false;
   let previewFrameId: number | null = null;
   const hasEditingPreview = (): boolean => view.state.facet(liveInputEditingPreview).some(read => read(view.state));
   const cancelPreviewFrame = (): void => {
@@ -739,6 +740,7 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   let scheduler = createScheduler();
   return {
     remainingQuietTime,
+    lastDocumentChangeWasInput: () => lastChangeWasInput,
     request(key: object, operation: () => void) {
       requestConsumer(key, operation);
     },
@@ -767,7 +769,13 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
         scheduler = createScheduler();
       }
       for (const transaction of update.transactions) {
-        if (transaction.docChanged) lastInputAt = performance.now();
+        if (transaction.docChanged) {
+          lastInputAt = performance.now();
+          const provenance = transaction.annotation(liveInputDerivedWorkProvenance);
+          if (provenance !== 'automatic-normalization') {
+            lastChangeWasInput = provenance === 'nested-input-projection' || transaction.isUserEvent('input');
+          }
+        }
         const beginsComposition = transaction.effects.some((effect) => effect.is(beginLiveInputCompositionEffect));
         const changesComposition = transaction.effects.some((effect) => effect.is(changeLiveInputCompositionEffect));
         const completesComposition = transaction.effects.some((effect) => effect.is(completeLiveInputCompositionEffect));
@@ -825,6 +833,11 @@ const codeMirrorLiveInputDerivedWorkPlugin = ViewPlugin.define(
 /** Count rendering/paint waits toward the same accepted input quiet window. */
 export function liveInputQuietDelay(view: EditorView, delayMs: number): number {
   return view.plugin(codeMirrorLiveInputDerivedWorkPlugin)?.remainingQuietTime(delayMs) ?? delayMs;
+}
+
+/** Read-only provenance; presentation-only refreshes do not retire the input. */
+export function lastDocumentChangeWasInput(view: EditorView): boolean {
+  return view.plugin(codeMirrorLiveInputDerivedWorkPlugin)?.lastDocumentChangeWasInput() ?? false;
 }
 
 export function beginLiveInputComposition(view: EditorView): void {

@@ -104,12 +104,9 @@ const request = (
     const abandoned = offscreen.render(request('UNMOUNTED'));
     offscreen.release();
     assert.match((await abandoned).error, /released/);
-    await new Promise(resolve => setTimeout(resolve, 20));
     activeGate.resolve('<svg>ACTIVE</svg>');
     assert.deepEqual(await shared, { ok: true, svg: '<svg>EDIT_10</svg>' });
     await latestStarted.promise;
-    assert.ok(editing.getRenderDurationMs() >= 15,
-      'completed superseded work must inform pacing while the latest presentation is still pending');
     latestGate.resolve('<svg>EDIT_40</svg>');
     assert.deepEqual(await current, { ok: true, svg: '<svg>EDIT_40</svg>' });
     assert.deepEqual(calls, ['ACTIVE', 'EDIT_10', 'EDIT_40'],
@@ -122,7 +119,6 @@ const request = (
     activeGate.resolve('<svg>ACTIVE</svg>');
     latestGate.resolve('<svg>EDIT_40</svg>');
     editingGroup.end(); siblingGroup.end(); editingPool.dispose();
-    assert.equal(editing.getRenderDurationMs(), 0, 'ended consumers must not expose retained timing state');
   }
 }
 

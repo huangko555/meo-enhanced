@@ -27,8 +27,6 @@ export type MermaidDiagramSuccessfulRender = Extract<MermaidDiagramRenderResult,
 export type MermaidDiagramLeafRenderConsumer = {
   render(request: MermaidDiagramRenderRequest): Promise<MermaidDiagramRenderResult>;
   getCached(request: MermaidDiagramRenderRequest): MermaidDiagramRenderResult | null;
-  /** Last completed layout cost for this consumer, including retained superseded work. */
-  getRenderDurationMs(): number;
   /** Detaches only this presentation's pending waiter before presenting a replacement. */
   replacePending(): void;
   /** Detaches this presentation and releases its leaf identity. Repeated release is safe. */
