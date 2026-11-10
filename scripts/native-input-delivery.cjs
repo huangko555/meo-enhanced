@@ -92,41 +92,56 @@ async function createPointerDriver({ frame, page, mouse = page.mouse, timeoutMs 
 
   const gesture = async (selector, delta = { x: 0, y: 0 }) => {
     const evidence = { selector, delta, commands: [], events: [], releaseAttempted: false };
-    let stage = 'target', armed = false, held = false;
+    const binding = '__meoInputReceipt_' + Math.random().toString(36).slice(2);
+    let stage = 'target', armed = false, held = false, bound = false, notify;
+    // Receiving an input is independent of the render task it starts. Observe
+    // through the protocol binding, so a busy renderer cannot starve polling.
+    const waitForReceipt = predicate => {
+      if (evidence.events.some(predicate)) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { notify = undefined; reject(new Error(`Input receipt exceeded ${timeoutMs}ms`)); }, timeoutMs);
+        notify = () => {
+          if (!evidence.events.some(predicate)) return;
+          clearTimeout(timer); notify = undefined; resolve();
+        };
+      });
+    };
     try {
       const point = await pointFor(selector);
       evidence.point = point;
-      await frame.evaluate(selector => {
+      await page.exposeFunction(binding, event => { evidence.events.push(event); notify?.(); });
+      bound = true;
+      await frame.evaluate(({ selector, binding }) => {
         if (window.__meoInputDelivery) throw Error('Another pointer probe is active');
         const events = [];
         const expectedTarget = document.querySelector(selector);
         const record = event => {
-          events.push({ type: event.type, trusted: event.isTrusted, pointerId: event.pointerId,
+          const receipt = { type: event.type, trusted: event.isTrusted, pointerId: event.pointerId,
             button: event.button, buttons: event.buttons, x: event.clientX, y: event.clientY,
             target: event.target?.tagName, className: String(event.target?.className ?? ''),
-            targetMatches: Boolean(expectedTarget?.isConnected && expectedTarget.contains(event.target)) });
+            targetMatches: Boolean(expectedTarget?.isConnected && expectedTarget.contains(event.target)) };
+          events.push(receipt);
+          void window[binding](receipt).catch(() => {});
         };
         for (const type of ['pointerdown', 'pointermove', 'pointerup']) window.addEventListener(type, record, true);
         window.__meoInputDelivery = { events, stop() {
           for (const type of ['pointerdown', 'pointermove', 'pointerup']) window.removeEventListener(type, record, true);
         } };
-      }, selector);
+      }, { selector, binding });
       armed = true;
       await mouse.move(point.root.x, point.root.y);
       evidence.commands.push('move');
       stage = 'pointermove';
-      await frame.waitForFunction(({ x, y }) => window.__meoInputDelivery.events.some(event =>
+      await waitForReceipt(event =>
         event.type === 'pointermove' && event.trusted && event.targetMatches
-        && Math.abs(event.x - x) <= 1 && Math.abs(event.y - y) <= 1),
-      { timeout: timeoutMs, polling: 10 }, point.local);
+        && Math.abs(event.x - point.local.x) <= 1 && Math.abs(event.y - point.local.y) <= 1);
       stage = 'pointerdown';
       held = true;
       await mouse.down();
       evidence.commands.push('press acknowledged');
-      await frame.waitForFunction(({ x, y }) => window.__meoInputDelivery.events.some(event =>
+      await waitForReceipt(event =>
         event.type === 'pointerdown' && event.trusted && event.button === 0 && event.targetMatches
-        && Math.abs(event.x - x) <= 1 && Math.abs(event.y - y) <= 1),
-      { timeout: timeoutMs, polling: 10 }, point.local);
+        && Math.abs(event.x - point.local.x) <= 1 && Math.abs(event.y - point.local.y) <= 1);
       if (delta.x || delta.y) {
         stage = 'pointermove';
         await mouse.move(point.root.x + delta.x, point.root.y + delta.y, { steps: 6 });
@@ -137,11 +152,8 @@ async function createPointerDriver({ frame, page, mouse = page.mouse, timeoutMs 
       await mouse.up();
       held = false;
       evidence.commands.push('release acknowledged');
-      await frame.waitForFunction(() => {
-        const events = window.__meoInputDelivery.events;
-        const down = events.find(event => event.type === 'pointerdown' && event.trusted);
-        return events.some(event => event.type === 'pointerup' && event.trusted && event.pointerId === down.pointerId);
-      }, { timeout: timeoutMs, polling: 10 });
+      const down = evidence.events.find(event => event.type === 'pointerdown' && event.trusted);
+      await waitForReceipt(event => event.type === 'pointerup' && event.trusted && event.pointerId === down.pointerId);
       return evidence;
     } catch (cause) {
       throw new NativeInputCapabilityError(stage, evidence, cause);
@@ -158,6 +170,15 @@ async function createPointerDriver({ frame, page, mouse = page.mouse, timeoutMs 
             return probe.events;
           });
         } catch (error) { evidence.observationError = String(error); }
+      }
+      if (bound) {
+        try {
+          await page.removeExposedFunction(binding);
+          // Puppeteer's public removal leaves an undefined wrapper property.
+          await Promise.all(page.frames().map(target => target.evaluate(name => { delete window[name]; }, binding)
+            .catch(error => { if (!target.detached) throw error; })));
+        }
+        catch (error) { evidence.observationError = String(error); }
       }
     }
   };

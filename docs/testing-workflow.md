@@ -963,10 +963,11 @@ Before using browser-protocol pointer input in an installed Workbench, run
 actual press/move/release receipts, rejects an acknowledged but undelivered press,
 rejects pending/covered frames and removes its observer on failure. It runs separately
 from quick and does not establish Windows OS input coverage.
-Delivery receipt checks use bounded timer polling rather than animation frames:
-a delivered event must remain observable while a mode transition delays drawing.
-The regression delays frames after an acknowledged release and requires the real
-trusted release within the original deadline; dropped-event controls still fail.
+Delivery receipts use a temporary protocol binding rather than renderer polling:
+a delivered event must remain observable while a mode transition delays drawing
+or runs a long task. Regressions delay frames or run a post-release task and require
+the real trusted release within the original deadline; dropped-event controls still
+fail. Each gesture removes its binding and observer, including failure paths.
 Installed resource fixtures also admit stable target geometry and the large-file
 comparison result before measuring a gesture; editor readiness alone does not
 finish an asynchronous toolbar-width change. They never retry a delivered gesture.

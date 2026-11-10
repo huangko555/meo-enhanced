@@ -120,42 +120,50 @@ if (args.has('--browser-url')) {
 
     // CDP can acknowledge a command before its event arrives. Delivery must not
     // depend on the next compositor frame after a mode switch.
-    let delayedRelease: Promise<void> | undefined;
-    const withoutFrames = await createPointerDriver({ frame, page, timeoutMs: 300, mouse: {
-      move: (...args: any[]) => (page.mouse.move as any)(...args),
-      down: () => page.mouse.down(),
-      up: async () => {
+    for (const presentation of ['frames', 'task'] as const) {
+      let delayedRelease: Promise<void> | undefined;
+      const delayedPresentation = await createPointerDriver({ frame, page, timeoutMs: 300, mouse: {
+        move: (...args: any[]) => (page.mouse.move as any)(...args),
+        down: () => page.mouse.down(),
+        up: async () => {
+          await frame.evaluate(presentation => {
+            const state = window as any;
+            const originalRaf = window.requestAnimationFrame;
+            state.__meoOriginalRaf = originalRaf;
+            if (presentation === 'frames') window.requestAnimationFrame = callback => window.setTimeout(() => originalRaf(callback), 1200);
+            if (presentation === 'task') {
+              state.__meoBusyClick = () => { const end = performance.now() + 650; while (performance.now() < end) {} };
+              document.querySelector('#click')!.addEventListener('click', state.__meoBusyClick, { once: true });
+            }
+            state.__meoReleaseStarted = performance.now();
+            window.addEventListener('pointerup', event => {
+              state.__meoReleaseReceipt = { at: performance.now(), trusted: event.isTrusted };
+            }, { once: true });
+          }, presentation);
+          delayedRelease = new Promise<void>(resolve => setTimeout(resolve, 20)).then(() => page.mouse.up());
+        }
+      } });
+      try {
+        const receipt = await delayedPresentation.click('#click');
+        await delayedRelease;
+        const timing = await frame.evaluate(() => {
+          const state = window as any;
+          return { ...state.__meoReleaseReceipt, elapsed: state.__meoReleaseReceipt?.at - state.__meoReleaseStarted };
+        });
+        assert.ok(timing.trusted && timing.elapsed < 300, 'The real release must arrive within the unchanged deadline');
+        assert.ok(receipt.events.some((event: any) => event.type === 'pointerup' && event.trusted));
+      } finally {
+        await delayedRelease;
         await frame.evaluate(() => {
           const state = window as any;
-          const originalRaf = window.requestAnimationFrame;
-          state.__meoOriginalRaf = originalRaf;
-          window.requestAnimationFrame = callback => window.setTimeout(() => originalRaf(callback), 1200);
-          state.__meoReleaseStarted = performance.now();
-          window.addEventListener('pointerup', event => {
-            state.__meoReleaseReceipt = { at: performance.now(), trusted: event.isTrusted };
-          }, { once: true });
+          window.requestAnimationFrame = state.__meoOriginalRaf;
+          if (state.__meoBusyClick) document.querySelector('#click')!.removeEventListener('click', state.__meoBusyClick);
+          delete state.__meoBusyClick;
+          delete state.__meoOriginalRaf;
+          delete state.__meoReleaseStarted;
+          delete state.__meoReleaseReceipt;
         });
-        delayedRelease = new Promise<void>(resolve => setTimeout(resolve, 20)).then(() => page.mouse.up());
       }
-    } });
-    try {
-      const receipt = await withoutFrames.click('#click');
-      await delayedRelease;
-      const timing = await frame.evaluate(() => {
-        const state = window as any;
-        return { ...state.__meoReleaseReceipt, elapsed: state.__meoReleaseReceipt?.at - state.__meoReleaseStarted };
-      });
-      assert.ok(timing.trusted && timing.elapsed < 300, 'The real release must arrive within the unchanged deadline');
-      assert.ok(receipt.events.some((event: any) => event.type === 'pointerup' && event.trusted));
-    } finally {
-      await delayedRelease;
-      await frame.evaluate(() => {
-        const state = window as any;
-        window.requestAnimationFrame = state.__meoOriginalRaf;
-        delete state.__meoOriginalRaf;
-        delete state.__meoReleaseStarted;
-        delete state.__meoReleaseReceipt;
-      });
     }
 
     const contentFrame = await frame.frameElement();
@@ -172,7 +180,11 @@ if (args.has('--browser-url')) {
       cover.style.cssText = 'position:fixed;inset:0;background:black;z-index:5'; document.body.append(cover);
     });
     await assert.rejects(driver.click('#click'), (error: any) => error.stage === 'target');
-    console.log('Native input delivery contract passed: actual press/move/release, dropped-command negative control, active frame, covering and cleanup');
+    for (const target of page.frames()) {
+      assert.equal(await target.evaluate(() => Object.getOwnPropertyNames(window)
+        .some(key => key.startsWith('__meoInputReceipt_'))), false, 'Every temporary receipt binding must be removed');
+    }
+    console.log('Native input delivery contract passed: actual press/move/release, render-independent receipts, dropped-command negative control, active frame, covering and cleanup');
   } catch (error) { primaryError = error; throw error; }
   finally {
     try {
