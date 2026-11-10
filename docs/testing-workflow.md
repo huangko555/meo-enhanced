@@ -2826,6 +2826,19 @@ do not authorize or start long-running workflows.
 
 ### Adding or changing tests
 
+`scripts/test-live-editing-preview-production.ts` belongs to `test:browser` and
+the rendered targeted plan. It uses trusted native input with production Workers
+and renderers, pairing ordinary/optimized documents, both Mermaid layouts, HTML,
+and dollar/LaTeX/fenced formulas. It checks single-edit delivery and intermediate
+preview updates during continuous typing; a final result after typing stops is
+insufficient. Native IME preedit must retain the last result and resume after
+commit. Timing is diagnostic, while the progress assertion guards against
+starvation behind the full-document quiet window. Keep the existing Mermaid
+continuity render-count, stale-result, lifecycle and compositor checks alongside it.
+Its isolated quiet-deadline fixture uses production Live syntax admission and a
+delayed rich-block reply, keeping two-stage startup readiness separate from the
+input latency being tested.
+
 `scripts/test-content-policy-parity.ts` is the focused shared-content regression
 in `test:browser` and the rendered targeted plan. It pairs ordinary/optimized
 documents and light/dark surfaces for quote/list exits, valid lazy continuations,

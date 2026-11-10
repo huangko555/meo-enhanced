@@ -1,5 +1,5 @@
 import { documentLines } from './documentLines';
-import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
+import { mapLiveWidgetPositions, refreshLiveWidgetPreview, liveWidgetEditingPreview } from '../editor/liveWidgetPositions';
 import { EditorState, Prec, StateEffect, StateField, type ChangeDesc } from '@codemirror/state';
 import {
   Decoration,
@@ -534,6 +534,14 @@ export async function formatActiveHtmlSource(view: EditorView, isCurrent: () => 
 type HtmlSourceActionsElement = HTMLSpanElement & { formatControl?: ReturnType<typeof createSourceFormatButton> };
 
 class HtmlSourceActionsWidget extends UiLanguageSensitiveWidget {
+  get [liveWidgetEditingPreview](): boolean { return this.source.length <= 32_768; }
+  [mapLiveWidgetPositions](): WidgetType { return this; }
+  [refreshLiveWidgetPreview](state: EditorState): WidgetType {
+    const range = getHtmlEditingRange(state);
+    if (!range || range.to - range.from > 32_768) return this;
+    const source = state.doc.sliceString(range.from, range.to);
+    return source === this.source ? this : new HtmlSourceActionsWidget(source);
+  }
   constructor(readonly source: string) { super(); }
   eq(other: WidgetType): boolean {
     return other instanceof HtmlSourceActionsWidget && this.hasSameUiLanguageEpoch(other) && other.source === this.source;
@@ -883,6 +891,16 @@ function disposeHtmlResources(root: HTMLElement): void {
 }
 
 class HtmlBlockWidget extends UiLanguageSensitiveWidget {
+  get [liveWidgetEditingPreview](): boolean { return this.editing && this.block.to - this.block.from <= 32_768; }
+  [refreshLiveWidgetPreview](state: EditorState): WidgetType {
+    const range = this.editing && getHtmlEditingRange(state);
+    if (!range || range.from !== this.block.from || range.to - range.from > 32_768) return this;
+    const source = state.doc.sliceString(range.from, range.to);
+    if (source === this.block.source) return this;
+    const next = new HtmlBlockWidget({ ...this.block, source }, true);
+    next.seedHeight(this);
+    return next;
+  }
   [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType {
     const from = changes.mapPos(this.block.from, 1), to = changes.mapPos(this.block.to, -1);
     const startLine = state.doc.lineAt(from).number, endLine = state.doc.lineAt(Math.max(from, to - 1)).number;

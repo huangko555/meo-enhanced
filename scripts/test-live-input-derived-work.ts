@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { EditorState, Transaction } from '@codemirror/state';
 import { markdown } from '@codemirror/lang-markdown';
 import { Decoration, WidgetType } from '@codemirror/view';
-import { mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges } from '../webview/src/editor/liveWidgetPositions';
+import { mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges,
+  hasLiveWidgetEditingPreview, refreshLiveWidgetPreviews, liveWidgetEditingPreview, mapLiveWidgetPositions } from '../webview/src/editor/liveWidgetPositions';
 import { displayMathResultField } from '../webview/src/helpers/displayMathEditing';
 import {
   createLiveInputDerivedWorkScheduler,
   isLiveInputNestedProjection,
   liveInputDerivedWorkExtensions,
+  refreshLiveInputEditingPreviewEffect,
   markLiveInputDerivedWorkFollowUp,
   markLiveInputNestedProjection,
   shouldDeferLiveInputDerivedWork,
@@ -17,6 +19,20 @@ import {
 class UnknownPositionWidget extends WidgetType {
   toDOM(): HTMLElement { throw new Error('This projection contract does not mount DOM'); }
 }
+class OversizedPreviewWidget extends WidgetType {
+  readonly [liveWidgetEditingPreview] = true;
+  [mapLiveWidgetPositions](): WidgetType { return this; }
+  toDOM(): HTMLElement { throw new Error('This budget contract does not mount DOM'); }
+}
+const budgetMark = Decoration.mark({ class: 'oversized-presentation' });
+const oversizedPresentation = Decoration.set([
+  Decoration.widget({ widget: new OversizedPreviewWidget(), side: 1 }).range(0),
+  ...Array.from({ length: 131_073 }, (_, position) => budgetMark.range(position, position + 1))
+], true);
+assert.equal(hasLiveWidgetEditingPreview(oversizedPresentation), false,
+  'an unprepared oversized presentation must keep the existing background budget');
+assert.equal(refreshLiveWidgetPreviews(oversizedPresentation, EditorState.create({ doc: 'source' })), oversizedPresentation,
+  'an editing checkpoint must not build an unbounded widget index');
 const widgetState = EditorState.create({ doc: 'unchanged' });
 const preparedMarks = prepareLiveWidgetPositions(Decoration.set([Decoration.mark({ class: 'stable' }).range(0, 1)]));
 const withUnknownControl = replaceLivePresentationRanges(preparedMarks, 2, 3,
@@ -50,6 +66,9 @@ assert.equal(
   true,
   'a real input transaction must enter the deferred production path'
 );
+assert.equal(shouldDeferLiveInputDerivedWork(productionInput.state.update({
+  effects: refreshLiveInputEditingPreviewEffect.of(true)
+})), true, 'a local editing preview must not release unrelated pending document work');
 const automaticFollowUp = productionInput.state.update({
   changes: { from: 0, to: 1, insert: 'B' },
   annotations: [

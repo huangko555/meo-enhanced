@@ -135,6 +135,7 @@ function targetedCommands(
       return [
         packageScript('test:rendered-source'),
         script('scripts/test-live-viewport-content-production.ts'),
+        script('scripts/test-live-editing-preview-production.ts'),
         script('scripts/test-math-tag-layout.ts'),
         script('scripts/test-composite-block-layout.ts'),
         script('scripts/test-composite-render-parity.ts'),

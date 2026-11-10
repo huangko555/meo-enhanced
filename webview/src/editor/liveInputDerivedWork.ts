@@ -132,6 +132,9 @@ const beginLiveInputCompositionEffect = StateEffect.define<true>();
 const changeLiveInputCompositionEffect = StateEffect.define<true>();
 const completeLiveInputCompositionEffect = StateEffect.define<true>();
 const resumeLiveInputAcceptedWorkEffect = StateEffect.define<true>();
+export const refreshLiveInputEditingPreviewEffect = StateEffect.define<true>();
+/** Bounded editing results may follow painted input before global quiet-time work. */
+export const liveInputEditingPreview = Facet.define<(state: EditorState) => boolean>();
 
 /** Phase bookkeeping does not change the document's presentation choices. */
 export function isLiveInputDerivedWorkBookkeeping(effect: StateEffect<unknown>): boolean {
@@ -139,7 +142,7 @@ export function isLiveInputDerivedWorkBookkeeping(effect: StateEffect<unknown>):
     settleLiveInputDerivedWorkEffect, cancelLiveInputDerivedWorkEffect,
     supersedeLiveInputDerivedWorkEffect, beginLiveInputCompositionEffect,
     changeLiveInputCompositionEffect, completeLiveInputCompositionEffect,
-    resumeLiveInputAcceptedWorkEffect].some(type => effect.is(type));
+    resumeLiveInputAcceptedWorkEffect, refreshLiveInputEditingPreviewEffect].some(type => effect.is(type));
 }
 
 type LiveInputDerivedWorkPhase =
@@ -354,6 +357,27 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
   const frameConsumers = new Map<object, FrameConsumerRecord>();
   let disposed = false;
   let lastInputAt: number | null = null;
+  let previewFrameId: number | null = null;
+  const hasEditingPreview = (): boolean => view.state.facet(liveInputEditingPreview).some(read => read(view.state));
+  const cancelPreviewFrame = (): void => {
+    if (previewFrameId !== null) window.cancelAnimationFrame(previewFrameId);
+    previewFrameId = null;
+  };
+  const scheduleEditingPreview = (): void => {
+    if (previewFrameId !== null || disposed || !hasEditingPreview()
+      || view.state.field(liveInputDerivedWorkPhaseField, false)?.phase !== 'pending-input') return;
+    // Do not restart this checkpoint on every key: continuous typing must make
+    // progress too. Each checkpoint reads the current state, never an old edit.
+    previewFrameId = window.requestAnimationFrame(() => {
+      previewFrameId = window.requestAnimationFrame(() => {
+        previewFrameId = null;
+        const phase = view.state.field(liveInputDerivedWorkPhaseField, false)?.phase;
+        if (!disposed && phase === 'pending-input' && hasEditingPreview()) {
+          run(() => view.dispatch({ effects: refreshLiveInputEditingPreviewEffect.of(true) }));
+        }
+      });
+    });
+  };
   const remainingQuietTime = (delayMs: number): number => lastInputAt === null
     ? delayMs : Math.max(0, delayMs - (performance.now() - lastInputAt));
   // Keep a pressed widget button alive until its pointer gesture ends.
@@ -755,9 +779,11 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
 
         if (beginsComposition || changesComposition) {
           scheduler.cancelPending();
+          cancelPreviewFrame();
         }
         if (supersedes || cancels) {
           scheduler.cancelPending();
+          cancelPreviewFrame();
           cancelConsumerGeneration();
           cancelFrameConsumers();
           continue;
@@ -770,7 +796,9 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
         if ((completesComposition || defersInput || resumesAcceptedWork)
           && transaction.state.field(liveInputDerivedWorkPhaseField, false)?.phase === 'pending-input') {
           scheduler.documentChanged();
+          scheduleEditingPreview();
         }
+        if (isLiveInputDerivedWorkPending(view.state) && syntaxTree(transaction.startState) !== syntaxTree(transaction.state)) scheduleEditingPreview();
         if (refreshes) {
           queueMicrotask(flushConsumers);
         }
@@ -781,6 +809,7 @@ function createCodeMirrorLiveInputDerivedWorkPlugin(view: EditorView) {
       pointerListeners.abort();
       activePointers.clear();
       scheduler.dispose();
+      cancelPreviewFrame();
       for (const taskId of [...deferredTasks.keys()]) cancelLargeDocumentDeferred(taskId);
       cancelConsumerGeneration();
       cancelFrameConsumers();

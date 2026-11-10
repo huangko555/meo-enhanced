@@ -6,7 +6,7 @@ import { backgroundMarkdownParser, prepareBackgroundMarkdownPresentation } from 
 import { markdownMixedLanguages } from './editor/markdownMixedLanguages';
 import { documentLines } from './helpers/documentLines';
 import { isAutomaticSymbolPairHistoryEffect } from './editor/typingAssistance';
-import { liveWidgetPresentationLayers, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges, updateLivePresentationRanges } from './editor/liveWidgetPositions';
+import { liveWidgetPresentationLayers, mapLiveWidgetPositions, mapStableLiveDecorations, prepareLiveWidgetPositions, replaceLivePresentationRanges, updateLivePresentationRanges, refreshLiveWidgetPreview, refreshLiveWidgetPreviews, liveWidgetEditingPreview, hasLiveWidgetEditingPreview } from './editor/liveWidgetPositions';
 import { livePresentationWindow } from './helpers/livePresentationWindow';
 import { liveViewportPresentationExtensions, restrictLiveWidgetPresentation, getLivePresentationBand,
   isLiveViewportPresentationEffect, livePresentationBandChanged } from './helpers/liveViewportPresentation';
@@ -184,6 +184,8 @@ import {
   isLiveInputDerivedWorkPending,
   isMappedLiveInputRefresh,
   liveInputDerivedWorkExtensions,
+  liveInputEditingPreview,
+  refreshLiveInputEditingPreviewEffect,
   mapLiveInputDerivedDecorations,
   liveInputDerivedWorkReadiness,
   replaceLiveInputNestedDecorationEffect,
@@ -2825,6 +2827,23 @@ class DisplayMathSourceActionsWidget extends UiLanguageSensitiveWidget {
 }
 
 class LatexMathWidget extends UiLanguageSensitiveWidget {
+  get [liveWidgetEditingPreview](): boolean { return this.editing && this.fencedDisplay && this.blockTo - this.anchor <= 32_768; }
+  [refreshLiveWidgetPreview](state: EditorState): WidgetType {
+    if (!this.editing || !this.fencedDisplay || this.blockTo - this.anchor > 32_768) return this;
+    const range = collectDocumentMathRanges(state, resolvedSyntaxTree(state, 0), [], { from: this.anchor, to: this.blockTo })
+      .find(range => range.fencedDisplay && state.doc.lineAt(range.from).from === this.anchor && range.to === this.blockTo);
+    const source = range && getDisplayMathSource(state, range);
+    if (!range || !source || source.text === this.sourceText) return this;
+    const current = renderLatexMathToHtml(range.content, 'display');
+    const invalid = !current || current.includes('class="katex-error"');
+    const previous = invalid && range.content.trim() ? getPreviousDisplayMathResult(state, range.from, range.to) : undefined;
+    const html = previous ?? current;
+    if (!html) return this;
+    const next = new LatexMathWidget(html, this.mode, true, this.startLine, this.endLine,
+      this.indentColumns, this.anchor, source.text, this.blockTo, true, !!previous);
+    next[renderedBlockPreviewHeight].seed(this[renderedBlockPreviewHeight]);
+    return next;
+  }
   [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType {
     if (!this.fencedDisplay) return this;
     const anchor = changes.mapPos(this.anchor, 1), to = changes.mapPos(this.blockTo, -1);
@@ -4516,6 +4535,16 @@ const liveDecorationField = StateField.define<DecorationSet>({
     return safeBuildDecorations(state, Decoration.none, 'create');
   },
   update(decorations: DecorationSet, transaction: Transaction): DecorationSet {
+    if (!transaction.docChanged && !transaction.selection && !transaction.reconfigured
+      && transaction.effects.some(effect => effect.is(refreshLiveInputEditingPreviewEffect))) {
+      const metadata = liveDecorationMetadata.get(transaction.startState);
+      if (metadata) liveDecorationMetadata.set(transaction.state, metadata);
+      // The preview checkpoint does not retire the pending closed-block proof.
+      // Parser publication must still resume it instead of rebuilding globally.
+      const pending = deferredLiveLocalInputs.get(transaction.startState);
+      if (pending) deferredLiveLocalInputs.set(transaction.state, pending);
+      return refreshLiveWidgetPreviews(decorations, transaction.state);
+    }
     // A newly added field was created from the final transaction state. The
     // reconfiguration then calls update for that same state; rebuilding here
     // doubles the full-document work on every Source-to-Live switch.
@@ -5003,6 +5032,9 @@ export const editorMarkdownLanguage = getEditorMarkdownLanguage();
 export function liveModeExtensions(options: { readonly largeDocument?: boolean; readonly language?: Extension } = {}): Extension[] {
   return [
     ...liveInputDerivedWorkExtensions(options),
+    // The side canvas already follows native source updates in its own measure
+    // pass. Only in-flow editing widgets need an input checkpoint transaction.
+    liveInputEditingPreview.of(state => hasLiveWidgetEditingPreview(state.field(liveDecorationField))),
     liveInputDerivedWorkReadiness.of(state => !deferredLiveLocalInputs.has(state)
       || !!preparedMarkdownStructure(state) || markdownStructureAvailable(state)),
     // Seed changed-line conflict proofs before any Live presentation reader.

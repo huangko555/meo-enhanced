@@ -616,6 +616,7 @@
       "scripts/test-live-command-presentation.ts",
       "scripts/test-live-composite-lists.ts",
       "scripts/test-live-decoration-history.ts",
+      "scripts/test-live-editing-preview-production.ts",
       "scripts/test-live-embedded-input-viewport.ts",
       "scripts/test-live-gutter-read-budget.ts",
       "scripts/test-live-hex-adjuster-appearance.ts",

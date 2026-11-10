@@ -7,6 +7,7 @@ import { getCodeBlockSourceLines } from '../webview/src/helpers/blockIndent';
 import { getFencedCodeContent } from '../webview/src/helpers/mermaidDiagram';
 import { applySourceLinePrefix, outerOffsetToSourceOffset, sourceOffsetToOuterOffset } from '../webview/src/helpers/sourceLinePrefix';
 import { mathFenceBodyRange } from '../src/shared/mathFence';
+import { boundedMermaidEditingSource, mermaidSourceForAnchor } from '../webview/src/helpers/mermaidSource';
 
 for (const fence of ['```', '~~~', '````', '~~~~']) {
   for (const [suffix, expected] of [
@@ -62,12 +63,48 @@ for (const { name, parent, prefix } of [
     if (node.name !== 'FencedCode') return;
     checked = true;
     assert.equal(getFencedCodeContent(state, node), payload.join('\n'), `${name}: rendering must preserve payload spaces and remove the container prefix on blank lines`);
+    const opening = state.doc.lineAt(node.from), closing = state.doc.lineAt(node.to - 1);
+    assert.equal(boundedMermaidEditingSource(state, opening.from, closing.to)?.source, payload.join('\n'),
+      `${name}: the editing preview must read the same bounded payload without a completed document tree`);
     const rows = getCodeBlockSourceLines(state, node.node).filter(row => !row.isFence);
     assert.deepEqual(rows.map(row => state.doc.sliceString(row.prefixTo, row.to)), payload, `${name}: ordinary code and Mermaid must agree on source indentation`);
     for (const row of rows) assert.deepEqual(getCodeBlockSourceLines(state, node.node, state.doc.lineAt(row.from).number), [row],
       `${name}: command input must read the same prefix without enumerating the block`);
   } });
   assert.ok(checked, `${name}: fenced code fixture must parse`);
+}
+for (const doc of ['```mermaid\nA --> B', '```mermaid\nA --> B\n```\nAfter',
+  '```mermaid\nA --> B\n```\n```mermaid\nC --> D\n```', '> ```mermaid\nA --> B\n> ```',
+  '```mermaid\n' + 'A'.repeat(32_768) + '\n```']) {
+  const state = EditorState.create({ doc });
+  assert.equal(boundedMermaidEditingSource(state, 0, state.doc.length), null,
+    'unclosed, escaped, multiple and oversized fences must retain authoritative document parsing');
+}
+for (const indentation of ['', ' ', '  ', '   ']) for (const openingGap of [' ', '\t', ' \t']) for (const bodyGap of [' ', '\t', ' \t']) {
+  const prefix = indentation + '>', doc = `${prefix}${openingGap}\`\`\`mermaid\n${prefix}${bodyGap}flowchart LR\n${prefix}${bodyGap}A --> B\n${prefix}${openingGap}\`\`\``;
+  const state = EditorState.create({ doc, extensions: markdown() });
+  resolvedSyntaxTree(state).iterate({ enter(node) {
+    if (node.name !== 'FencedCode') return;
+    const opening = state.doc.lineAt(node.from), closing = state.doc.lineAt(node.to - 1);
+    const source = boundedMermaidEditingSource(state, opening.from, closing.to);
+    if (source) assert.equal(source.source, mermaidSourceForAnchor(state, opening.from)?.source,
+      `bounded reading must retain physical tab stops: ${JSON.stringify({ indentation, openingGap, bodyGap })}`);
+  } });
+}
+{
+  const block = '> ```mermaid\n> flowchart LR\n> A --> B\n> ```';
+  const prefix = 'Background paragraph.\n\n'.repeat(2000);
+  // No language tree is installed: the document Worker has not caught up yet.
+  const state = EditorState.create({ doc: prefix + block + '\n\n' + prefix });
+  const read = state.doc.sliceString.bind(state.doc);
+  Object.defineProperty(state.doc, 'sliceString', { configurable: true, value(from: number, to: number) {
+    assert.ok(to - from <= 32_768, 'an active preview must not read the surrounding document');
+    return read(from, to);
+  } });
+  try {
+    assert.equal(boundedMermaidEditingSource(state, prefix.length, prefix.length + block.length)?.source,
+      'flowchart LR\nA --> B', 'an owned closed block must update before global syntax publication');
+  } finally { delete (state.doc as any).sliceString; }
 }
 for (const [doc, kind, line] of [
   ['> ```ts\n' + '> value\n'.repeat(12000) + '> ```', 'FencedCode', 2],

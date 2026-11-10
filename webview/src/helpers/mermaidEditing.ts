@@ -1,7 +1,7 @@
 import { documentBlocksFacet, isGraphBlockLanguage } from '../editor/documentBlocks';
 import { createGraphDiagramWidget, type GraphDiagramWidget } from './graphDiagramWidget';
 import { editorScrollIntoView } from '../editor/scrollEffects';
-import { mapLiveWidgetPositions, liveWidgetPositionsIndependent } from '../editor/liveWidgetPositions';
+import { mapLiveWidgetPositions, liveWidgetPositionsIndependent, refreshLiveWidgetPreview, liveWidgetEditingPreview } from '../editor/liveWidgetPositions';
 import { EditorSelection, MapMode, StateEffect, StateField, type ChangeDesc, type EditorState } from '@codemirror/state';
 import { BlockType, Decoration, EditorView, ViewPlugin, WidgetType, type ViewUpdate } from '@codemirror/view';
 import { createElement, Check, Pencil, Columns2, Rows2 } from 'lucide';
@@ -14,7 +14,7 @@ import {
 import { getMermaidDiagramPresentationFactory } from '../editor/mermaidDiagramPresentation';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { setLivePointerSelectionActiveEffect, sourcePresentationSelection } from '../editor/livePointerSelection';
-import { supersedeLiveInputDerivedWork, isLiveInputDerivedWorkRefresh, liveInputDerivedWorkReadiness, usesLargeDocumentDerivedWorkBudget, liveInputQuietDelay } from '../editor/liveInputDerivedWork';
+import { supersedeLiveInputDerivedWork, isLiveInputDerivedWorkPending, isLiveInputDerivedWorkRefresh, liveInputDerivedWorkReadiness, usesLargeDocumentDerivedWorkBudget, liveInputQuietDelay } from '../editor/liveInputDerivedWork';
 import { isCompleteMarkdownStructure } from '../editor/markdownStructure';
 import { resolvedSyntaxTree, syntaxTreeChanged } from './markdownSyntax';
 import { isExternalDocumentPresentation } from '../editor/externalDocumentPresentation';
@@ -31,7 +31,7 @@ import {
   type LiveBlockIndentValue
 } from './blockIndent';
 import { getViewportController } from './viewportController';
-import { mermaidSourceAt, mermaidSourceForAnchor, selectMermaidSource } from './mermaidSource';
+import { boundedMermaidEditingSource, mermaidSourceAt, mermaidSourceForAnchor, selectMermaidSource } from './mermaidSource';
 import { retainRenderedBlockModePointerFocus } from './renderedBlockModeControls';
 import { focusRenderedBlockAction } from './renderedBlockActionFocus';
 import { focusBlockReading, isBlockReading } from '../editor/blockInteraction';
@@ -207,8 +207,9 @@ export function getMermaidBlockMode(
   };
 }
 function activeMermaidSource(state: EditorState) {
-  const anchor = state.field(mermaidEditingStateField, false)?.activeAnchor;
-  return anchor == null ? null : mermaidSourceForAnchor(state, anchor);
+  const editing = state.field(mermaidEditingStateField, false), anchor = editing?.activeAnchor;
+  return anchor == null ? null : (editing?.activeTo != null ? boundedMermaidEditingSource(state, anchor, editing.activeTo) : null)
+    ?? mermaidSourceForAnchor(state, anchor);
 }
 function currentGraphRange(state: EditorState, anchor: number) {
   const source = mermaidSourceForAnchor(state, anchor);
@@ -503,7 +504,7 @@ export function addMermaidToolbar(
 }
 
 type PreviewElement = HTMLElement & {
-  mermaidPreview?: { widget: GraphDiagramWidget; timer?: number; source: string; startLine: number; endLine: number; viewport: MermaidViewportState };
+  mermaidPreview?: { widget: GraphDiagramWidget; timer?: number; lastUpdateAt?: number; sourceDoc?: EditorState['doc']; source: string; startLine: number; endLine: number; viewport: MermaidViewportState };
 };
 /** The same preview action is used in document flow and opaque floating chrome. */
 export function createMermaidPreviewHeading(view: EditorView, anchor: number): HTMLElement {
@@ -561,6 +562,14 @@ export function createMermaidPreviewHeading(view: EditorView, anchor: number): H
 }
 
 export class MermaidSourcePreviewWidget extends UiLanguageSensitiveWidget {
+  get [liveWidgetEditingPreview](): boolean { return this.source.length <= 32_768; }
+  [refreshLiveWidgetPreview](state: EditorState): WidgetType {
+    const editing = state.field(mermaidEditingStateField, false);
+    if (editing?.activeAnchor !== this.anchor || editing.activeTo === null || editing.activeTo - this.anchor > 32_768) return this;
+    const source = boundedMermaidEditingSource(state, this.anchor, editing.activeTo);
+    return !source || source.language !== this.graphLanguage.split(/\s+/)[0].toLowerCase() || source.source === this.source ? this : new MermaidSourcePreviewWidget(this.anchor, source.source,
+      source.opening.number, source.closing.number, this.indent, this.language, this.viewport, this.graphLanguage);
+  }
   [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType {
     const anchor = changes.mapPos(this.anchor, 1), startLine = state.doc.lineAt(anchor).number;
     return anchor === this.anchor && startLine === this.startLine ? this
@@ -625,21 +634,52 @@ export class MermaidSourcePreviewWidget extends UiLanguageSensitiveWidget {
     root.querySelector<HTMLElement>('.meo-native-source-preview-label')!.dataset.meoMermaidAnchor = String(this.anchor);
     updateMermaidLayoutButton(root.querySelector<HTMLButtonElement>('.meo-mermaid-layout-btn')!, view,
       view.state.field(mermaidEditingStateField).narrow || view.dom.clientWidth < MERMAID_SIDE_MIN_WIDTH);
-    if (preview.source === this.source) {
+    if (view.composing) return true;
+    const large = usesLargeDocumentDerivedWorkBudget(view.state), pending = isLiveInputDerivedWorkPending(view.state);
+    if (preview.source === this.source && !(preview.timer !== undefined && large && !pending)) {
       if (preview.timer === undefined) preview.widget.updateSource(this.source, this.startLine, this.endLine);
       return true;
     }
     preview.source = this.source;
+    preview.sourceDoc = view.state.doc;
     root.dataset.meoMermaidRendering = 'true';
-    clearTimeout(preview.timer);
-    // Large-document input already coalesces derived work through its quiet
-    // window. Accept that source without a second debounce on the retained SVG.
+    if (preview.timer !== undefined) {
+      if (!large || pending) return true;
+      clearTimeout(preview.timer);
+    }
+    // Keep single edits prompt, but cap repeated diagram layout during typing.
+    // Later input replaces the desired source without moving this deadline.
+    const now = performance.now();
+    // Limit repeated diagram layout while typing. A fully accepted quiet-time
+    // refresh may flush the latest source immediately.
+    const throttle = large && pending && preview.lastUpdateAt !== undefined && now >= preview.lastUpdateAt
+      ? Math.max(0, 120 - (now - preview.lastUpdateAt)) : 0;
     preview.timer = window.setTimeout(() => {
       preview.timer = undefined;
       if (root.mermaidPreview !== preview || !root.isConnected) return;
+      if (view.composing) {
+        delete root.dataset.meoMermaidRendering;
+        return;
+      }
+      if (preview.sourceDoc !== view.state.doc) {
+        // A newer input may still be waiting for its syntax publication. Never
+        // spend a diagram layout on the superseded source captured by a timer.
+        const editing = view.state.field(mermaidEditingStateField, false);
+        const current = editing?.activeAnchor === this.anchor && editing.activeTo !== null && editing.activeTo - this.anchor <= 32_768
+          ? boundedMermaidEditingSource(view.state, this.anchor, editing.activeTo) : null;
+        if (!current || current.language !== this.graphLanguage.split(/\s+/)[0].toLowerCase()) {
+          delete root.dataset.meoMermaidRendering;
+          return;
+        }
+        preview.source = current.source;
+        preview.sourceDoc = view.state.doc;
+        preview.startLine = current.opening.number;
+        preview.endLine = current.closing.number;
+      }
+      preview.lastUpdateAt = performance.now();
       preview.widget.updateSource(preview.source, preview.startLine, preview.endLine);
       delete root.dataset.meoMermaidRendering;
-    }, usesLargeDocumentDerivedWorkBudget(view.state) ? 0 : liveInputQuietDelay(view, 80));
+    }, Math.max(throttle, !large || pending ? liveInputQuietDelay(view, 80) : 0));
     return true;
   }
   destroy(root: PreviewElement): void {

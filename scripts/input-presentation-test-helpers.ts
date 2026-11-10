@@ -146,7 +146,7 @@ async function assertStablePaint(page: Page, clip: PaintClip | readonly PaintCli
 }
 
 async function open(page: Page, text: string, coldPreview = false, initialMode: 'source' | 'live' | 'preview' = 'source',
-  testOptions: { uiLanguage?: 'en' | 'zh-CN'; beforePreviewRender?: () => Promise<void>; outlineVisible?: boolean } = {}) {
+  testOptions: { uiLanguage?: 'en' | 'zh-CN'; beforePreviewRender?: () => Promise<void>; outlineVisible?: boolean; latexDelimiters?: boolean } = {}) {
   let hostText = text, version = 1, ready = false, firstRender = false;
   let renderedText = '', renderedDocumentId: string | undefined;
   const documents = new Map<string, ReturnType<typeof createPreviewDocument>>();
@@ -171,6 +171,7 @@ async function open(page: Page, text: string, coldPreview = false, initialMode: 
         previewFontFamily: '', previewSourceColoring: true, editorAppearance: 'dark', editorFontSizeMode: 'auto', editorFontSize: 14,
         gitChangesGutter: false, gitDiffLineHighlights: false, gitDiffDetailsVisible: false, diffBaselineMode: 'current-edit',
         fixedBaselinePinned: false, fixedBaselineActive: false, contentMaxWidthEnabled: false, largeDocumentOptimizationEnabled: true,
+        latexDelimiters: testOptions.latexDelimiters ?? false,
         findOptions: { wholeWord: false, caseSensitive: false }, outlinePosition: 'right', outlineVisible: testOptions.outlineVisible ?? false, outlineWidth: 260,
         restoreReadingPositionOnOpen: false, vscodeTheme: null };
     }

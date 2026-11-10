@@ -1,4 +1,5 @@
-import { EditorSelection, Transaction, type EditorState } from '@codemirror/state';
+import { EditorSelection, EditorState, Transaction } from '@codemirror/state';
+import { markdownLanguage } from '@codemirror/lang-markdown';
 import type { EditorView } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
 import { getCodeBlockSourceLines, parseBlockLinePrefix } from './blockIndent';
@@ -6,6 +7,50 @@ import { getFencedCodeInfo, currentSyntaxTree } from './markdownSyntax';
 import { insertLiteralSourceNewline } from '../editor/indentedCodeEditing';
 import { completedBackgroundMarkdownStructure } from '../editor/backgroundMarkdownStructure';
 import { isGraphBlockLanguage } from '../editor/documentBlocks';
+
+type EditingSource = { anchor: number; source: string; language: string;
+  opening: ReturnType<EditorState['doc']['lineAt']>; closing: ReturnType<EditorState['doc']['lineAt']> };
+const editingSourceCache = new WeakMap<EditorState, { anchor: number; to: number; value: EditingSource | null }>();
+
+/** Read only an already owned editing span. This small local parse is never
+ * published as document syntax and cannot absorb text beyond the known fence.
+ * Removing matching outer indentation lets the existing source reader retain
+ * list/quote prefixes, tabs and payload indentation without a second grammar. */
+export function boundedMermaidEditingSource(state: EditorState, anchor: number, to: number): EditingSource | null {
+  if (anchor < 0 || to > state.doc.length || to <= anchor || to - anchor > 32_768) return null;
+  const cached = editingSourceCache.get(state);
+  if (cached?.anchor === anchor && cached.to === to) return cached.value;
+  let value: EditingSource | null = null;
+  const opening = state.doc.lineAt(anchor), closing = state.doc.lineAt(to - 1);
+  if (opening.from === anchor && closing.to === to && closing.number > opening.number) {
+    // Remove whole CommonMark indentation units. Keeping the remaining one to
+    // three spaces preserves physical tab stops in quote/list payload prefixes.
+    const leading = /^ */.exec(opening.text)![0];
+    const indentation = leading.slice(0, Math.floor(leading.length / 4) * 4);
+    const lines = state.doc.sliceString(anchor, to).split('\n');
+    if ((!indentation || indentation.length % state.tabSize === 0 || !lines.some(line => line.includes('\t')))
+      && lines.every(line => line.startsWith(indentation) || !line.trim())) {
+      const text = lines.map(line => line.startsWith(indentation) ? line.slice(indentation.length) : '').join('\n');
+      const local = EditorState.create({ doc: text, extensions: EditorState.tabSize.of(state.tabSize) });
+      const tree = markdownLanguage.parser.parse(text);
+      let fence: SyntaxNode | null = null;
+      tree.iterate({ enter(node) { if (node.name === 'FencedCode' && !fence) { fence = node.node; return false; } } });
+      if (fence) {
+        const node = fence as SyntaxNode;
+        const language = getFencedCodeInfo(local, { node })?.split(/\s+/)[0].toLowerCase();
+        if (local.doc.lineAt(node.from).number === 1 && local.doc.lineAt(node.to - 1).number === local.doc.lines
+          && node.lastChild?.name === 'CodeMark' && local.doc.lineAt(node.lastChild.from).number === local.doc.lines
+          && isGraphBlockLanguage(state, language)) {
+          const source = getCodeBlockSourceLines(local, node).filter(line => !line.isFence)
+            .map(line => ' '.repeat(line.payloadInset) + local.doc.sliceString(line.prefixTo, line.to)).join('\n');
+          value = { anchor, source, language: language!, opening, closing };
+        }
+      }
+    }
+  }
+  editingSourceCache.set(state, { anchor, to, value });
+  return value;
+}
 
 export function mermaidSourceAt(state: EditorState, position = state.selection.main.head) {
   const line = state.doc.lineAt(Math.max(0, Math.min(position, state.doc.length)));

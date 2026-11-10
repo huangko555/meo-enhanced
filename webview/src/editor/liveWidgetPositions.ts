@@ -8,9 +8,50 @@ import { Decoration, type DecorationSet, type WidgetType } from '@codemirror/vie
  */
 export const mapLiveWidgetPositions = Symbol('mapLiveWidgetPositions');
 export const liveWidgetPositionsIndependent = Symbol('liveWidgetPositionsIndependent');
+/** Refresh only the mounted editing result, without certifying document syntax. */
+export const refreshLiveWidgetPreview = Symbol('refreshLiveWidgetPreview');
+export const liveWidgetEditingPreview = Symbol('liveWidgetEditingPreview');
 interface LiveWidgetPositions {
   readonly [liveWidgetPositionsIndependent]?: true;
   [mapLiveWidgetPositions](changes: ChangeDesc, state: EditorState): WidgetType;
+}
+
+export function hasLiveWidgetEditingPreview(decorations: DecorationSet): boolean {
+  if (decorations.size > maxProjectionDecorations && !mappableSets.has(decorations)) return false;
+  const parts = projectionParts(decorations);
+  if (!parts) return false;
+  for (const cursor = parts.widgetPositions.iter(); cursor.value; cursor.next()) {
+    if (cursor.value.spec.widget[liveWidgetEditingPreview]) return true;
+  }
+  return false;
+}
+
+export function refreshLiveWidgetPreviews(decorations: DecorationSet, state: EditorState): DecorationSet {
+  if (decorations.size > maxProjectionDecorations && !mappableSets.has(decorations)) return decorations;
+  const parts = projectionParts(decorations);
+  if (!parts) return decorations;
+  const replacements = new Map<Decoration, Decoration>();
+  let first = Infinity, last = -Infinity;
+  const add: Range<Decoration>[] = [];
+  for (const cursor = parts.widgetPositions.iter(); cursor.value; cursor.next()) {
+    const widget = cursor.value.spec.widget as WidgetType & {
+      [liveWidgetEditingPreview]?: boolean;
+      [refreshLiveWidgetPreview]?: (state: EditorState) => WidgetType;
+    };
+    if (!widget[liveWidgetEditingPreview]) continue;
+    const next = widget[refreshLiveWidgetPreview]?.(state);
+    if (!next || next === widget) continue;
+    const spec = { ...cursor.value.spec, widget: next };
+    replacements.set(cursor.value, cursor.from === cursor.to ? Decoration.widget(spec) : Decoration.replace(spec));
+    first = Math.min(first, cursor.from); last = Math.max(last, cursor.to);
+  }
+  if (!replacements.size) return decorations;
+  // Keep equal-position controls/marks and the accepted layer partition.
+  for (const cursor = decorations.iter(first); cursor.value && cursor.from <= last; cursor.next()) {
+    if (replacements.has(cursor.value)) add.push(replacements.get(cursor.value)!.range(cursor.from, cursor.to));
+  }
+  return updateLivePresentationRanges(decorations, { filterFrom: first, filterTo: last,
+    filter: (_from, _to, value) => !replacements.has(value), add, sort: true });
 }
 
 // Ordinary marks can use RangeSet's structural mapping. Only widgets carry

@@ -13,7 +13,13 @@ export async function checkLiveInputQuietDeadlines(browser: Browser, bundle: str
       await page.setViewport({ width: 1000, height: 800 });
       await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
       await page.addStyleTag({ path: 'webview/src/styles.css' });
-      await page.evaluate(code => { document.body.dataset.meoMarkdownWorkerSrc = URL.createObjectURL(new Blob([code], { type: 'text/javascript' })); }, await worker.outputs[0]!.text());
+      await page.evaluate(({ code, large }) => {
+        // Syntax and rich-block replies are separate stages. Hold the latter
+        // so this input test cannot accidentally rely on their arrival order
+        // instead of the production Live admission used below.
+        const delayBlocks = large ? 'const sendQuietFixtureMessage = self.postMessage.bind(self); self.postMessage = (message, ...rest) => { if (message?.kind === "blocks") setTimeout(() => sendQuietFixtureMessage(message, ...rest), 500); else sendQuietFixtureMessage(message, ...rest); };\n' : '';
+        document.body.dataset.meoMarkdownWorkerSrc = URL.createObjectURL(new Blob([delayBlocks, code], { type: 'text/javascript' }));
+      }, { code: await worker.outputs[0]!.text(), large });
       await page.addScriptTag({ content: bundle });
       await page.evaluate(large => {
         const w = window as any;
@@ -26,6 +32,8 @@ export async function checkLiveInputQuietDeadlines(browser: Browser, bundle: str
           text: 'Before\n\n```mermaid\nflowchart LR\nA[Alpha] --> B[End]\n```\n\nAfter\n\n'
             + (large ? 'Background paragraph.\n\n'.repeat(2000) : '') });
       }, large);
+      assert.equal(await page.evaluate(() => (window as any).quietEditor.prepareLiveSyntax(() => true)), true,
+        'the isolated fixture must use the same Live syntax admission as production bootstrap');
       await page.waitForSelector('.meo-mermaid-block svg');
       await page.click('.meo-mermaid-mode-btn');
       await page.evaluate(() => (window as any).quietEditor.whenVisiblePresentationReady(3000));
@@ -56,6 +64,18 @@ export async function checkLiveInputQuietDeadlines(browser: Browser, bundle: str
           'large input must consume elapsed time instead of restarting its 120ms quiet window: ' + JSON.stringify(result.delays));
       } else assert.ok(result.delays.includes(0) && !result.delays.includes(80) && result.sources.some(source => source.includes('A[Beta]')),
         'accepted Mermaid source must not restart an expired input quiet window: ' + JSON.stringify(result.delays));
+    } catch (error) {
+      const diagnostic = await page.evaluate(() => {
+        const scope = window as any, editor = scope.quietEditor, block = document.querySelector('.meo-mermaid-block');
+        const rect = block?.getBoundingClientRect();
+        return { visibility: document.visibilityState, focused: document.hasFocus(), fonts: document.fonts.status,
+          lines: editor?.view.state.doc.lines, runtime: typeof scope.mermaid?.render, sources: scope.quietSources,
+          blocks: document.querySelectorAll('.meo-mermaid-block').length, svg: block?.querySelectorAll('svg').length,
+          block: block?.outerHTML.slice(0, 1800), rect: rect && { top: rect.top, bottom: rect.bottom, width: rect.width },
+          editorHeight: editor?.view.scrollDOM.clientHeight };
+      }).catch(diagnosticError => ({ unavailable: String(diagnosticError) }));
+      console.error('Mermaid quiet-deadline fixture failure: ' + JSON.stringify({ large, diagnostic }));
+      throw error;
     } finally { await page.evaluate(() => (window as any).quietEditor?.destroy()); await page.close(); }
   }
   console.log('Live input quiet deadlines passed: painted frames share the accepted input quiet window');
@@ -88,6 +108,7 @@ export async function checkMermaidEditingControlStability(browser: Browser, bund
             + 'A[Alpha' + (large && layout === 'side-by-side' ? '5'.repeat(120) : '')
             + '] --> B[End]\n```\n\nAfter\n\n' + (large ? 'Background paragraph.\n\n'.repeat(21000) : '') });
       }, { large, layout });
+      assert.equal(await page.evaluate(() => (window as any).controlsEditor.prepareLiveSyntax(() => true)), true);
       await page.waitForSelector('.meo-mermaid-block svg');
       await page.click('.meo-mermaid-mode-btn');
       await page.evaluate(layout => {
@@ -199,7 +220,10 @@ export async function checkMermaidInputContinuity(browser: Browser, bundle: stri
       await page.evaluate(() => {
         const g = window as any, render = g.mermaid.render.bind(g.mermaid);
         g.continuityRenderRequests = [];
-        g.mermaid.render = (...args: unknown[]) => { g.continuityRenderRequests.push(args[1]); return render(...args); };
+        g.continuityPreviewTimeline = [];
+        document.addEventListener('input', event => g.continuityPreviewTimeline.push({ input: (event as InputEvent).data, time: performance.now() }), true);
+        g.mermaid.render = (...args: unknown[]) => { g.continuityRenderRequests.push(args[1]);
+          g.continuityPreviewTimeline.push({ source: args[1], time: performance.now() }); return render(...args); };
       });
       await page.addScriptTag({ content: bundle });
       await page.evaluate(text => {
@@ -207,6 +231,7 @@ export async function checkMermaidInputContinuity(browser: Browser, bundle: stri
         api.applyBuiltInVisualBaseline('light');
         g.continuityEditor = api.createEditor({ parent: document.getElementById('app'), text, initialMode: 'live' });
       }, text);
+      assert.equal(await page.evaluate(() => (window as any).continuityEditor.prepareLiveSyntax(() => true)), true);
       await page.waitForSelector('.meo-mermaid-block svg');
       await page.evaluate(({ text, layout }) => {
         const g = window as any, view = g.continuityEditor.view, anchor = text.indexOf('```');
@@ -239,11 +264,11 @@ export async function checkMermaidInputContinuity(browser: Browser, bundle: stri
       await page.keyboard.type('7');
       await page.waitForFunction(() => { const samples = (window as any).continuitySamples; return samples.slice(-6).length === 6 && samples.slice(-6).every((sample: any) => !sample.missing && sample.label === 'Alpha7'); });
       await client.send('Page.stopScreencast'); await client.detach();
-      await page.evaluate(() => { (window as any).continuityRenderRequests = []; });
+      await page.evaluate(() => { (window as any).continuityRenderRequests = []; (window as any).continuityPreviewTimeline = []; });
       await page.keyboard.type('abc', { delay: large ? 80 : 15 });
       await page.waitForFunction(() => { const samples = (window as any).continuitySamples; return samples.slice(-6).length === 6 && samples.slice(-6).every((sample: any) => !sample.missing && sample.label === 'Alpha7abc'); });
       const burstRenders = await page.evaluate(() => (window as any).continuityRenderRequests.length);
-      assert.ok(burstRenders <= 2, `${layout}/${large}: native input must retain bounded rendering work (${burstRenders})`);
+      assert.ok(burstRenders <= 2, `${layout}/${large}: native input must retain bounded rendering work (${burstRenders}): ${JSON.stringify(await page.evaluate(() => (window as any).continuityPreviewTimeline))}`);
       const samples = await page.evaluate(() => {
         const g = window as any; cancelAnimationFrame(g.continuityFrame); g.continuityObserver.disconnect(); return g.continuitySamples;
       }) as { missing?: boolean; id: number; width: number; height: number }[];
