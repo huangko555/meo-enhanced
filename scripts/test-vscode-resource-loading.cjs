@@ -77,7 +77,21 @@ exports.run = async () => {
       await frame.page().bringToFront();
       const pointer = await createPointerDriver({frame,page:frame.page()});
       record.inputs = [];
-      const click = async selector => {record.inputs.push({selector,receipt:await pointer.click(selector)});};
+      const click = async selector => {
+        // Comparison results can change toolbar width after the editor is ready.
+        // Admit current geometry before the first gesture, never replay input.
+        await frame.waitForFunction(selector => {
+          const node = document.querySelector(selector), rect = node?.getBoundingClientRect();
+          const prior = globalThis.__resourcePointerGeometry;
+          const bounds = rect && [rect.x, rect.y, rect.width, rect.height].join(',');
+          const same = prior?.selector === selector && prior.node === node && prior.bounds === bounds;
+          const frames = same ? prior.frames + 1 : 0;
+          globalThis.__resourcePointerGeometry = { selector, node, bounds, frames };
+          return node?.isConnected && rect.width > 0 && rect.height > 0 && frames >= 2;
+        }, { timeout: 30000 }, selector);
+        await frame.evaluate(() => { delete globalThis.__resourcePointerGeometry; });
+        record.inputs.push({selector,receipt:await pointer.click(selector)});
+      };
       await frame.evaluate(() => {
         globalThis.__resourceModeClicks = [];
         document.addEventListener('click', event => {
@@ -164,6 +178,12 @@ exports.run = async () => {
       await assertExplicitSave('keyboard', original);
       await vscode.commands.executeCommand('workbench.action.files.save');
       assert.equal(fs.readFileSync(file, 'utf8'), original, 'typing and history preserve the complete saved source');
+      if (large) await frame.waitForFunction(() => {
+        const summary = document.querySelector('.changes-review-trigger .changes-review-empty');
+        const label = summary?.closest('button')?.getAttribute('aria-label');
+        // The accepted unavailable summary includes its reason in every language.
+        return summary?.textContent && label?.startsWith(summary.textContent + ': ');
+      }, { timeout: 30000 });
       modeStarted = performance.now();
       await click('button[data-mode="preview"]');
       await frame.waitForFunction(previewReady);

@@ -967,6 +967,9 @@ Delivery receipt checks use bounded timer polling rather than animation frames:
 a delivered event must remain observable while a mode transition delays drawing.
 The regression delays frames after an acknowledged release and requires the real
 trusted release within the original deadline; dropped-event controls still fail.
+Installed resource fixtures also admit stable target geometry and the large-file
+comparison result before measuring a gesture; editor readiness alone does not
+finish an asynchronous toolbar-width change. They never retry a delivered gesture.
 Before pressing, the driver requires trusted pointer movement at the current
 target. A newly admitted Webview may acknowledge a move before its input route
 has delivered it. The dropped-move negative control requires zero press commands;
