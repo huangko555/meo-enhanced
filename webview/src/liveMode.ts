@@ -61,6 +61,8 @@ import {
   isListMarkerDecoration,
   projectChangedListMarkerDecoration,
   CheckboxWidget,
+  continuedListMarker,
+  listMarkerDataInContainerLine,
   listMarkerData,
   detectListIndentStylesByLine,
   nextOrderedSequenceNumber
@@ -3418,9 +3420,9 @@ function blockquoteLineDecorationsAtInputPosition(
   return [...decorations.values()];
 }
 
-/** Keep accepted prefixes through adjacent indentation edits and renumbering.
+/** Keep accepted prefixes through indentation edits, renumbering and continuation.
  * The deferred builder still owns all structural interpretation. */
-function projectInputRenumberedListMarkers(
+function projectInputListMarkers(
   decorations: DecorationSet,
   mapped: DecorationSet,
   transaction: Transaction
@@ -3429,7 +3431,7 @@ function projectInputRenumberedListMarkers(
   const visited = new Set<number>();
   const changedLines = new Set<number>();
   const replacedMarkers = new Set<string>();
-  transaction.changes.iterChangedRanges((from, to) => {
+  transaction.changes.iterChangedRanges((from, to, nextFrom, nextTo) => {
     decorations.between(from, to, (start, end, decoration) => {
       if (start === end || visited.has(start)) return;
       const replacement = projectChangedListMarkerDecoration(decoration, transaction, start, end);
@@ -3439,6 +3441,46 @@ function projectInputRenumberedListMarkers(
         changedLines.add(transaction.startState.doc.lineAt(start).from);
       }
     });
+    // List continuation already owns this exact prefix. Project its new row
+    // from the accepted row without waiting for the full Markdown refresh.
+    if (from !== to || !transaction.isUserEvent('input.list') || nextTo - nextFrom > 4_096) return;
+    const line = transaction.startState.doc.lineAt(from);
+    if (line.length > 4_096) return;
+    const prefix = continuedListMarker(line.text);
+    if (!prefix || transaction.newDoc.sliceString(nextFrom, nextTo) !== '\n' + prefix) return;
+    let layout: ListLineLayout | undefined;
+    let markerOffset: number | undefined;
+    let indentOffset: number | undefined;
+    decorations.between(line.from, from, (start, end, decoration) => {
+      if (start === end && start === line.from) layout = decoration.spec.listLineLayout ?? layout;
+      if (isListMarkerDecoration(decoration)) markerOffset = start - line.from;
+      if (decoration.spec.widget instanceof ListIndentWidget) indentOffset = start - line.from;
+    });
+    if (!layout || markerOffset === undefined) return;
+    const nextLine = transaction.newDoc.lineAt(nextFrom + 1);
+    const style = { columns: layout.guideStepColumns, insert: ' '.repeat(layout.guideStepColumns) };
+    const previousMarker = listMarkerDataInContainerLine(line.text);
+    if (!previousMarker || previousMarker.fromOffset !== markerOffset) return;
+    const prefixOffset = indentOffset ?? markerOffset;
+    const marker = listMarkerData(nextLine.text, null, style, prefixOffset);
+    if (!marker) return;
+    marker.indentColumns = countColumn(nextLine.text, transaction.state.tabSize, marker.fromOffset)
+      - countColumn(nextLine.text, transaction.state.tabSize, prefixOffset);
+    marker.contentOffsetColumns = countColumn(nextLine.text, transaction.state.tabSize, marker.toOffset) + marker.displayExtraColumns;
+    if (markerOffset > 0) {
+      // Retain the accepted indentation widget at the new source position.
+      const indentTo = line.from + markerOffset;
+      decorations.between(line.from, indentTo, (start, end, decoration) => {
+        if (start < end && end <= indentTo && decoration.spec.widget instanceof ListIndentWidget) {
+          additions.push(decoration.range(nextLine.from + start - line.from, nextLine.from + end - line.from));
+        }
+      });
+    }
+    additions.push(listLineDeco(marker.contentOffsetColumns, marker.indentColumns,
+      layout.guideStepColumns, false, marker.isTask, marker.taskHiddenPrefixColumns,
+      Boolean(marker.orderedNumber)).range(nextLine.from));
+    addListMarkerDecoration(additions, transaction.state, nextLine.from, null, style, null,
+      prefixOffset);
   });
   const linePositions = new Set<number>();
   for (const from of changedLines) {
@@ -3556,7 +3598,8 @@ function projectInputBlockquoteLines(
     decorations.between(changedLine.from, changedLine.from, (from, to, decoration) => {
       const className = decoration.spec.attributes?.class ?? decoration.spec.class;
       if (from === to && from === changedLine.from &&
-        ['meo-md-quote-source-order', 'meo-md-container-prose', 'meo-md-quote-nested'].includes(className)) {
+        className?.split(/\s+/).some((name: string) =>
+          ['meo-md-quote-source-order', 'meo-md-container-prose', 'meo-md-quote-nested'].includes(name))) {
         carriedContainerDecorations.push(decoration);
       }
     });
@@ -4687,7 +4730,7 @@ const liveDecorationField = StateField.define<DecorationSet>({
               ?? decorations.map(transaction.changes))
           : projectInputCodeBlockLines(
             projectInputBlockquoteLines(
-              projectInputRenumberedListMarkers(decorations, mapLiveInputDerivedDecorations(decorations, transaction), transaction),
+              projectInputListMarkers(decorations, mapLiveInputDerivedDecorations(decorations, transaction), transaction),
               transaction
             ),
             transaction
@@ -4742,6 +4785,20 @@ const liveDecorationField = StateField.define<DecorationSet>({
  * point and mark layers separately. */
 export function getLivePresentationDecorations(state: EditorState): DecorationSet {
   return state.field(liveDecorationField);
+}
+
+/** Accepted prefixes, rather than partial syntax or container line styling,
+ * prove that a list command may consume this row while parsing is pending. */
+export function isLiveListItemAt(state: EditorState, position: number): boolean {
+  const line = state.doc.lineAt(position);
+  let found = false;
+  state.field(liveDecorationField, false)?.between(line.from, Math.min(line.to, line.from + 4_096), (from, to, decoration) => {
+    if (from >= line.from && to <= line.to && (isListMarkerDecoration(decoration) || decoration.spec.class === 'meo-md-list-prefix')) {
+      found = true;
+      return false;
+    }
+  });
+  return found;
 }
 
 const publishPreparedLivePresentationEffect = StateEffect.define<true>();

@@ -1,7 +1,8 @@
 import { documentLines } from './documentLines';
-import { markdownTaskMarkerPattern } from '../../../src/foundation/markdownTaskList';
+import { hasMarkdownListPrefix, readMarkdownListPrefix, type MarkdownListPrefix } from '../../../src/foundation/markdownListPrefix';
 import type { ChangeDesc } from '@codemirror/state';
 import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
+import { sourcePresentationSelection } from '../editor/livePointerSelection';
 import { isolateHistory } from '@codemirror/commands';
 import { listHistoryFocusEffect } from '../adapters/codeMirrorListHistoryFocus';
 import {
@@ -20,21 +21,15 @@ import { getUiStrings } from '../application/uiLanguage';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { parseFrontmatter, isInsideFrontmatterContent } from './frontmatter';
 
-interface ListMarkerData {
-  fromOffset: number;
-  leadingWhitespace: string;
+interface ListMarkerData extends MarkdownListPrefix {
   indentLevel: number;
   indentColumns: number;
-  markerEndOffset: number;
-  toOffset: number;
   contentOffsetColumns: number;
   displayExtraColumns: number;
   markerText: string;
   classes: string;
-  orderedNumber: string | undefined;
   isTask: boolean;
   taskHiddenPrefixColumns: number;
-  taskBracketStart?: number;
   taskStatus?: TaskStatus;
 }
 
@@ -44,14 +39,6 @@ type OrderedDisplayIndex = string | number | null;
 interface ListIndentStyle {
   columns: number;
   insert: string;
-}
-
-interface ParsedListMarkerParts {
-  leadingWhitespace: string;
-  bullet: string | undefined;
-  orderedNumber: string | undefined;
-  orderedSuffix: string | undefined;
-  hasTask: boolean;
 }
 
 interface ListMarkerDecorationOptions {
@@ -74,8 +61,6 @@ interface ListTextDeletion {
 const sourceListMarkerDeco = Decoration.mark({ class: 'meo-md-list-prefix' });
 const sourceTaskBracketDeco = Decoration.mark({ class: 'meo-md-task-bracket' });
 const taskCompleteDeco = Decoration.mark({ class: 'meo-task-complete' });
-const listItemRegex = /^(\s*)(?:[-+*]|\d+[.)])(?:\s+|$)/;
-const listMarkerRegex = new RegExp(String.raw`^(\s*)(?:([-+*])|(\d+)([.)]))(?:\s+(?:${markdownTaskMarkerPattern}\s+)?|$)`);
 const TWO_SPACE_INDENT = '  ';
 const FOUR_SPACE_INDENT = '    ';
 const TAB_INDENT = '\t';
@@ -126,18 +111,17 @@ function lineIsInFrontmatterContent(
 }
 
 function isListLine(lineText: string): boolean {
-  return listItemRegex.test(lineText);
+  return hasMarkdownListPrefix(lineText);
 }
 
 function inferListIndentStyle(listLineTexts: readonly string[]): ListIndentStyle {
   const spaceIndents: number[] = [];
   for (const lineText of listLineTexts) {
-    const match = listItemRegex.exec(lineText);
-    if (!match || !match[1]) {
+    if (!isListLine(lineText)) {
       continue;
     }
-
-    const leadingWhitespace = match[1];
+    const leadingWhitespace = /^\s*/.exec(lineText)![0];
+    if (!leadingWhitespace) continue;
     if (leadingWhitespace.includes('\t')) {
       return listIndentStyle.tabs;
     }
@@ -276,12 +260,12 @@ export function outdentListByTwoSpaces(view: EditorView): boolean {
 
   forEachSelectionLine(state, (line) => {
     const lineText = state.doc.sliceString(line.from, line.to);
-    const listMatch = listItemRegex.exec(lineText);
-    if (!listMatch || !listMatch[1].length) {
+    const marker = readMarkdownListPrefix(lineText);
+    if (!marker?.leadingWhitespace.length) {
       return;
     }
 
-    const leadingWhitespace = listMatch[1];
+    const leadingWhitespace = marker.leadingWhitespace;
     const style = lineIndentStyle(line.number, stylesByLine);
     const deleteLength = listIndentDeleteLength(leadingWhitespace, style);
     if (!deleteLength) {
@@ -350,21 +334,6 @@ function collectNestedListHoistChanges(
   return changes;
 }
 
-function parseListMarkerParts(lineText: string): ParsedListMarkerParts | null {
-  const match = listMarkerRegex.exec(lineText);
-  if (!match) {
-    return null;
-  }
-
-  return {
-    leadingWhitespace: match[1],
-    bullet: match[2],
-    orderedNumber: match[3],
-    orderedSuffix: match[4],
-    hasTask: match[5] !== undefined
-  };
-}
-
 function taskStatusFromMarker(markerChar: string): TaskStatus {
   return markerChar.toLowerCase() === 'x' ? 'done' : 'todo';
 }
@@ -373,27 +342,15 @@ function taskStatusCssClass(status: TaskStatus): string {
   return `is-${status}`;
 }
 
-function buildListMarkerText(
-  parts: ParsedListMarkerParts | null,
-  orderedNumber: string | undefined = parts?.orderedNumber
-): string | null {
-  if (!parts) {
-    return null;
+function siblingListPrefix(lineText: string, marker: MarkdownListPrefix, advance: boolean): string | null {
+  let number = marker.orderedNumber;
+  if (advance && number !== undefined) {
+    const next = Number.parseInt(number, 10) + 1;
+    if (!Number.isFinite(next)) return null;
+    number = String(next);
   }
-
-  if (parts.bullet) {
-    return parts.hasTask
-      ? `${parts.leadingWhitespace}${parts.bullet} [ ] `
-      : `${parts.leadingWhitespace}${parts.bullet} `;
-  }
-
-  if (!orderedNumber || !parts.orderedSuffix) {
-    return null;
-  }
-
-  return parts.hasTask
-    ? `${parts.leadingWhitespace}${orderedNumber}${parts.orderedSuffix} [ ] `
-    : `${parts.leadingWhitespace}${orderedNumber}${parts.orderedSuffix} `;
+  const markerText = marker.bullet ?? `${number}${marker.orderedSuffix}`;
+  return lineText.slice(0, marker.fromOffset) + markerText + (marker.taskMarker !== undefined ? ' [ ] ' : ' ');
 }
 
 export function listMarkerData(
@@ -402,16 +359,12 @@ export function listMarkerData(
   style: ListIndentStyle = defaultListIndentStyle,
   markerOffset = 0
 ): ListMarkerData | null {
-  const match = listMarkerRegex.exec(lineText.slice(markerOffset));
-  if (!match) {
+  const prefix = readMarkdownListPrefix(lineText, markerOffset);
+  if (!prefix) {
     return null;
   }
 
-  const indent = match[1].length;
-  const leadingWhitespace = match[1];
-  const orderedNumber = match[3];
-  const orderedSuffix = match[4];
-  const taskMarker = match[5];
+  const { leadingWhitespace, orderedNumber, orderedSuffix, taskMarker } = prefix;
 
   let markerText = '•';
   let classes = 'meo-md-list-marker-bullet';
@@ -421,24 +374,20 @@ export function listMarkerData(
     classes = 'meo-md-list-marker-ordered';
   }
 
-  const markerCharLength = match[2]?.length ?? (orderedNumber?.length ?? 0) + (orderedSuffix?.length ?? 0);
-  const markerEndOffset = indent + markerCharLength;
+  const markerCharLength = prefix.markerEndOffset - prefix.fromOffset;
   const indentColumns = indentationColumns(leadingWhitespace, style);
   // CommonMark display numbers can outgrow repeated source markers such as 1.
   const displayExtraColumns = Math.max(0, markerText.length - markerCharLength);
-  const contentOffsetColumns = markerOffset + indentColumns + (match[0].length - indent) + displayExtraColumns;
+  const contentOffsetColumns = markerOffset + indentColumns + (prefix.toOffset - prefix.fromOffset) + displayExtraColumns;
   const indentLevel = Math.floor(indentColumns / style.columns);
   if (!orderedNumber && indentLevel % 2 === 1) {
     classes += ' meo-md-list-marker-bullet-hollow';
   }
 
   const result: ListMarkerData = {
-    fromOffset: markerOffset + indent,
-    leadingWhitespace,
+    ...prefix,
     indentLevel,
     indentColumns,
-    markerEndOffset: markerOffset + markerEndOffset,
-    toOffset: markerOffset + match[0].length,
     contentOffsetColumns,
     displayExtraColumns,
     markerText,
@@ -449,10 +398,7 @@ export function listMarkerData(
   };
 
   if (taskMarker !== undefined) {
-    const hiddenTaskPrefixLength = Math.max(0, (match[0].length - indent) - 1);
-    // List separators may contain multiple spaces or a tab. Locate the bracket
-    // in the matched prefix so a toggle never overwrites the opening bracket.
-    result.taskBracketStart = markerOffset + match[0].indexOf('[', markerEndOffset);
+    const hiddenTaskPrefixLength = Math.max(0, prefix.toOffset - prefix.fromOffset - 1);
     result.taskStatus = taskStatusFromMarker(taskMarker);
     result.isTask = true;
     result.taskHiddenPrefixColumns = hiddenTaskPrefixLength + displayExtraColumns;
@@ -522,6 +468,10 @@ class ListMarkerWidget extends WidgetType {
     marker.textContent = this.text;
     appendSourceGap();
     return marker;
+  }
+
+  ignoreEvent(): boolean {
+    return false;
   }
 }
 
@@ -624,7 +574,7 @@ export function addListMarkerDecoration(
   // A caret or a precise marker-only selection needs editable source. A text
   // selection spanning the item keeps its marker and stable reading geometry.
   // A prefix without a separator also has no room for the widget's trailing gap.
-  const editingMarker = state.selection.ranges.some(range => range.empty
+  const editingMarker = sourcePresentationSelection(state).ranges.some(range => range.empty
     ? range.head > indentEnd && range.head < markerTo
     : range.from >= indentEnd && range.to <= markerTo);
   if (options?.useSourceStyleLiteral || marker.toOffset === marker.markerEndOffset || editingMarker) {
@@ -697,11 +647,17 @@ export function projectChangedListMarkerDecoration(
       widget: widget?.[mapLiveWidgetPositions]?.(transaction.changes) ?? widget
     }).range(mappedFrom, mappedTo);
   }
-  const previous = /^(\d+)([.)][ \t]+(?:\[[ xX]\][ \t]+)?)$/.exec(transaction.startState.doc.sliceString(from, to));
-  if (!previous) return;
+  const previous = readMarkdownListPrefix(oldPrefix);
+  if (!previous?.orderedNumber || previous.fromOffset !== 0
+    || previous.toOffset !== oldPrefix.length || previous.toOffset === previous.markerEndOffset) return;
   const nextFrom = transaction.changes.mapPos(from, -1), nextTo = transaction.changes.mapPos(to, 1);
-  const next = /^(\d+)([.)][ \t]+(?:\[[ xX]\][ \t]+)?)$/.exec(transaction.newDoc.sliceString(nextFrom, nextTo));
-  if (!next || next[1] === previous[1] || next[2] !== previous[2]) return;
+  const nextText = transaction.newDoc.sliceString(nextFrom, nextTo);
+  // A prefix split belongs to structural refresh, rather than one inline widget.
+  if (/[\r\n]/.test(nextText)) return;
+  const next = readMarkdownListPrefix(nextText);
+  if (!next?.orderedNumber || next.fromOffset !== 0 || next.toOffset !== nextText.length
+    || next.toOffset === next.markerEndOffset || next.orderedNumber === previous.orderedNumber
+    || next.orderedSuffix !== previous.orderedSuffix) return;
   const ranges: Array<Range<Decoration>> = [];
   const line = transaction.newDoc.lineAt(nextFrom);
   addListMarkerDecoration(ranges, transaction.state, nextFrom, null, defaultListIndentStyle,
@@ -712,95 +668,37 @@ export function projectChangedListMarkerDecoration(
 }
 
 export function continuedListMarker(lineText: string): string | null {
-  const prefixOffset = quotePrefixOffset(lineText);
-  const parts = parseListMarkerParts(lineText.slice(prefixOffset));
-  if (!parts) {
-    return null;
-  }
-  const marker = listMarkerDataInContainerLine(lineText);
-  if (!marker) {
-    return null;
-  }
-
-  const hasContent = lineText.slice(marker.toOffset).trim().length > 0;
-  if (!hasContent) {
-    return null;
-  }
-
-  if (!parts.orderedNumber) {
-    const next = buildListMarkerText(parts);
-    return next === null ? null : lineText.slice(0, prefixOffset) + next;
-  }
-
-  const nextNumber = Number.parseInt(parts.orderedNumber, 10) + 1;
-  if (!Number.isFinite(nextNumber)) {
-    return null;
-  }
-  const next = buildListMarkerText(parts, String(nextNumber));
-  return next === null ? null : lineText.slice(0, prefixOffset) + next;
+  const marker = readMarkdownListPrefix(lineText, quotePrefixOffset(lineText));
+  return marker && lineText.slice(marker.toOffset).trim() ? siblingListPrefix(lineText, marker, true) : null;
 }
 
-function sameLevelListMarker(lineText: string): string | null {
-  const prefixOffset = quotePrefixOffset(lineText);
-  const marker = buildListMarkerText(parseListMarkerParts(lineText.slice(prefixOffset)));
-  return marker === null ? null : lineText.slice(0, prefixOffset) + marker;
-}
-
-export function handleEnterContinueList(view: EditorView): boolean {
+/** Empty item exits; body start inserts above; body end continues below. */
+export function handleEnterInList(view: EditorView): boolean {
   const { state } = view;
   const selection = state.selection.main;
-  if (!selection.empty) {
-    return false;
-  }
-
-  const position = selection.head;
-  const line = state.doc.lineAt(position);
-  if (position !== line.to) {
-    return false;
-  }
-
-  const lineText = state.doc.sliceString(line.from, line.to);
-  const marker = continuedListMarker(lineText);
-  if (!marker) {
-    return false;
-  }
-
-  const insert = `\n${marker}`;
-  view.dispatch({
-    changes: { from: position, insert },
-    selection: { anchor: position + insert.length },
-    userEvent: 'input.list'
-  });
-  return true;
-}
-
-export function handleEnterOnEmptyListItem(view: EditorView): boolean {
-  const { state } = view;
-  const selection = state.selection.main;
-  if (!selection.empty) {
-    return false;
-  }
-
-  const position = selection.head;
-  const line = state.doc.lineAt(position);
-  const lineText = state.doc.sliceString(line.from, line.to);
-  const marker = listMarkerDataInContainerLine(lineText);
-  if (!marker) {
-    return false;
-  }
-
+  if (state.readOnly || state.selection.ranges.length !== 1 || !selection.empty) return false;
+  const line = state.doc.lineAt(selection.head);
+  const prefixOffset = quotePrefixOffset(line.text);
+  const marker = readMarkdownListPrefix(line.text, prefixOffset);
+  if (!marker) return false;
   const contentStart = line.from + marker.toOffset;
-  if (position !== contentStart && position !== line.to) {
-    return false;
+  if (!line.text.slice(marker.toOffset).trim()) {
+    if (selection.head !== contentStart && selection.head !== line.to) return false;
+    view.dispatch({
+      changes: { from: line.from + prefixOffset, to: contentStart, insert: '' },
+      selection: { anchor: line.from + prefixOffset },
+      userEvent: 'input.list'
+    });
+    return true;
   }
-
-  if (lineText.slice(marker.toOffset).trim().length > 0) {
-    return false;
-  }
-
+  const atStart = selection.head === contentStart;
+  if (!atStart && selection.head !== line.to) return false;
+  const prefix = siblingListPrefix(line.text, marker, !atStart);
+  if (prefix === null) return false;
+  const from = atStart ? line.from : line.to;
   view.dispatch({
-    changes: { from: line.from + quotePrefixOffset(lineText), to: contentStart, insert: '' },
-    selection: { anchor: line.from + quotePrefixOffset(lineText) },
+    changes: { from, insert: atStart ? prefix + '\n' : '\n' + prefix },
+    selection: { anchor: from + prefix.length + (atStart ? 0 : 1) },
     userEvent: 'input.list'
   });
   return true;
@@ -872,6 +770,28 @@ export function handleBackspaceAtListContentStart(view: EditorView): boolean {
   return true;
 }
 
+export function handleDeleteBeforeEmptyListItem(view: EditorView): boolean {
+  const { state } = view;
+  if (state.readOnly || state.selection.ranges.length !== 1 || !state.selection.main.empty) return false;
+  const position = state.selection.main.head;
+  const line = state.doc.lineAt(position);
+  if (position !== line.to || line.number === state.doc.lines) return false;
+  const marker = listMarkerDataInContainerLine(line.text);
+  if (!marker || lineIsInFrontmatterContent(parseFrontmatter(state), line)) return false;
+  const nextLine = state.doc.line(line.number + 1);
+  const nextMarker = listMarkerDataInContainerLine(nextLine.text);
+  if (!nextMarker || nextLine.text.slice(nextMarker.toOffset).trim()
+    || line.text.slice(0, quotePrefixOffset(line.text)) !== nextLine.text.slice(0, quotePrefixOffset(nextLine.text))) return false;
+  view.dispatch({
+    changes: { from: line.to, to: nextLine.to },
+    selection: { anchor: position },
+    effects: listHistoryFocusEffect(line.from, position, position),
+    annotations: isolateHistory.of('full'),
+    userEvent: 'delete.forward'
+  });
+  return true;
+}
+
 function collapsedSingleCursorListContext(state: EditorState) {
   if (state.selection.ranges.length !== 1) {
     return null;
@@ -919,80 +839,6 @@ export function handleArrowRightAtListLineStart(view: EditorView): boolean {
   }
 
   view.dispatch({ selection: { anchor: context.contentStart } });
-  return true;
-}
-
-export function handleEnterAtListContentStart(view: EditorView): boolean {
-  const { state } = view;
-  const selection = state.selection.main;
-  if (!selection.empty) {
-    return false;
-  }
-
-  const position = selection.head;
-  const line = state.doc.lineAt(position);
-  const lineText = state.doc.sliceString(line.from, line.to);
-  const marker = listMarkerDataInContainerLine(lineText);
-  if (!marker) {
-    return false;
-  }
-
-  const contentStart = line.from + marker.toOffset;
-  if (position !== contentStart) {
-    return false;
-  }
-
-  const content = lineText.slice(marker.toOffset).trim();
-  if (!content) {
-    return false;
-  }
-
-  const sameMarker = sameLevelListMarker(lineText);
-  if (!sameMarker) {
-    return false;
-  }
-
-  const insert = `${sameMarker}\n`;
-  view.dispatch({
-    changes: { from: line.from, insert },
-    selection: { anchor: line.from + sameMarker.length },
-    userEvent: 'input.list'
-  });
-  return true;
-}
-
-export function handleEnterBeforeNestedList(view: EditorView): boolean {
-  const { state } = view;
-  const selection = state.selection.main;
-  if (!selection.empty) {
-    return false;
-  }
-
-  const position = selection.head;
-  const line = state.doc.lineAt(position);
-  if (position !== line.to || line.number >= state.doc.lines) {
-    return false;
-  }
-
-  const currentText = state.doc.sliceString(line.from, line.to);
-  const nextLine = state.doc.line(line.number + 1);
-  const nextText = state.doc.sliceString(nextLine.from, nextLine.to);
-
-  if (!/^[ \t]+(?:[-+*]|\d+[.)])\s+/.test(nextText)) {
-    return false;
-  }
-
-  const marker = continuedListMarker(currentText);
-  if (!marker) {
-    return false;
-  }
-
-  const insert = `\n${marker}`;
-  view.dispatch({
-    changes: { from: position, insert },
-    selection: { anchor: position + insert.length },
-    userEvent: 'input.list'
-  });
   return true;
 }
 

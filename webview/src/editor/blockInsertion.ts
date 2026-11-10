@@ -1,12 +1,11 @@
 import { matchInlineScript } from '../../../src/foundation/inlineScript';
-import { markdownTaskMarkerPattern } from '../../../src/foundation/markdownTaskList';
+import { readMarkdownListPrefix } from '../../../src/foundation/markdownListPrefix';
 import { EditorSelection, type EditorState, type TransactionSpec } from '@codemirror/state';
 import type { Tree } from '@lezer/common';
 import { syntaxTree } from '@codemirror/language';
 import { isSuggestionAddress } from '../application/inputSuggestions';
 import { indentedCodeBlockAt } from './codeBlockSource';
 export type MarkdownInputContext = 'block' | 'inline' | 'heading' | 'excluded';
-const listPrefix = new RegExp(String.raw`^(?:[-+*]|\d+[.)])[ \t]+(?:${markdownTaskMarkerPattern}[ \t]+)?`);
 
 /** Literal comment markers in code cannot affect later prose comment operations. */
 export function markdownCodeRanges(tree: Tree): { from: number; to: number }[] {
@@ -52,26 +51,29 @@ export function blockInsertion(state: EditorState, from: number, to: number, blo
   const line = state.doc.lineAt(from);
   if (state.doc.lineAt(to).number !== line.number) return null;
   const rawPrefix = /^[ \t]*(?:>[ \t]*)*/.exec(line.text)?.[0] ?? '';
-  const marker = listPrefix.exec(line.text.slice(rawPrefix.length))?.[0] ?? '';
+  const list = readMarkdownListPrefix(line.text, rawPrefix.length);
+  const marker = list && list.toOffset > list.markerEndOffset ? line.text.slice(rawPrefix.length, list.toOffset) : '';
   const insidePrefix = from < line.from + rawPrefix.length + marker.length;
   const firstPrefix = insidePrefix ? '' : rawPrefix + marker;
-  const baseMarker = /^(?:[-+*]|\d+[.)])[ \t]+/.exec(marker)?.[0] ?? '';
-  let continuation = insidePrefix ? '' : rawPrefix + ' '.repeat(baseMarker.length);
+  const baseLength = marker && list ? (list.taskBracketStart ?? list.toOffset) - rawPrefix.length : 0;
+  let continuation = insidePrefix ? '' : rawPrefix + ' '.repeat(baseLength);
   // A continuation line already carries its list indentation; the syntax tree owns the hierarchy.
   let node = syntaxTree(state).resolveInner(from, -1);
   while (node.parent && node.name !== 'ListItem') node = node.parent;
   if (!insidePrefix && !marker && node.name === 'ListItem') {
     const opening = state.doc.lineAt(node.from).text;
     const quote = /^[ \t]*(?:>[ \t]*)*/.exec(opening)?.[0] ?? '';
-    const list = /^(?:[-+*]|\d+[.)])[ \t]+/.exec(opening.slice(quote.length))?.[0] ?? '';
-    if (list) continuation = quote + ' '.repeat(list.length);
+    const openingList = readMarkdownListPrefix(opening, quote.length);
+    if (openingList && openingList.toOffset > openingList.markerEndOffset) {
+      continuation = quote + ' '.repeat((openingList.taskBracketStart ?? openingList.toOffset) - quote.length);
+    }
   }
   const left = state.sliceDoc(line.from + firstPrefix.length, from);
   const right = state.sliceDoc(to, line.to);
   const emptyLeft = !left.trim();
   const lines = block.split('\n');
   // An empty task marker stays on its own line so it cannot become part of a table header.
-  const emptyTask = emptyLeft && !insidePrefix && marker !== baseMarker;
+  const emptyTask = emptyLeft && !insidePrefix && list?.taskMarker !== undefined;
   const prefix = emptyLeft && !emptyTask ? firstPrefix : continuation;
   const rendered = lines.map((text, index) => (index ? continuation : prefix) + text).join('\n');
   const before = emptyTask ? firstPrefix + '\n' + continuation + '\n' : emptyLeft ? (line.number > 1 && state.doc.line(line.number - 1).text.trim() ? continuation + '\n' : '') : '\n' + continuation + '\n';

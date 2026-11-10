@@ -1,6 +1,25 @@
 import { EditorState } from '@codemirror/state';
 import assert from 'node:assert/strict';
 import { orderedListRenumberTransactionFilter, listMarkerData, continuedListMarker } from '../webview/src/helpers/listMarkers';
+import { hasMarkdownListPrefix, readMarkdownListPrefix } from '../src/foundation/markdownListPrefix';
+
+for (const { source, offset, body, status } of [
+  { source: '  -\t [X]\t body', offset: 0, body: 'body', status: 'X' },
+  { source: '> 12)  [ ]   body', offset: 2, body: 'body', status: ' ' },
+  { source: '\t+ [~] body', offset: 0, body: '[~] body', status: undefined },
+  { source: '001. body', offset: 0, body: 'body', status: undefined }
+]) {
+  const prefix = readMarkdownListPrefix(source, offset)!;
+  assert.ok(prefix);
+  assert.equal(source.slice(prefix.toOffset), body);
+  assert.equal(prefix.taskMarker, status);
+  assert.equal(source.slice(prefix.fromOffset, prefix.markerEndOffset), prefix.bullet ?? `${prefix.orderedNumber}${prefix.orderedSuffix}`);
+  if (prefix.taskBracketStart !== undefined) assert.equal(source[prefix.taskBracketStart], '[');
+}
+for (const source of ['-word', '1.word', '[x] body', '> - body']) {
+  assert.equal(hasMarkdownListPrefix(source), false, source);
+  assert.equal(readMarkdownListPrefix(source), null, source);
+}
 
 for (const prefix of ['- ', '+ ', '* ', '1. ', '1) ']) {
   for (const [marker, status] of [[' ', 'todo'], ['x', 'done'], ['X', 'done']]) {
