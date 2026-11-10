@@ -1,5 +1,4 @@
 import { readDocumentTextProjection } from './application/documentTextProjection';
-import { markdownTaskMarkerPattern } from '../../src/foundation/markdownTaskList';
 import { createEditorScrollOwnership, editorManagedScroll, editorScrollIntoView } from './editor/scrollEffects';
 import { latexDelimitersFacet } from './editor/mathSyntaxPreference';
 import { markdownSyntaxPublication } from './editor/markdownSyntaxPublication';
@@ -104,10 +103,7 @@ import {
   handleArrowRightAtListLineStart,
   handleBackspaceAtListContentStart,
   handleDeleteBeforeEmptyListItem,
-  handleEnterAtListContentStart,
-  handleEnterOnEmptyListItem,
-  handleEnterContinueList,
-  handleEnterBeforeNestedList,
+  handleEnterInList,
   indentListByTwoSpaces,
   outdentListByTwoSpaces,
   orderedListRenumberTransactionFilter
@@ -250,12 +246,6 @@ type InlineSelectionRange = {
   empty: boolean;
 };
 
-type MarkerReplacementContext = {
-  contentStart: number;
-  oldMarkerLen: number;
-  isExistingTask: boolean;
-};
-
 type EditableEditorMode = 'source' | 'live';
 
 type SourcePositionChange = {
@@ -321,9 +311,6 @@ const activeSearchMatchStyle = 'color: var(--meo-semantic-searchMatchActiveForeg
 const searchMatchMark = Decoration.mark({ class: 'meo-search-match', attributes: { style: searchMatchStyle } });
 const activeSearchMatchMark = Decoration.mark({ class: 'meo-search-match meo-search-match-active', attributes: { style: activeSearchMatchStyle } });
 const tableSearchStateEventName = 'meo-search-state-change';
-const existingListMarkerRegex = new RegExp(String.raw`^(\s*)([-+*]\s+${markdownTaskMarkerPattern}|[-+*]|\d+[.)])\s+`);
-const existingHeadingMarkerRegex = /^(\s*)(#{1,6})\s+/;
-const existingTaskMarkerRegex = new RegExp(String.raw`^[-+*]\s+${markdownTaskMarkerPattern}`);
 const codeBlockAncestorNames = new Set(['FencedCode', 'CodeBlock']);
 
 const setSearchAnchorEffect = StateEffect.define<SearchMatchRange | null>();
@@ -1719,65 +1706,6 @@ export function createEditor({
     }
   };
 
-  const forEachSelectedLine = (
-    state: EditorState,
-    callback: (line: { from: number; to: number; number: number }) => void
-  ): void => {
-    const seen = new Set<number>();
-    for (const range of state.selection.ranges) {
-      const fromLine = state.doc.lineAt(range.from).number;
-      const toPos = Math.max(range.from, range.to - (range.empty ? 0 : 1));
-      const toLine = state.doc.lineAt(toPos).number;
-      for (let lineNumber = fromLine; lineNumber <= toLine; lineNumber += 1) {
-        if (seen.has(lineNumber)) {
-          continue;
-        }
-        seen.add(lineNumber);
-        callback(state.doc.line(lineNumber));
-      }
-    }
-  };
-
-  const lineMarkerReplacementContext = (
-    state: EditorState,
-    line: { from: number; to: number }
-  ): MarkerReplacementContext => {
-    const lineText = state.doc.sliceString(line.from, line.to);
-    const existingMarker = existingListMarkerRegex.exec(lineText);
-    const existingHeading = existingHeadingMarkerRegex.exec(lineText);
-    const leadingWhitespace = existingMarker?.[1] ?? existingHeading?.[1] ?? /^(\s*)/.exec(lineText)?.[1] ?? '';
-
-    const contentStart = line.from + leadingWhitespace.length;
-    let oldMarkerLen = 0;
-    if (existingMarker) {
-      oldMarkerLen = existingMarker[0].length - leadingWhitespace.length;
-    } else if (existingHeading) {
-      oldMarkerLen = existingHeading[0].length - leadingWhitespace.length;
-    }
-
-    const isExistingTask = Boolean(existingMarker && existingTaskMarkerRegex.test(existingMarker[0]));
-    return { contentStart, oldMarkerLen, isExistingTask };
-  };
-
-  const buildListFormatChangesForSelection = (state: EditorState, insert: string): ChangeSpec[] => {
-    const changes: ChangeSpec[] = [];
-    forEachSelectedLine(state, (line) => {
-      const { contentStart, oldMarkerLen } = lineMarkerReplacementContext(state, line);
-      changes.push({ from: contentStart, to: contentStart + oldMarkerLen, insert });
-    });
-    return changes;
-  };
-
-  const dispatchSelectedListFormatChanges = (
-    changes: ChangeSpec[],
-    userEvent: Annotation<string>
-  ): void => {
-    if (!changes.length) {
-      return;
-    }
-    view.dispatch({ changes, annotations: userEvent });
-  };
-
   const isSearchMatchSelection = (from: number, to: number) => {
     if (from >= to) {
       return false;
@@ -2565,11 +2493,7 @@ export function createEditor({
             continueLiteralSourceNewline(view) || insertMermaidNewline(view) || insertDisplayMathNewline(view) ||
             insertIndentedCodeNewline(view, resolvedSyntaxTreeAt(view.state, view.state.selection.main.to)) ||
             handleEnterContinueContainedCodeBlock(view) ||
-            (view.state.facet(inputAssistanceFacet).lists && (
-              handleEnterOnEmptyListItem(view) ||
-              handleEnterAtListContentStart(view) ||
-              handleEnterContinueList(view) ||
-              handleEnterBeforeNestedList(view)))
+            (view.state.facet(inputAssistanceFacet).lists && handleEnterInList(view))
         },
         { key: 'Shift-Enter', run: (view) => insertIndentedCodeNewline(view, resolvedSyntaxTreeAt(view.state, view.state.selection.main.to), false) || insertTableCellLineBreak(view) },
         { key: 'Ctrl-Enter', run: (view) => finishDisplayMathEditing(view) || insertTableCellLineBreak(view) },
@@ -4666,17 +4590,7 @@ export function createEditor({
         return cachedInlineSelection;
       };
 
-      let insert = '';
       switch (action) {
-        case 'bulletList':
-          insert = '- ';
-          break;
-        case 'numberedList':
-          insert = '1. ';
-          break;
-        case 'task':
-          insert = '- [ ] ';
-          break;
         case 'codeBlock':
           return insertCodeBlock(view, selection, userEvent);
         case 'inlineCode':
@@ -4694,8 +4608,6 @@ export function createEditor({
           return insertInlineFence(view, inlineSelection(), '~~', userEvent);
         case 'highlight':
           return insertInlineFence(view, inlineSelection(), '==', userEvent);
-        case 'quote':
-          return insertQuote(view, selection, userEvent);
         case 'hr':
           return insertHr(view, selection, userEvent);
         case 'table':
@@ -4708,27 +4620,6 @@ export function createEditor({
           return insertImage(view, inlineSelection(), userEvent);
       }
 
-      if (!selection.empty && (action === 'bulletList' || action === 'numberedList')) {
-        const changes = buildListFormatChangesForSelection(state, insert);
-        dispatchSelectedListFormatChanges(changes, userEvent);
-        return;
-      }
-
-      const line = state.doc.lineAt(selection.from);
-      const { contentStart, oldMarkerLen, isExistingTask } = lineMarkerReplacementContext(state, line);
-      if (action === 'task' && isExistingTask) {
-        return;
-      }
-
-      const newMarkerLen = insert.length;
-      const cursorOffset = selection.from - (contentStart + oldMarkerLen);
-      const newCursorPos = contentStart + newMarkerLen + Math.max(0, cursorOffset);
-
-      view.dispatch({
-        changes: { from: contentStart, to: contentStart + oldMarkerLen, insert },
-        selection: { anchor: newCursorPos },
-        annotations: userEvent
-      });
     },
     getHeadings() {
       const state = view.state, tree = resolvedSyntaxTree(state, 8);
@@ -5437,32 +5328,6 @@ function insertInlineFence(
   userEvent: Annotation<string>
 ): void {
   return toggleInlineWrapper(view, selection, marker, marker, userEvent);
-}
-
-function insertQuote(
-  view: EditorView,
-  selection: InlineSelectionRange | SelectionRange,
-  userEvent: Annotation<string>
-): void {
-  const { state } = view;
-  const line = state.doc.lineAt(selection.from);
-  const lineText = state.doc.sliceString(line.from, line.to);
-
-  const existingQuote = /^(\s*)(>\s*)/.exec(lineText);
-  if (existingQuote) {
-    return;
-  }
-
-  const leadingWhitespace = /^(\s*)/.exec(lineText)?.[1] ?? '';
-  const insert = '> ';
-  const contentStart = line.from + leadingWhitespace.length;
-  const cursorOffset = selection.from - contentStart;
-
-  view.dispatch({
-    changes: { from: contentStart, insert },
-    selection: { anchor: contentStart + insert.length + cursorOffset },
-    annotations: userEvent
-  });
 }
 
 function insertHr(

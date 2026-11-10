@@ -9,6 +9,7 @@ Markdown 正文和 HTML 使用共同的语义规则与基础样式。Live、Prev
 | 内容 | 共同来源 | 适配位置 |
 | --- | --- | --- |
 | 引用／列表中断、表格分隔与标题优先级 | `src/shared/markdownContentRules.ts` | `markdownContentParser.ts`、`webview/src/helpers/markdownContentGrammar.ts`，及既有表格发现路径 |
+| 编辑中的列表前缀与两态任务位置 | `src/foundation/markdownListPrefix.ts` | 列表命令、Live 标记与块插入使用同一行内规则，具体行为见[列表编辑规则](list-editing.md) |
 | 读取场景的 Markdown 与行内 HTML 语法配置 | `src/shared/markdownContentParser.ts` | Preview／导出和 `htmlMarkdown.ts`；资源、源行映射、数学与脚注保持各自既有所有者 |
 | 强调、粗体、删除线、上下标、下划线、高亮、行内代码、段落、引用和标题基础样式 | `src/shared/markdownContentStyles.ts` | `markdownContentStyleTheme.ts` 映射 Live 标记及 HTML 标签，`exportStyles.ts` 映射读取标签 |
 | HTML 标签、属性、作者样式与样式表过滤 | `src/shared/htmlPolicy.ts`、`htmlStyle.ts`、`htmlStylesheet.ts` | Live 与读取适配消费同一策略，不能另写标签或 CSS 白名单 |

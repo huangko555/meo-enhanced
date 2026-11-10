@@ -8,6 +8,7 @@ import { parseDelimitedTable, markdownTableFromCells } from '../application/deli
 import { inlineCodeMarkers, planInlineWrapper } from '../application/symbolInput';
 import { isCodeInput } from './pasteAssistance';
 import type { EditorCommandId } from '../../../src/foundation/editingPreferences';
+import { readMarkdownListPrefix } from '../../../src/foundation/markdownListPrefix';
 
 import { markdownCodeRanges } from './blockInsertion';
 import { planHtmlCommentToggle } from '../application/htmlCommentInput';
@@ -45,10 +46,17 @@ function toggleLines(view: EditorView, command: EditorCommandId): boolean {
     });
   }
   const targetPrefix = command === 'bullet' ? '- ' : command === 'ordered' ? '1. ' : command === 'taskList' ? '- [ ] ' : command === 'quote' ? '> ' : heading ? '#'.repeat(Number(heading[1])) + ' ' : '';
-  const ownMarker = command === 'bullet' ? /^\s*[-+*]\s+(?!\[[ xX]\])/ : command === 'ordered' ? /^\s*\d+[.)]\s+/ : command === 'taskList' ? /^\s*[-+*]\s+\[[ xX]\]\s+/ : command === 'quote' ? /^\s*>\s?/ : heading ? new RegExp('^\\s*#{' + heading[1] + '} ') : null;
-  const remove = !!ownMarker && lines.every(line => {
+  const ownMarker = command === 'quote' ? /^\s*>\s?/ : heading ? new RegExp('^\\s*#{' + heading[1] + '} ') : null;
+  const remove = lines.every(line => {
     const setext = setextByLine.get(line.from);
-    return setext ? Number(setext.name.slice(-1)) === Number(heading?.[1]) : ownMarker.test(line.text);
+    if (setext) return Number(setext.name.slice(-1)) === Number(heading?.[1]);
+    const list = readMarkdownListPrefix(line.text);
+    if (list && list.toOffset > list.markerEndOffset) {
+      if (command === 'bullet') return list.bullet !== undefined && list.taskMarker === undefined;
+      if (command === 'ordered') return list.orderedNumber !== undefined;
+      if (command === 'taskList') return list.taskMarker !== undefined;
+    }
+    return ownMarker?.test(line.text) ?? false;
   });
   let ordinal = 0;
   const contentOffsets = new Map<number, number>();
@@ -68,11 +76,15 @@ function toggleLines(view: EditorView, command: EditorCommandId): boolean {
       return { from: setext.from, to: setext.to, insert: prefix + singleLineHeading(view.state.sliceDoc(content.from, content.to)) };
     }
     if (command === 'taskDone') {
-      const match = /^(\s*[-+*]\s+\[)([ xX])(\])/.exec(line.text);
-      return match ? { from: line.from + match[1].length, to: line.from + match[1].length + 1, insert: match[2] === ' ' ? 'x' : ' ' } : { from: line.from, insert: '' };
+      const task = readMarkdownListPrefix(line.text);
+      if (!task || task.taskBracketStart === undefined) return { from: line.from, insert: '' };
+      const from = line.from + task.taskBracketStart + 1;
+      return { from, to: from + 1, insert: task.taskMarker === ' ' ? 'x' : ' ' };
     }
     const indentation = /^\s*/.exec(line.text)![0];
-    const existing = /^(?:#{1,6}\s+|[-+*]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+|>\s?)/.exec(line.text.slice(indentation.length))?.[0] ?? '';
+    const list = readMarkdownListPrefix(line.text);
+    const existingLength = list && list.toOffset > list.markerEndOffset ? list.toOffset - indentation.length
+      : /^(?:#{1,6}\s+|>\s?)/.exec(line.text.slice(indentation.length))?.[0].length ?? 0;
     let prefix = remove ? '' : command === 'ordered' ? `${++ordinal}. ` : targetPrefix;
     if (command === 'headingUp' || command === 'headingDown') {
       const level = /^(#{1,6})\s/.exec(line.text.slice(indentation.length))?.[1].length ?? 0;
@@ -80,7 +92,7 @@ function toggleLines(view: EditorView, command: EditorCommandId): boolean {
       prefix = next ? '#'.repeat(next) + ' ' : '';
     }
     contentOffsets.set(line.from, indentation.length + prefix.length);
-    return { from: line.from + indentation.length, to: line.from + indentation.length + existing.length, insert: prefix };
+    return { from: line.from + indentation.length, to: line.from + indentation.length + existingLength, insert: prefix };
   });
   const changeSet = view.state.changes(changes);
   if (changeSet.empty) return true;

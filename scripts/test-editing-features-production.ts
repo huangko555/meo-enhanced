@@ -53,6 +53,18 @@ try {
   };
   const text = () => page.evaluate(() => (window as any).editor.getText());
   const command = (command: string) => page.evaluate(command => (window as any).editor.executeCommand(command), command);
+  for (const mode of ['live', 'source']) {
+    for (const prefix of ['- ', '+ ', '* ', '1. ', '1) ', '  4. ']) {
+      const source = prefix + '[X] task body';
+      await prepare(mode, source);
+      assert.equal(await command('taskDone'), true);
+      assert.equal(await text(), prefix + '[ ] task body', `${mode}/${prefix}/task completion uses the same two-state rule`);
+      await page.evaluate(() => (window as any).editor.undo());
+      assert.equal(await text(), source, `${mode}/${prefix}/task completion undo`);
+      await command('bullet');
+      assert.equal(await text(), prefix.startsWith('  ') ? '  - task body' : '- task body', `${mode}/${prefix}/list conversion consumes the whole task prefix`);
+    }
+  }
   const paste = (text: string, html = '', custom = '') => page.evaluate(({ text, html, custom }) => {
     const clipboard = new DataTransfer(); clipboard.setData('text/plain', text);
     if (html) clipboard.setData('text/html', html);

@@ -278,6 +278,64 @@ async function assertListBoundaryDragging(page: import('puppeteer-core').Page): 
   console.log('list boundary dragging passed: prefix gaps, ordered/bullet/nested, both directions, light/dark, ordinary/optimized');
 }
 
+async function assertListEnterRules(page: import('puppeteer-core').Page): Promise<void> {
+  const fixtures = [
+    { source: '- body', head: 2, expected: '- \n- body', after: 2 },
+    { source: '7. body', head: 3, expected: '7. \n8. body', after: 3 },
+    { source: '3) [x] body', head: 7, expected: '3) [ ] \n4) [x] body', after: 7 },
+    { source: '> - [X] body', head: 8, expected: '> - [ ] \n> - [X] body', after: 8 },
+    { source: '  - [ ] ', head: 8, expected: '', after: 0 },
+    { source: '> - [X] ', head: 8, expected: '> ', after: 2 },
+    { source: '-', head: 1, expected: '', after: 0 }
+  ];
+  for (const large of [false, true]) for (const mode of ['live', 'source']) for (const fixture of fixtures) {
+    const suffix = '\n\nKEEP' + (large ? '\n\n' + 'padding text\n'.repeat(8100) : '');
+    const source = fixture.source + suffix, expected = fixture.expected + suffix;
+    const label = `${mode}/${large ? 'optimized' : 'ordinary'}/${JSON.stringify(fixture.source)}`;
+    const optimized = await page.evaluate(async ({ source, head, mode }) => {
+      const scope = window as any, harness = scope.ListEditingHarness;
+      const editor = scope.__listEnterEditor = harness.createEditor({ parent: document.getElementById('editor-host')!, text: source, initialMode: mode, onApplyChanges() {} });
+      editor.view.dispatch({ selection: { anchor: head } }); editor.focus();
+      for (let i = 0; i < 6; i++) await new Promise(requestAnimationFrame);
+      return harness.usesLargeDocumentDerivedWorkBudget(editor.view.state);
+    }, { source, head: fixture.head, mode });
+    try {
+      assert.equal(optimized, large, label + '/actual budget');
+      await page.keyboard.press('Enter');
+      for (const operation of ['read', 'undo', 'redo'] as const) {
+        const result = await page.evaluate(async operation => {
+          const editor = (window as any).__listEnterEditor;
+          if (operation !== 'read') await editor[operation]();
+          return { text: editor.getText(), head: editor.view.state.selection.main.head };
+        }, operation);
+        assert.equal(result.text, operation === 'undo' ? source : expected, label + '/' + operation);
+        assert.equal(result.head, operation === 'undo' ? fixture.head : fixture.after, label + '/' + operation + '/caret');
+      }
+    } finally { await page.evaluate(() => (window as any).__listEnterEditor.destroy()); }
+  }
+  console.log('list Enter rules passed: start/empty items, task reset, quotes, native history, Live/Source, ordinary/optimized');
+  for (const large of [false, true]) for (const mode of ['live', 'source']) {
+    const suffix = '\n\nKEEP' + (large ? '\n\n' + 'padding text\n'.repeat(8100) : '');
+    const source = '- alpha\n- beta' + suffix;
+    await page.evaluate(async ({ source, mode }) => {
+      const scope = window as any;
+      const editor = scope.__listEnterEditor = scope.ListEditingHarness.createEditor({ parent: document.getElementById('editor-host')!, text: source, initialMode: mode, onApplyChanges() {} });
+      editor.view.dispatch({ selection: { anchor: 7 } });
+      editor.executeCommand('addCursor'); editor.focus();
+      for (let i = 0; i < 6; i++) await new Promise(requestAnimationFrame);
+    }, { source, mode });
+    try {
+      await page.keyboard.press('Enter');
+      const result = await page.evaluate(() => {
+        const editor = (window as any).__listEnterEditor;
+        return { text: editor.getText(), count: editor.view.state.selection.ranges.length };
+      });
+      assert.equal(result.text, '- alpha\n- \n- beta\n- ' + suffix, `${mode}/${large}/native multi-cursor continuation`);
+      assert.equal(result.count, 2, `${mode}/${large}/native multi-cursor selection`);
+    } finally { await page.evaluate(() => (window as any).__listEnterEditor.destroy()); }
+  }
+}
+
 async function assertListContinuationFrames(page: import('puppeteer-core').Page): Promise<void> {
   const fixtures = [
     { first: '1. Parent', item: '   - Child', empty: '   - ' },
@@ -558,6 +616,7 @@ async function main(): Promise<void> {
     await assertListPasteFrames(page);
     if (process.argv.includes('--paste-only')) return;
     await assertListBoundaryDragging(page);
+    await assertListEnterRules(page);
     await assertListContinuationFrames(page);
     await assertListTextSelection(page);
     await assertListPrefixTyping(page);
