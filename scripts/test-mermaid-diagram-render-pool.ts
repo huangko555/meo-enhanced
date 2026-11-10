@@ -72,6 +72,51 @@ const request = (
   configKey = 'default'
 ) => ({ rawSource, normalizedSource: rawSource.trim(), themeKey, configKey } as const);
 
+// A slow active layout must not turn replaced editing sources into a queue of
+// cache warm-ups. A sibling still waiting for one source continues to own it.
+{
+  const activeGate = deferred<string>(), started = deferred<void>();
+  const calls: string[] = [];
+  const editingPool = createMermaidDiagramRenderPool({
+    initialize() {}, maxQueuedOperations: 4,
+    async render(_id, source) {
+      calls.push(source);
+      if (source === 'ACTIVE') { started.resolve(); return activeGate.promise; }
+      return `<svg>${source}</svg>`;
+    }
+  });
+  const editingGroup = editingPool.acquireGroup(), siblingGroup = editingPool.acquireGroup();
+  const editing = editingGroup.createLeaf(), sibling = siblingGroup.createLeaf();
+  let current = editing.render(request('ACTIVE'));
+  await started.promise;
+  let shared: Promise<unknown> | undefined;
+  try {
+    for (let index = 1; index <= 40; index++) {
+      editing.replacePending();
+      assert.match((await current).error, /replaced/,
+        'continuous replacements must not exhaust the queue with abandoned sources');
+      current = editing.render(request(`EDIT_${index}`));
+      if (index === 10) shared = sibling.render(request('EDIT_10'));
+    }
+    const offscreen = editingGroup.createLeaf();
+    const abandoned = offscreen.render(request('UNMOUNTED'));
+    offscreen.release();
+    assert.match((await abandoned).error, /released/);
+    activeGate.resolve('<svg>ACTIVE</svg>');
+    assert.deepEqual(await shared, { ok: true, svg: '<svg>EDIT_10</svg>' });
+    assert.deepEqual(await current, { ok: true, svg: '<svg>EDIT_40</svg>' });
+    assert.deepEqual(calls, ['ACTIVE', 'EDIT_10', 'EDIT_40'],
+      'only the running source, a surviving sibling request and the latest edit may consume layout');
+    assert.deepEqual(editingPool.getCached(request('ACTIVE')), { ok: true, svg: '<svg>ACTIVE</svg>' },
+      'already running layout remains reusable without publishing its obsolete presentation');
+    assert.equal(editingPool.getCached(request('EDIT_39')), null,
+      'unstarted abandoned sources must not spend layout just to populate the cache');
+  } finally {
+    activeGate.resolve('<svg>ACTIVE</svg>');
+    editingGroup.end(); siblingGroup.end(); editingPool.dispose();
+  }
+}
+
 const controlledRenderer = createControlledRenderer();
 const initializeCalls: Array<[string, string]> = [];
 const pool = createMermaidDiagramRenderPool({

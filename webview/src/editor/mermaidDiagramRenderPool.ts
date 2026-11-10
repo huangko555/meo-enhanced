@@ -165,7 +165,10 @@ export function createMermaidDiagramRenderPool(
       settleWaiter(waiter, { error: reason });
     }
     for (const job of jobs) {
-      if (retainLeafWork && 'group' in owner) retainForGroup(job, owner.group);
+      // A running layout may already have paid most of its cost and remains
+      // reusable within Live. Unstarted work needs a real waiter: retaining
+      // every replaced edit here fills the queue ahead of the current source.
+      if (retainLeafWork && 'group' in owner && job.state === 'running') retainForGroup(job, owner.group);
       cancelIfOrphaned(job);
     }
   };
