@@ -665,6 +665,8 @@ export function getFencedCodeContent(state: EditorState, node: SyntaxNodeRef): s
 }
 
 export class MermaidDiagramWidget extends WidgetType {
+  private presentationLatencyMs = 0;
+  private presentationOverheadMs = 0;
   private container: HTMLElement | null = null;
   diagramText: string;
   startLine: number;
@@ -776,6 +778,12 @@ export class MermaidDiagramWidget extends WidgetType {
     );
   }
 
+  /** Cached content needs no layout; otherwise reuse the last observed paint cost. */
+  updateCostMs(source: string): number {
+    return this.presentationFactory.getCached(mermaidRenderRequest(source, this.themeSignature))?.ok === true
+      ? 0 : Math.max(this.presentationLatencyMs, this.presentationOverheadMs + (this.presentationHandle?.getRenderDurationMs() ?? 0));
+  }
+
   /** Update an embedded split preview without discarding its SVG or camera. */
   updateSource(diagramText: string, startLine: number, endLine: number): void {
     const sourceChanged = this.diagramText !== diagramText;
@@ -801,6 +809,7 @@ export class MermaidDiagramWidget extends WidgetType {
     const gated = !!view && usesLargeDocumentDerivedWorkBudget(view.state) && typeof IntersectionObserver !== 'undefined';
     let nearScreen = !gated;
     let presentationGeneration = 0;
+    let renderStartedAt: number | null = null;
     let releaseBusyAfterLayout = false;
     const finishPresentation = () => {
       presentationGeneration += 1;
@@ -911,6 +920,7 @@ export class MermaidDiagramWidget extends WidgetType {
         this.renderSvg(container, svg, view);
         const presentedSource = this.diagramText;
         const presentedTheme = this.themeSignature;
+        const startedAt = renderStartedAt;
         const presentedWrapper = container.querySelector('.meo-mermaid-svg-wrapper');
         // Let the replacement paint before deferred document work resumes.
         // A newer source/theme or replacement must retain its own wait marker.
@@ -918,6 +928,12 @@ export class MermaidDiagramWidget extends WidgetType {
           if (container.isConnected && this.diagramText === presentedSource
             && this.themeSignature === presentedTheme
             && container.querySelector('.meo-mermaid-svg-wrapper') === presentedWrapper) {
+            // Include DOM acceptance and its paint opportunity. Cached results
+            // do not describe the cost of laying out the next edited source.
+            if (startedAt !== null) {
+              this.presentationLatencyMs = performance.now() - startedAt;
+              this.presentationOverheadMs = Math.max(0, this.presentationLatencyMs - (this.presentationHandle?.getRenderDurationMs() ?? 0));
+            }
             delete container.dataset.meoMermaidRendering;
           }
         }));
@@ -1007,6 +1023,8 @@ export class MermaidDiagramWidget extends WidgetType {
       }
       const identity = getMermaidEditorPresentationIdentity();
       needsPresentation = false;
+      renderStartedAt = this.presentationFactory.getCached(mermaidRenderRequest(this.diagramText, identity.themeKey))?.ok === true
+        ? null : performance.now();
       this.presentationHandle.present(this.diagramText, identity.themeKey, identity.configKey);
     };
     this.visibilityObserver?.disconnect();

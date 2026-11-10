@@ -20,6 +20,7 @@ export type MermaidDiagramPresentationHandle = {
   present(source: string, themeKey: string, configKey: string): void;
   externalDocumentPresented(): void;
   whenIdle(): Promise<void>;
+  getRenderDurationMs(): number;
   dispose(): void;
 };
 
@@ -50,7 +51,7 @@ export type MermaidDiagramPresentationFactoryOptions = {
   readonly createHandle: (
     view: MermaidDiagramPresentationView,
     resources: MermaidDiagramLeafRenderConsumer
-  ) => MermaidDiagramPresentationHandle;
+  ) => Omit<MermaidDiagramPresentationHandle, 'getRenderDurationMs'>;
 };
 
 /** Owns per-Editor scopes while Bootstrap owns concrete runtime assembly. */
@@ -104,6 +105,7 @@ export function createMermaidDiagramPresentationFactory(
               delegate.externalDocumentPresented();
             },
             whenIdle: () => active ? delegate.whenIdle() : Promise.resolve(),
+            getRenderDurationMs: () => active ? resources.getRenderDurationMs() : 0,
             dispose() {
               if (!active) return;
               active = false;

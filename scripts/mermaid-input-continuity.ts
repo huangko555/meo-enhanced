@@ -4,6 +4,73 @@ import sharp from 'sharp';
 import type { Browser } from 'puppeteer-core';
 import { assessLargeDocument } from '../src/foundation/largeDocument';
 
+/** Reproduce layout slower than typing without depending on machine speed. */
+export async function checkSlowMermaidInputProgress(browser: Browser, bundle: string): Promise<void> {
+  const worker = await Bun.build({ entrypoints: ['webview/src/markdownParseWorker.ts'], target: 'browser', format: 'iife' });
+  assert.ok(worker.success);
+  const scenarios = [false, true].flatMap(large => ['stacked', 'side-by-side'].map(layout => ({ large, layout, varying: false })));
+  scenarios.push({ large: false, layout: 'stacked', varying: true }, { large: true, layout: 'side-by-side', varying: true });
+  for (const { large, layout, varying } of scenarios) {
+    const page = await browser.newPage();
+    const label = `${large ? 'optimized' : 'ordinary'}/${layout}/${varying ? 'varying' : 'fixed'}`;
+    try {
+      await page.setViewport({ width: 1100, height: 720 });
+      await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
+      await page.addStyleTag({ path: 'webview/src/styles.css' });
+      await page.evaluate(code => { document.body.dataset.meoMarkdownWorkerSrc = URL.createObjectURL(new Blob([code], { type: 'text/javascript' })); }, await worker.outputs[0]!.text());
+      await page.addScriptTag({ content: bundle });
+      await page.evaluate(({ large, varying }) => {
+        const w = window as any;
+        w.mermaid = { initialize() {}, async render(_id: string, source: string) {
+          await new Promise(resolve => setTimeout(resolve, varying && !source.includes('[Alpha1]') ? 320 : 220));
+          return { svg: `<svg width="240" height="90" data-source="${encodeURIComponent(source)}"><text>${source.match(/Alpha\d*/)?.[0]}</text></svg>` };
+        } };
+        w.slowEditor = w.MermaidEditingHarness.createEditor({ parent: document.getElementById('app'), initialMode: 'live',
+          text: 'Before\n\n```mermaid\nflowchart LR\nA[Alpha] --> B[End]\n```\n\nAfter\n\n' + (large ? 'Background paragraph.\n\n'.repeat(3000) : '') });
+      }, { large, varying });
+      assert.equal(await page.evaluate(() => (window as any).slowEditor.prepareLiveSyntax(() => true)), true);
+      assert.equal(await page.evaluate(() => (window as any).MermaidEditingHarness.usesLargeDocumentDerivedWorkBudget((window as any).slowEditor.view.state)), large);
+      await page.waitForSelector('.meo-mermaid-block svg'); await page.click('.meo-mermaid-mode-btn');
+      await page.evaluate(layout => {
+        const w = window as any, view = w.slowEditor.view, text = view.state.doc.toString();
+        view.dispatch({ effects: w.MermaidEditingHarness.setMermaidLayoutEffect.of({ anchor: text.indexOf('```'), layout }),
+          selection: { anchor: text.indexOf('Alpha') + 5 } }); view.focus();
+      }, layout);
+      await page.waitForSelector('.meo-mermaid-editing-preview svg');
+      await page.evaluate(() => {
+        const w = window as any, view = w.slowEditor.view;
+        w.slowProbe = { accepted: 'Alpha', inputs: [] as any[], paints: [] as any[] };
+        document.addEventListener('input', event => {
+          const input = event as InputEvent;
+          if (!(input.target as Element).closest('.cm-content') || !input.data) return;
+          w.slowProbe.accepted += input.data;
+          w.slowProbe.inputs.push({ value: w.slowProbe.accepted, at: performance.now(), trusted: input.isTrusted });
+        }, true);
+        new MutationObserver(() => {
+          const value = document.querySelector('.meo-mermaid-editing-preview svg text')?.textContent;
+          if (!value || !w.slowProbe.inputs.some((input: any) => input.value === value) || w.slowProbe.paints.some((paint: any) => paint.value === value)) return;
+          const paint = { value, at: 0 }; w.slowProbe.paints.push(paint);
+          requestAnimationFrame(() => { paint.at = performance.now(); });
+        }).observe(view.dom, { childList: true, subtree: true, characterData: true });
+      });
+      await page.keyboard.type('1');
+      await page.waitForFunction(() => (window as any).slowProbe.paints.some((p: any) => p.value === 'Alpha1' && p.at), { timeout: 5000 });
+      const burst = '234567892345'.repeat(varying ? 2 : 1);
+      await page.keyboard.type(burst, { delay: 60 });
+      await page.waitForFunction(() => { const p = (window as any).slowProbe; return p.paints.some((paint: any) => paint.value === p.accepted && paint.at); }, { timeout: 5000 });
+      const result = await page.evaluate(() => {
+        const w = window as any, p = w.slowProbe;
+        return { inputs: p.inputs, source: w.slowEditor.getText(),
+          intermediate: p.paints.filter((paint: any) => paint.value !== 'Alpha1' && paint.at > 0 && paint.at < p.inputs.at(-1).at).length };
+      });
+      assert.equal(result.inputs.length, burst.length + 1); assert.ok(result.inputs.every((input: any) => input.trusted));
+      assert.ok(result.source.includes('Alpha1' + burst));
+      assert.ok(result.intermediate >= 2, `${label}:slow layout must advance during typing, observed ${result.intermediate} paints`);
+      console.log(`Slow Mermaid ${label}: ${result.intermediate} intermediate paints`);
+    } finally { await page.evaluate(() => (window as any).slowEditor?.destroy()); await page.close(); }
+  }
+}
+
 export async function checkLiveInputQuietDeadlines(browser: Browser, bundle: string): Promise<void> {
   const worker = await Bun.build({ entrypoints: ['webview/src/markdownParseWorker.ts'], target: 'browser', format: 'iife' });
   assert.ok(worker.success);

@@ -26,6 +26,7 @@ type RenderGroupRecord = {
 
 type LeafRenderConsumerRecord = {
   active: boolean;
+  renderDurationMs: number;
   readonly group: RenderGroupRecord;
   readonly waiters: Set<OperationWaiter>;
 };
@@ -304,6 +305,7 @@ export function createMermaidDiagramRenderPool(
     }
 
     const generation = resourceGeneration;
+    const requestedAt = performance.now();
     const abortController = new AbortController();
     const job: OperationJob = {
       abortController,
@@ -320,6 +322,7 @@ export function createMermaidDiagramRenderPool(
           }
           abortController.signal.throwIfAborted();
           const svg = await options.render(`mermaid-${++renderSequence}`, request.normalizedSource, abortController.signal, job.interactive);
+          if (consumer.active && consumer.group.active) consumer.renderDurationMs = performance.now() - requestedAt;
           return { ok: true, svg };
         } catch (error) {
           return {
@@ -395,12 +398,14 @@ export function createMermaidDiagramRenderPool(
     }
     const consumer: LeafRenderConsumerRecord = {
       active: true,
+      renderDurationMs: 0,
       group,
       waiters: new Set()
     };
     group.leaves.add(consumer);
     return {
       render: (request) => render(consumer, request),
+      getRenderDurationMs: () => consumer.active && group.active ? consumer.renderDurationMs : 0,
       getCached(request) {
         if (disposed || !consumer.active || !group.active) return null;
         const key = cacheKeyFor(request);

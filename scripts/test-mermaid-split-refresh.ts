@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { launchTestBrowser } from './browser-test-helpers';
-import { checkLiveInputQuietDeadlines, checkMermaidEditingControlStability, checkMermaidInputContinuity } from './mermaid-input-continuity';
+import { checkLiveInputQuietDeadlines, checkMermaidEditingControlStability, checkMermaidInputContinuity, checkSlowMermaidInputProgress } from './mermaid-input-continuity';
 
 // Exercise main-document source edits through the production editor. A held renderer
 // makes the old-diagram/loading transition observable without timing a CPU.
@@ -10,10 +10,13 @@ const build = await Bun.build({
 assert.ok(build.success, build.logs.map(String).join('\n'));
 const browser = await launchTestBrowser();
 try {
+  if (process.argv.includes('--slow-layout-only')) await checkSlowMermaidInputProgress(browser, await build.outputs[0].text());
+  else {
   if (!process.argv.includes('--controls-only')) await checkLiveInputQuietDeadlines(browser, await build.outputs[0].text());
   if (!process.argv.includes('--quiet-deadlines-only')) await checkMermaidEditingControlStability(browser, await build.outputs[0].text());
   if (!process.argv.includes('--quiet-deadlines-only') && !process.argv.includes('--controls-only')) {
   await checkMermaidInputContinuity(browser, await build.outputs[0].text());
+  await checkSlowMermaidInputProgress(browser, await build.outputs[0].text());
   const page = await browser.newPage();
   await page.setViewport({ width: 1100, height: 720, deviceScaleFactor: 1 });
   await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div>');
@@ -217,5 +220,6 @@ try {
   console.log(JSON.stringify({ foregroundPriority: priority }));
   assert.equal(priority.order[0], 'edit', 'Background retries must not start before the visible split edit');
   console.log('PASS Mermaid split refresh: old diagram, typing batch, cache, stale results, errors, theme, disposal');
+  }
   }
 } finally { await browser.close(); }

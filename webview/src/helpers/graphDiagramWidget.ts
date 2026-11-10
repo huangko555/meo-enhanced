@@ -7,7 +7,7 @@ const cameras = new WeakMap<object, { language: string; camera: DocumentBlockCam
 
 export type GraphRenderer = { language: string; port: DocumentBlocksPort };
 export type GraphDiagramWidget = WidgetType & Pick<MermaidDiagramWidget,
-  'toDOM' | 'destroy' | 'updateSource' | 'eq' | 'estimatedHeight' | 'measuredHeight' | 'themeSignature' | 'measuredContentWidth' | 'startLine' | 'endLine'>;
+  'toDOM' | 'destroy' | 'updateSource' | 'eq' | 'estimatedHeight' | 'measuredHeight' | 'themeSignature' | 'measuredContentWidth' | 'startLine' | 'endLine' | 'updateCostMs'>;
 
 /** Only the canvas differs. The caller owns the common code-block shell and editor state. */
 export function createGraphDiagramWidget(source: string, start: number, end: number,
@@ -22,6 +22,7 @@ export function createGraphDiagramWidget(source: string, start: number, end: num
 }
 
 class ContributedDiagramWidget extends WidgetType {
+  updateCostMs(_source: string): number { return 0; }
   measuredHeight = 360;
   measuredContentWidth = 0;
   themeSignature = '';

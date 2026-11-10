@@ -504,7 +504,7 @@ export function addMermaidToolbar(
 }
 
 type PreviewElement = HTMLElement & {
-  mermaidPreview?: { widget: GraphDiagramWidget; timer?: number; lastUpdateAt?: number; sourceDoc?: EditorState['doc']; source: string; startLine: number; endLine: number; viewport: MermaidViewportState };
+  mermaidPreview?: { widget: GraphDiagramWidget; timer?: number; lastUpdateAt?: number; lastUpdateDoc?: EditorState['doc']; sourceDoc?: EditorState['doc']; source: string; startLine: number; endLine: number; viewport: MermaidViewportState };
 };
 /** The same preview action is used in document flow and opaque floating chrome. */
 export function createMermaidPreviewHeading(view: EditorView, anchor: number): HTMLElement {
@@ -620,7 +620,7 @@ export class MermaidSourcePreviewWidget extends UiLanguageSensitiveWidget {
       return language && port?.supports(language) ? { language, port } : undefined;
     })());
     root.append(label, widget.toDOM(view));
-    root.mermaidPreview = { widget, source: this.source, startLine: this.startLine, endLine: this.endLine, viewport: this.viewport };
+    root.mermaidPreview = { widget, source: this.source, sourceDoc: view.state.doc, lastUpdateDoc: view.state.doc, startLine: this.startLine, endLine: this.endLine, viewport: this.viewport };
     return root;
   }
   updateDOM(root: PreviewElement, view: EditorView): boolean {
@@ -636,7 +636,10 @@ export class MermaidSourcePreviewWidget extends UiLanguageSensitiveWidget {
       view.state.field(mermaidEditingStateField).narrow || view.dom.clientWidth < MERMAID_SIDE_MIN_WIDTH);
     if (view.composing) return true;
     const large = usesLargeDocumentDerivedWorkBudget(view.state), pending = isLiveInputDerivedWorkPending(view.state);
-    if (preview.source === this.source && !(preview.timer !== undefined && large && !pending)) {
+    // A presentation-only publication may flush immediately. A quiet syntax
+    // reply for newer text must not reset the current typing checkpoint.
+    const acceptedOnly = large && !pending && preview.lastUpdateDoc === view.state.doc;
+    if (preview.source === this.source && !(preview.timer !== undefined && acceptedOnly)) {
       if (preview.timer === undefined) preview.widget.updateSource(this.source, this.startLine, this.endLine);
       return true;
     }
@@ -644,16 +647,19 @@ export class MermaidSourcePreviewWidget extends UiLanguageSensitiveWidget {
     preview.sourceDoc = view.state.doc;
     root.dataset.meoMermaidRendering = 'true';
     if (preview.timer !== undefined) {
-      if (!large || pending) return true;
+      if (!acceptedOnly) return true;
       clearTimeout(preview.timer);
     }
     // Keep single edits prompt, but cap repeated diagram layout during typing.
     // Later input replaces the desired source without moving this deadline.
     const now = performance.now();
-    // Limit repeated diagram layout while typing. A fully accepted quiet-time
-    // refresh may flush the latest source immediately.
-    const throttle = large && pending && preview.lastUpdateAt !== undefined && now >= preview.lastUpdateAt
-      ? Math.max(0, 120 - (now - preview.lastUpdateAt)) : 0;
+    // Pace requests by a measured successful layout. A fixed interval shorter
+    // than layout continuously invalidates results, leaving no preview until
+    // typing stops. Keep one fixed next checkpoint, read the latest source there,
+    // and retain ordinary presentation supersession and lifecycle guards.
+    const interval = acceptedOnly ? 0 : Math.min(1000, Math.max(large && pending ? 120 : 0, preview.widget.updateCostMs(this.source)));
+    const throttle = preview.lastUpdateAt !== undefined && now >= preview.lastUpdateAt
+      ? Math.max(0, interval - (now - preview.lastUpdateAt)) : 0;
     preview.timer = window.setTimeout(() => {
       preview.timer = undefined;
       if (root.mermaidPreview !== preview || !root.isConnected) return;
@@ -677,6 +683,7 @@ export class MermaidSourcePreviewWidget extends UiLanguageSensitiveWidget {
         preview.endLine = current.closing.number;
       }
       preview.lastUpdateAt = performance.now();
+      preview.lastUpdateDoc = view.state.doc;
       preview.widget.updateSource(preview.source, preview.startLine, preview.endLine);
       delete root.dataset.meoMermaidRendering;
     }, Math.max(throttle, !large || pending ? liveInputQuietDelay(view, 80) : 0));
