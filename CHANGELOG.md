@@ -4,6 +4,9 @@ This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
 ## 0.4.0
+- Kept Live Mermaid, HTML and formula editing previews current while background parsing catches up, preserving intermediate results during continuous input and the latest valid formula during incomplete input.
+- Unified ordered, unordered and task-list prefixes and commands, including ordered-task toggles, stable dragging from list-marker gaps, immediate continuation markers and complete empty-item deletion.
+- Protected literal HTML, code and formula source from list deletion while document parsing is pending, without adding document scans or a second editing state.
 
 - Added Chinese word movement, deletion and double-click selection in Source and Live text using the built-in `Intl.Segmenter`, including directed multiple selections.
 - Fixed deletion undo restoring the wrong caret or collapsing multiple selections in Source and Live text.
