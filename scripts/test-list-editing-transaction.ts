@@ -544,6 +544,7 @@ async function main(): Promise<void> {
         await waitForFrames(page);
       };
       const read = () => page.evaluate(() => (window as any).__codeListEditor.getText() as string);
+      const nestedList = '1. Parent\n    5. First\n    9. Second\n';
       const fence = '```text\n10. A\n20. B\n30. C\n```\n';
       const yaml = '```yaml\nsteps:\n  - name: x\n    - b\n```\n';
       for (const { source, at, act, expected } of [
@@ -551,6 +552,8 @@ async function main(): Promise<void> {
         { source: fence, at: fence.length - 1, act: () => page.keyboard.press('Enter'), expected: fence + '\n' },
         { source: yaml, at: yaml.indexOf('name'), act: () => page.keyboard.press('Backspace'), expected: yaml.replace('- name', '-name') },
         { source: '1. A\n1. B\n1. C\n', at: 4, act: () => page.keyboard.type('x'), expected: '1. Ax\n2. B\n3. C\n' },
+        { source: nestedList, at: nestedList.indexOf('First') + 'First'.length, act: () => page.keyboard.type('x'),
+          expected: '1. Parent\n    5. Firstx\n    6. Second\n' },
         { source: '- A\n  - B\n', at: 2, act: () => page.keyboard.press('Backspace'), expected: 'A\n- B\n' }
       ]) {
         await open(source, at);

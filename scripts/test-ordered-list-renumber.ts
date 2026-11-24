@@ -86,4 +86,17 @@ for (const [source, insert, expected] of [
   assert.equal(before.update({ changes: { from: at, insert } }).newDoc.toString(), expected, source);
 }
 
+const largePrefix = 'Ordinary paragraph.\n\n'.repeat(1_800);
+for (const [source, expected] of [
+  ['1. Parent\n    5. First\n    9. Second\n', '1. Parent\n    5. First!\n    6. Second\n'],
+  ['    5. First\n    9. Second\n', '    5. First!\n    9. Second\n']
+]) {
+  const doc = largePrefix + source;
+  const before = EditorState.create({ doc, extensions: [markdown(), orderedListRenumberTransactionFilter(() => true)] });
+  assert.ok(ensureSyntaxTree(before, doc.length, 5_000), 'the large document has accepted syntax');
+  const at = doc.indexOf('First') + 'First'.length;
+  assert.equal(before.update({ changes: { from: at, insert: '!' } }).newDoc.sliceString(largePrefix.length),
+    expected, 'typing keeps verified nested lists and indented code distinct in a large document');
+}
+
 console.log('ordered list nesting renumber checks passed');

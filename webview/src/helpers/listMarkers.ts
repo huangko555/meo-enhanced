@@ -1040,6 +1040,19 @@ function touchesPossibleCode(doc: Text, from: number, to: number): boolean {
     || /`{3}|~{3}|(?:^|\n)(?:[ \t]*>)*[ \t]?(?: {4}| {0,3}\t)/.test(doc.sliceString(first.from, next.to));
 }
 
+function editsExistingListBody(transaction: Transaction, oldFrom: number, oldTo: number, from: number, to: number): boolean {
+  const line = transaction.startState.doc.lineAt(oldFrom);
+  if (oldTo > line.to || to > transaction.newDoc.lineAt(from).to) return false;
+  const offset = oldFrom - line.from;
+  if (offset > LIST_CODE_PARSE_LIMIT) return false;
+  const beforeEdit = line.text.slice(0, offset);
+  const prefix = readMarkdownContainerPrefixes(beforeEdit).at(-1);
+  if (prefix?.kind !== 'list') return false;
+  const firstBodyCharacter = beforeEdit[prefix.to];
+  // Text before this edit already rules out introducing a fence or HTML opener.
+  return !!firstBodyCharacter && !'<~`'.includes(firstBodyCharacter);
+}
+
 /** Existing code ownership can be reused for ordinary typing. When a fence or
  * indented block might change, confirm ownership in the edited revision. */
 function excludeCodeBlockChanges(transaction: Transaction, changes: readonly ListTextChange[]): ListTextChange[] {
@@ -1050,7 +1063,8 @@ function excludeCodeBlockChanges(transaction: Transaction, changes: readonly Lis
   if (isBackgroundMarkdownPreparationPending(startState)) return [];
   let mayChangeCode = false;
   transaction.changes.iterChangedRanges((oldFrom, oldTo, from, to) => {
-    mayChangeCode ||= touchesPossibleCode(startState.doc, oldFrom, oldTo) || touchesPossibleCode(newDoc, from, to);
+    if (mayChangeCode || editsExistingListBody(transaction, oldFrom, oldTo, from, to)) return;
+    mayChangeCode = touchesPossibleCode(startState.doc, oldFrom, oldTo) || touchesPossibleCode(newDoc, from, to);
   });
   if (mayChangeCode) {
     // Keep this synchronous parse bounded. Ambiguous large edits preserve the
