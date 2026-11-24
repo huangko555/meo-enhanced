@@ -1,6 +1,7 @@
 import { EditorState, Prec, RangeSetBuilder, StateEffect, StateField, Transaction, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import { readDocumentTextProjection } from '../application/documentTextProjection';
+import { createTextSearch } from '../application/searchCaseFolding';
 import { isLiveInputDerivedWorkRefresh, mapLiveInputDerivedDecorations, shouldDeferLiveInputDerivedWork } from './liveInputDerivedWork';
 
 export type SearchOptions = {
@@ -159,21 +160,10 @@ function findSearchMatchRanges(text: string, query: string, options: SearchOptio
     return [];
   }
 
-  const haystack = options.caseSensitive ? text : text.toLocaleLowerCase();
-  const needle = options.caseSensitive ? query : query.toLocaleLowerCase();
+  const nextMatch = createTextSearch(query, options.caseSensitive)(text);
   const matches: SearchMatchRange[] = [];
-  let offset = 0;
-  while (offset <= text.length) {
-    const index = haystack.indexOf(needle, offset);
-    if (index < 0) {
-      break;
-    }
-
-    const end = index + query.length;
-    if (!options.wholeWord || isWholeWordRange(text, index, end)) {
-      matches.push({ start: index, end });
-    }
-    offset = end;
+  for (let match = nextMatch(); match; match = nextMatch()) {
+    if (!options.wholeWord || isWholeWordRange(text, match.start, match.end)) matches.push(match);
   }
   return matches;
 }

@@ -65,6 +65,20 @@ for (const prefix of prefixes) for (const reference of references) for (const fo
 }
 assert.ok(reused > 0 && fallback > 0, 'the corpus must exercise both proven reuse and conservative fallback');
 
+// A definition directly under its paragraph keeps the blank line that followed
+// it. That line shifts every later code line, so a shared index must match too.
+for (const above of ['Text before[^n].', '- Item before[^n].', '> Quote before[^n].', '| A[^n] |\n| - |', '```js\ncode\n```'])
+for (const definition of ['[^n]: Note.', '[^n]: Note.\n    Continued.', '[^n]: Note.\n[^other]: Other.', '[^n]: Note.\n\n[^other]: Other.'])
+for (const below of ['\nAfter.\n\n```js\nconst literal = "[^n]";\n```', '\n```js\ncode\n```\n\nAfter[^n].', '\n> Quote\n\n    indented', '\n---\n\n    indented'])
+for (const sourcePositions of [false, true]) {
+  const result = prepare(`${above}\n${definition}\n${below}`, sourcePositions);
+  const lines = result.body.markdown.split('\n');
+  const label = JSON.stringify({ above, definition, below, sourcePositions });
+  assert.equal(result.body.sourceLines.length, lines.length, `every body line keeps a source line: ${label}`);
+  assert.ok(lines[lines.lastIndexOf(below.split('\n')[1]!) - 1] === '', `the blank line above the next block survives: ${label}`);
+  if (result.bodyCodeLines) assert.deepEqual([...result.bodyCodeLines], [...collectMarkdownCodeLines(result.body.markdown)], label);
+}
+
 // Removing a complete paragraph between indented blocks can merge their blank
 // lines into code. Root alignment alone is insufficient proof of safe reuse.
 const joiningCode = '    first\n\nParagraph.\n\n    second';

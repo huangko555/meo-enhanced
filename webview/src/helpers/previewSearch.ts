@@ -1,4 +1,5 @@
 import type { SearchMatchAnchor } from '../application/searchMatchAnchor';
+import { createTextSearch, type TextSearchCursor } from '../application/searchCaseFolding';
 import { revealPreviewDocumentElement } from './previewDocumentReveal';
 
 type SearchOptions = { wholeWord?: boolean; caseSensitive?: boolean };
@@ -187,7 +188,7 @@ export function createPreviewSearchController({
     }
     observeGeometry(doc);
     const revision = generation;
-    const comparableQuery = options.caseSensitive ? query : query.toLocaleLowerCase();
+    const search = createTextSearch(query, options.caseSensitive);
     const nodes: Text[] = [];
     const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: node => node.parentElement && !node.parentElement.closest('script, style, noscript, svg')
@@ -198,7 +199,7 @@ export function createPreviewSearchController({
     const occurrences = new Map<number, number>();
     const lineOffsets = new Map<HTMLElement, number>();
     let pendingNode: {
-      node: Text; raw: string; comparable: string; offset: number; cursor: number;
+      node: Text; raw: string; nextMatch: TextSearchCursor; cursor: number;
       line: number; fixedLine: boolean; fragment: DocumentFragment; changed: boolean;
     } | null = null;
     const publishNode = () => {
@@ -246,22 +247,21 @@ export function createPreviewSearchController({
           const prefixLines = mapped?.tagName === 'TR' ? 0 : mapped ? lineOffsets.get(mapped) ?? 0 : 0;
           if (mapped) lineOffsets.set(mapped, prefixLines + (raw.match(/\n/g)?.length ?? 0));
           pendingNode = {
-            node, raw, comparable: options.caseSensitive ? raw : raw.toLocaleLowerCase(),
-            offset: 0, cursor: 0, fragment: doc.createDocumentFragment(), changed: false,
+            node, raw, nextMatch: search(raw),
+            cursor: 0, fragment: doc.createDocumentFragment(), changed: false,
             fixedLine: mapped?.tagName === 'TR',
             line: Number(mapped?.dataset.sourceLine ?? 1) + prefixLines
               + (mapped?.tagName === 'PRE' && !mapped.classList.contains('meo-export-frontmatter-source') ? 1 : 0)
           };
         }
         const node = pendingNode;
-        const start = node.comparable.indexOf(comparableQuery, node.offset);
-        if (start < 0) {
+        const match = node.nextMatch();
+        if (!match) {
           publishNode();
           pendingNode = null;
           continue;
         }
-        const end = start + comparableQuery.length;
-        node.offset = Math.max(end, start + 1);
+        const { start, end } = match;
         if (options.wholeWord && (/[\p{L}\p{N}_]/u.test(node.raw[start - 1] ?? '')
           || /[\p{L}\p{N}_]/u.test(node.raw[end] ?? ''))) continue;
         const before = node.raw.slice(node.cursor, start);

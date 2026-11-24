@@ -46,6 +46,21 @@ assert.ok(
   'skipped heading levels must still retain a nested hierarchy'
 );
 
+for (const [headings, ids] of [
+  [['Notes', 'Notes', 'Notes 2'], ['notes', 'notes-2', 'notes-2-2']],
+  [['Notes 2', 'Notes', 'Notes', 'Notes'], ['notes-2', 'notes', 'notes-3', 'notes-4']],
+  [['Notes', 'Notes', 'Notes 3'], ['notes', 'notes-2', 'notes-3']],
+  [['A', 'A', 'A 2', 'A 2', 'A'], ['a', 'a-2', 'a-2-2', 'a-2-3', 'a-3']]
+] as const) for (const target of ['html', 'pdf', 'docx'] as const) for (const windowedPresentation of [false, true]) {
+  const rendered = renderMarkdownToHtml({
+    markdownText: headings.map(heading => `# ${heading}`).join('\n\n'), markdownFilePath: 'C:/tmp/repeated-headings.md',
+    target, includeTableOfContents: true, windowedPresentation
+  }).html;
+  assert.deepEqual([...rendered.matchAll(/<h1\b[^>]*\bid="([^"]*)"/g)].map(match => match[1]), ids, `${target}: every heading has its own id`);
+  assert.deepEqual([...rendered.matchAll(/<a class="meo-export-toc-link" href="#([^"]*)">([^<]*)</g)].map(match => [match[2], match[1]]),
+    headings.map((heading, index) => [heading, ids[index]]), `${target}: every contents entry targets its own heading`);
+}
+
 const localized = renderMarkdownToHtml({
   markdownText: '---\n状态: 草稿\n---\n# 标题',
   markdownFilePath: 'C:/tmp/zh-contents.md',

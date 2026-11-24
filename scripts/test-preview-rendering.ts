@@ -12,6 +12,32 @@ import { prepareMarkdownWithFootnotes } from '../src/export/footnotes';
 import MarkdownIt from 'markdown-it';
 import { readFileSync } from 'node:fs';
 import { assessLargeDocument } from '../src/foundation/largeDocument';
+import { EditorState } from '@codemirror/state';
+import { markdown } from '@codemirror/lang-markdown';
+import { syntaxTree } from '@codemirror/language';
+import { detectAlertInBlockquote } from '../webview/src/helpers/alerts';
+
+for (const [text, expected] of [
+  ['> [!NOTE](https://example.test)', 0],
+  ['> [!NOTE][ref]\n\n[ref]: https://example.test', 0],
+  ['> [!NOTE]\n\n[!NOTE]: https://example.test', 0],
+  ['> # [!NOTE]', 0],
+  ['> ordinary text\n> [!NOTE]', 0],
+  ['> > [!NOTE]\n> > body', 1],
+  ['> [!note] body', 1],
+  ['>\n> [!NOTE]', 1]
+] as const) {
+  const state = EditorState.create({ doc: text, extensions: markdown() });
+  let live = 0;
+  syntaxTree(state).iterate({
+    enter(node) {
+      if (node.name === 'Blockquote' && detectAlertInBlockquote(state, node)) live++;
+    }
+  });
+  const html = renderMarkdownToHtml({ markdownText: text, markdownFilePath: '/fixture/alerts.md', target: 'html' }).html;
+  assert.equal(live, expected, 'Live alert ownership: ' + text);
+  assert.equal((html.match(/class="meo-export-alert-header"/g) ?? []).length, expected, 'Preview alert ownership: ' + text);
+}
 
 for (const preset of ['default', 'github-readme'] as const) {
   for (const [markdownText, start, end] of [
@@ -106,6 +132,67 @@ for (const preset of ['default', 'github-readme'] as const) {
   } finally { parsed.dispose(); }
 }
 
+for (const preset of ['default', 'github-readme'] as const) for (const sourceFootnotes of [false, true]) {
+  const label = `${preset}/${sourceFootnotes ? 'side' : 'full'}`;
+  const render = (markdownText: string) => {
+    const options = { markdownText, markdownFilePath: '/fixture/code-span-notes.md', target: 'html' as const, preset, sourceFootnotes };
+    const complete = renderMarkdownToHtml(options).html;
+    assert.equal(prepareMarkdownPresentation({ ...options, windowedPresentation: true }).renderAll().html, complete,
+      `${label}: lazy rendering agrees on code spans`);
+    return complete;
+  };
+  const referenceCount = (html: string) => html.split('class="footnote-ref"').length - 1;
+  for (const [codeSpan, code] of [['`\\`', '\\'], ['`C:\\`', 'C:\\'], ['``a`\\``', 'a`\\']] as const) {
+    const after = render(`Use ${codeSpan} first[^n].\n\n[^n]: Escape note.`);
+    assert.ok(after.includes(`<code>${code}</code>`), `${label}: ${codeSpan} keeps its backslash`);
+    assert.equal(referenceCount(after), 1, `${label}: a reference after ${codeSpan} is linked`);
+    assert.ok(after.includes('Escape note.'), `${label}: the note referenced after ${codeSpan} is listed`);
+    const inside = render(`Use ${codeSpan} and \`[^n]\` then[^n].\n\n[^n]: Escape note.`);
+    assert.ok(inside.includes('<code>[^n]</code>'), `${label}: a later code span keeps its literal reference`);
+    assert.equal(referenceCount(inside), 1, `${label}: only the reference outside code is linked`);
+  }
+  const escaped = render('Literal \\`[^n] and \\[^n]\n\n[^n]: Escape note.');
+  assert.equal(referenceCount(escaped), 1, `${label}: escapes outside code spans keep their meaning`);
+  const nested = render('Text[^n].\n\n[^n]: Note `\\` then[^other].\n\n[^other]: Nested note.');
+  assert.equal(referenceCount(nested), 2, `${label}: a definition scans its own code spans`);
+  assert.ok(nested.includes('Nested note.'));
+}
+
+for (const preset of ['default', 'github-readme'] as const) {
+  const render = (markdownText: string, sourceFootnotes = false, target: 'html' | 'pdf' | 'docx' = 'html') => {
+    const options = { markdownText, markdownFilePath: '/fixture/adjacent-notes.md', target, preset, sourceFootnotes };
+    const complete = renderMarkdownToHtml(options).html;
+    assert.equal(prepareMarkdownPresentation({ ...options, windowedPresentation: true }).renderAll().html, complete,
+      `${preset}: lazy rendering agrees on definition boundaries`);
+    return parseDocument(complete);
+  };
+  const outline = (document: ReturnType<typeof parseDocument>) => DomUtils.findAll(element => /^(?:p|h[1-6]|hr|li|blockquote)$/.test(element.name), document.children)
+    .filter(element => {
+      for (let parent = element.parent; parent; parent = parent.parent) {
+        if ('attribs' in parent && (parent.attribs.class ?? '').includes('footnotes')) return false;
+      }
+      return true;
+    })
+    .map(element => `${element.name}:${DomUtils.textContent(element).replace(/\[?\d\]?/g, '').replace(/\s+/g, ' ').trim()}:${element.attribs['data-source-line']}`);
+  const first = 'p:First.:1';
+  for (const [lines, expected] of [
+    [['First[^1].', '[^1]: Note.', '', 'Second.'], [first, 'p:Second.:4']],
+    [['First[^1].', '[^1]: Note.', '    Continued.', '', '', 'Second.'], [first, 'p:Second.:6']],
+    [['First[^1].', '[^1]: Note.', '', '    Paragraph.', 'Second.'], [first, 'p:Second.:5']],
+    [['First[^1][^2].', '[^1]: Note.', '[^2]: Other.', '', 'Second.'], [first, 'p:Second.:5']],
+    [['First[^1][^2].', '[^1]: Note.', '', '[^2]: Other.', 'Second.'], [first, 'p:Second.:5']],
+    [['First[^1].', '[^1]: Note.', '', '---', '', 'Second.'], [first, 'hr::4', 'p:Second.:6']],
+    [['- First[^1].', '[^1]: Note.', '', 'Second.'], ['li:First.:1', 'p:Second.:4']],
+    [['> First[^1].', '[^1]: Note.', '', 'Second.'], ['blockquote:First.:1', first, 'p:Second.:4']]
+  ] as const) {
+    const text = lines.join('\n');
+    for (const target of ['html', 'pdf', 'docx'] as const) for (const newline of ['\n', '\r\n']) {
+      assert.deepEqual(outline(render(lines.join(newline), false, target)), expected, `${preset}/${target}: ${JSON.stringify(text)}`);
+    }
+    assert.deepEqual(outline(render(text, true)), expected, `${preset}/side: ${JSON.stringify(text)}`);
+  }
+}
+
 {
   const text = 'Reference[^middle] and[^end].\n\nBefore.\n\n[^middle]: Moved note.\n    Continued note.\n\nAfter.\n\n[^end]: Natural tail note.\n';
   const parsed = createPreviewDocument('footnote-reading-flow', { markdownText: text, sourceDocumentPath: '/fixture/notes.md', uiLanguage: 'en' });
@@ -144,6 +231,26 @@ for (const preset of ['default', 'github-readme'] as const) {
   } finally { prototype.parse = parse; }
 }
 
+for (const options of [{}, { windowedPresentation: true, sourceFootnotes: true }]) {
+  const quotes = (markdownText: string) => DomUtils.getElementsByTagName('blockquote', parseDocument(prepareMarkdownPresentation({
+    markdownText, markdownFilePath: '/fixture/alerts.md', target: 'html', ...options
+  }).renderAll().html).children).map(node => [
+    /\bmeo-export-alert-note\b/.test(node.attribs.class ?? ''),
+    DomUtils.findAll(child => child.attribs.class === 'meo-export-alert-header', node.children).length,
+    DomUtils.textContent(node).replace(/\s+/g, '')
+  ]);
+  for (const markdownText of ['> [!NOTE]\n> Body', '> [!NOTE] Body', '> [!NOTE]Body', '>\n> [!NOTE]\n> Body', '> [!note]\n>\n> Body', '1. > [!NOTE] Body']) {
+    assert.deepEqual(quotes(markdownText), [[true, 1, 'NOTEBody']], markdownText);
+  }
+  assert.deepEqual(quotes('> > [!NOTE]\n> > Body'), [[false, 1, 'NOTEBody'], [true, 1, 'NOTEBody']],
+    'a directive belongs to the blockquote that directly contains it');
+  for (const [markdownText, text] of [
+    ['> [!NOTE](https://example.com)', '!NOTE'], ['> [!NOTE][ref]\n\n[ref]: https://example.com', '!NOTE'],
+    ['> # [!NOTE]\n> Body', '[!NOTE]Body'], ['> - [!NOTE]\n> - Body', '[!NOTE]Body'],
+    ['> ---\n> [!NOTE]', '[!NOTE]'], ['> Body\n> [!NOTE]', 'Body[!NOTE]']
+  ]) assert.deepEqual(quotes(markdownText!), [[false, 0, text]], markdownText);
+}
+
 const compatibility = JSON.parse(readFileSync('scripts/fixtures/github-readme/compatibility.json', 'utf8'));
 for (const preset of ['default', 'github-readme'] as const) for (const probe of compatibility.probes) {
   if (probe.pending) continue;
@@ -164,6 +271,58 @@ for (const preset of ['default', 'github-readme'] as const) {
   assert.equal(first, prepareMarkdownPresentation(options).renderBlock(0).html,
     'an earlier reading block retains the existing HTML-anchor presentation');
   assert.equal(deferred.renderAll().html, complete);
+}
+
+for (const preset of ['default', 'github-readme'] as const) {
+  const render = (markdownText: string) => parseDocument(renderMarkdownToHtml({
+    markdownText, markdownFilePath: '/fixture/attribute-angle-brackets.md', target: 'html', preset
+  }).html).children;
+  for (const [tag, markdownText] of [
+    ['a', '<a href="https://example.com" title="a > b">Content</a> after'],
+    ['a', "<a href='https://example.com' title='a > b'>Content</a> after"],
+    ['a', '<a href="https://example.com?q=1>0">Content</a> after'],
+    ['span', '<span title="</b>">**Content**</span> after'],
+    ['kbd', '<kbd title="a > b">Content</kbd> after'],
+    ['div', '<div title="a > b">Content</div>'],
+    ['div', '<div title="a > b">\n\n**Content**\n\n</div>\n\nafter'],
+    ['p', '<div><p title="a > b" lang="en">Content</p>after</div>']
+  ] as const) {
+    const element = DomUtils.getElementsByTagName(tag, render(markdownText)).find(node => DomUtils.textContent(node).trim() === 'Content');
+    assert.ok(element, `${preset}: ${markdownText} ends at its own closing tag`);
+  }
+
+  // The same fragment without the quoted bracket is the control: admitting the
+  // bracket must not admit an attribute, URL or element that was blocked before.
+  for (const fragment of [
+    '<a title="a QUOTED b" href="https://example.com" onclick="alert(1)">Content</a>',
+    '<a onclick="if (a QUOTED b) alert(1)" href="https://example.com">Content</a>',
+    "<a onmouseover='a QUOTED b' title='QUOTED' href='https://example.com'>Content</a>",
+    '<a title="a QUOTED b" href="javascript:alert(1)">Content</a>',
+    '<a href="javascript:alert(1 QUOTED 0)">Content</a>',
+    '<a title="QUOTED" href="java&#10;script:alert(1)">Content</a>',
+    '<a title="QUOTED" href="vbscript:msgbox(1)">Content</a>',
+    '<a title="QUOTED<img src=x onerror=alert(1)QUOTED">Content</a>',
+    '<a title="QUOTED</a><img src=x onerror=alert(1)>">Content</a>',
+    '<div title="a QUOTED b" onclick="alert(1)">Content</div>',
+    '<div data-x="QUOTED" style="background:url(javascript:alert(1))">Content</div>',
+    '<form title="QUOTED" action="javascript:alert(1)" onsubmit="alert(1)"><button formaction="javascript:alert(1)">Content</button></form>',
+    '<svg aria-label="QUOTED" onload="alert(1)"><a href="javascript:alert(1)" title="QUOTED">Content</a></svg>',
+    '<img src="x.png" alt="QUOTED" onerror="alert(1)">Content',
+    '<script data-x="QUOTED">alert(1)</script>Content'
+  ]) for (const markdownText of [fragment, `Inline ${fragment} tail.`, `<div title="QUOTED">\n\n${fragment}\n\n</div>`]) {
+    const elements = (quoted: string) => DomUtils.findAll(() => true, render(markdownText.replaceAll('QUOTED', quoted)));
+    const names = (quoted: string) => elements(quoted).map(node => [node.name, Object.keys(node.attribs)]);
+    assert.deepEqual(names('>'), names('gt'), `${preset}: ${markdownText} keeps the control's elements and attributes`);
+    for (const node of elements('>')) {
+      assert.notEqual(node.name, 'script', `${preset}: ${markdownText}`);
+      for (const [name, value] of Object.entries(node.attribs)) {
+        assert.doesNotMatch(name, /^(?:on|action$|formaction$)/i, `${preset}: ${markdownText}`);
+        if (['href', 'src', 'style', 'xlink:href'].includes(name)) {
+          assert.doesNotMatch(value.replace(/[\u0000- ]/g, ''), /(?:javascript|vbscript):/i, `${preset}: ${markdownText}`);
+        }
+      }
+    }
+  }
 }
 
 {

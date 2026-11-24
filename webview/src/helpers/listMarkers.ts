@@ -4,7 +4,7 @@ import type { ChangeDesc } from '@codemirror/state';
 import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
 import { sourcePresentationSelection } from '../editor/livePointerSelection';
 import { isolateHistory } from '@codemirror/commands';
-import { syntaxTree } from '@codemirror/language';
+import { language, syntaxTree } from '@codemirror/language';
 import type { SyntaxNode, Tree } from '@lezer/common';
 import { listHistoryFocusEffect } from '../adapters/codeMirrorListHistoryFocus';
 import {
@@ -24,6 +24,8 @@ import { Decoration, WidgetType, EditorView, type DecorationSet } from '@codemir
 import { getUiStrings } from '../application/uiLanguage';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { parseFrontmatter, isInsideFrontmatterContent } from './frontmatter';
+import { resolvedSyntaxTreeAt } from './markdownSyntax';
+import { isBackgroundMarkdownPreparationPending } from '../editor/backgroundMarkdownStructure';
 
 interface ListMarkerData extends MarkdownListPrefix {
   indentLevel: number;
@@ -69,6 +71,7 @@ const FOUR_SPACE_INDENT = '    ';
 const TAB_INDENT = '\t';
 const TWO_SPACE_INDENT_COLUMNS = 2;
 const FOUR_SPACE_INDENT_COLUMNS = 4;
+const LIST_CODE_PARSE_LIMIT = 32_768;
 const orderedListNormalizationIntent = Annotation.define<{
   resetNestedStartsAtLines: readonly number[];
 }>();
@@ -763,6 +766,18 @@ export function handleEnterInList({ state, dispatch }: Parameters<StateCommand>[
   return true;
 }
 
+/** The end of an open fence or indented block still belongs to its code. */
+function isInCodeBlock(tree: Tree, position: number): boolean {
+  for (const side of [1, -1] as const) {
+    for (let node: SyntaxNode | null = tree.resolveInner(position, side); node; node = node.parent) {
+      if (node.name !== 'FencedCode' && node.name !== 'CodeBlock') continue;
+      const last = node.lastChild;
+      return position < node.to || last?.name !== 'CodeMark' || last.from === node.from;
+    }
+  }
+  return false;
+}
+
 export const handleBackspaceAtListContentStart: StateCommand = ({ state, dispatch }) => {
   const selection = state.selection.main;
   if (!selection.empty) {
@@ -790,6 +805,9 @@ export const handleBackspaceAtListContentStart: StateCommand = ({ state, dispatc
   if (!isAtContentStart && !isAtEmptyItemMarkerEnd) {
     return false;
   }
+
+  if (isBackgroundMarkdownPreparationPending(state)
+    || isInCodeBlock(resolvedSyntaxTreeAt(state, line.to), line.from + marker.fromOffset)) return false;
 
   const deletingEmptyLine = !content.trim();
   const nextLine = line.number < state.doc.lines ? state.doc.line(line.number + 1) : null;
@@ -1010,7 +1028,54 @@ function collectOrderedListRenumberChangesForTransaction(
     changes.push(...collectOrderedListRenumberChangesInLines(lines, resetNestedStartsAtLines));
   }
 
-  return changes;
+  return changes.length ? excludeCodeBlockChanges(transaction, changes) : changes;
+}
+
+/** Check the changed lines and the following line, which can enter or leave
+ * a code block when its preceding line is edited. */
+function touchesPossibleCode(doc: Text, from: number, to: number): boolean {
+  const first = doc.lineAt(from);
+  const next = doc.line(Math.min(doc.lines, doc.lineAt(to).number + 1));
+  return next.to - first.from > LIST_CODE_PARSE_LIMIT
+    || /`{3}|~{3}|(?:^|\n)(?:[ \t]*>)*[ \t]?(?: {4}| {0,3}\t)/.test(doc.sliceString(first.from, next.to));
+}
+
+function editsExistingListBody(transaction: Transaction, oldFrom: number, oldTo: number, from: number, to: number): boolean {
+  const line = transaction.startState.doc.lineAt(oldFrom);
+  if (oldTo > line.to || to > transaction.newDoc.lineAt(from).to) return false;
+  const offset = oldFrom - line.from;
+  if (offset > LIST_CODE_PARSE_LIMIT) return false;
+  const beforeEdit = line.text.slice(0, offset);
+  const prefix = readMarkdownContainerPrefixes(beforeEdit).at(-1);
+  if (prefix?.kind !== 'list') return false;
+  const firstBodyCharacter = beforeEdit[prefix.to];
+  // Text before this edit already rules out introducing a fence or HTML opener.
+  return !!firstBodyCharacter && !'<~`'.includes(firstBodyCharacter);
+}
+
+/** Existing code ownership can be reused for ordinary typing. When a fence or
+ * indented block might change, confirm ownership in the edited revision. */
+function excludeCodeBlockChanges(transaction: Transaction, changes: readonly ListTextChange[]): ListTextChange[] {
+  const { startState, newDoc } = transaction;
+  const parser = startState.facet(language)?.parser;
+  if (!parser) return [...changes];
+  // Missing syntax does not prove a list. A later edit in the run renumbers it.
+  if (isBackgroundMarkdownPreparationPending(startState)) return [];
+  let mayChangeCode = false;
+  transaction.changes.iterChangedRanges((oldFrom, oldTo, from, to) => {
+    if (mayChangeCode || editsExistingListBody(transaction, oldFrom, oldTo, from, to)) return;
+    mayChangeCode = touchesPossibleCode(startState.doc, oldFrom, oldTo) || touchesPossibleCode(newDoc, from, to);
+  });
+  if (mayChangeCode) {
+    // Keep this synchronous parse bounded. Ambiguous large edits preserve the
+    // source digits until an edit has an accepted tree to consult.
+    if (newDoc.length > LIST_CODE_PARSE_LIMIT) return [];
+    const tree = parser.parse(newDoc.toString());
+    return changes.filter(({ from }) => !isInCodeBlock(tree, from));
+  }
+  const toOld = transaction.changes.invertedDesc;
+  const tree = resolvedSyntaxTreeAt(startState, toOld.mapPos(changes.at(-1)!.from, 1));
+  return changes.filter(({ from }) => !isInCodeBlock(tree, toOld.mapPos(from, 1)));
 }
 
 /**

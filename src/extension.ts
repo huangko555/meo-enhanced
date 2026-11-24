@@ -14,7 +14,7 @@ import { createImageDimensionCatalog } from './host/imageDimensions';
 import { disposeWikiResources, resolveDocumentWikiResources } from './host/wikiResources';
 import type { ResolvedWikiResources } from './foundation/wikiReference';
 import { shouldPreloadMermaid, webviewPreloadModules } from './extension/webviewResourceHints';
-import { createGitApiWatcher } from './git/gitApiWatch';
+import { createGitApiWatcher, refreshRepositorySessions } from './git/gitApiWatch';
 import {
   AGENT_REVIEW_FILE_OVERRIDE_CLEANUP_DELAY_MS,
   AGENT_REVIEW_POST_REOPEN_DEDUP_DELAY_MS,
@@ -492,12 +492,7 @@ class MarkdownWebviewProvider implements vscode.CustomTextEditorProvider {
 
   async initializeGitWatcher(): Promise<void> {
     const watcher = await createGitApiWatcher((repoRootFsPath) => {
-      for (const session of this.panelSessions.values()) {
-        if (session.getGitRepoRoot() !== repoRootFsPath) {
-          continue;
-        }
-        session.refreshGitBaseline({ forceReload: true });
-      }
+      refreshRepositorySessions(this.panelSessions.values(), repoRootFsPath);
     });
     if (watcher) {
       this.context.subscriptions.push(watcher);

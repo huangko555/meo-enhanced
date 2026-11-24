@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import { mock } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { URI } from 'vscode-uri';
 import {
   createGitBaselineRefreshCoordinator,
   type GitBaselineRefreshOptions,
   type GitBaselineRefreshTimer
 } from '../src/application/gitBaselineRefreshCoordinator';
+import { GitDocumentState } from '../src/git/documentState';
 
 const drain = async (): Promise<void> => {
   for (let index = 0; index < 8; index += 1) await Promise.resolve();
@@ -161,7 +165,7 @@ mock.module('vscode', () => ({
   extensions: { getExtension: () => gitExtension },
   Disposable: class { constructor(private readonly release: () => void) {} dispose() { this.release(); } }
 }));
-const { createGitApiWatcher } = await import('../src/git/gitApiWatch');
+const { createGitApiWatcher, refreshRepositorySessions } = await import('../src/git/gitApiWatch');
 assert.equal(await createGitApiWatcher(() => {}), null);
 gitExtension = { isActive: false, activate: async () => { throw new Error('Git unavailable'); } };
 assert.equal(await createGitApiWatcher(() => {}), null);
@@ -186,3 +190,50 @@ assert.deepEqual(gitChanges, ['C:/git-watcher-fixture']);
 gitWatcher.dispose();
 assert.equal(gitRepositoryDisposed, 1);
 console.log('Optional Git API absence, activation failure, missing model, recovery and watcher disposal passed');
+
+for (const [platform, sessionRepoRoot, changedRepoRoot, refreshes] of [
+  ['win32', 'C:/Work/Repo', 'c:\\Work\\Repo', true],
+  ['win32', 'C:/Work/Repo', 'c:\\work\\repo', true],
+  ['win32', 'C:/', 'c:\\', true],
+  ['win32', '//server/share/repo', '\\\\server\\share\\repo', true],
+  ['win32', 'C:/Work/Repo', 'd:\\Work\\Repo', false],
+  ['win32', 'C:/Work/Repo', 'c:\\Work\\Repo\\nested', false],
+  ['win32', null, 'c:\\Work\\Repo', false],
+  ['linux', '/work/repo', '/work/repo', true],
+  ['linux', '/work/repo', '/work/Repo', false],
+  ['linux', '/work/a\\b', '/work/a/b', false],
+  ['darwin', '/work/repo', '/work/Repo', false]
+] as const) {
+  const refreshed: GitBaselineRefreshOptions[] = [];
+  refreshRepositorySessions([{
+    getGitRepoRoot: () => sessionRepoRoot,
+    refreshGitBaseline: (options) => { refreshed.push(options); }
+  }], changedRepoRoot, platform);
+  assert.deepEqual(refreshed, refreshes ? [{ forceReload: true }] : [],
+    `${platform}: panel in ${sessionRepoRoot} after a change in ${changedRepoRoot}`);
+}
+
+const repository = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'meo-git-refresh-')));
+try {
+  execFileSync('git', ['init', '--quiet'], { cwd: repository, stdio: 'ignore' });
+  const gitState = new GitDocumentState(path.join(repository, 'note.md'), repository);
+  await gitState.resolveBaseline();
+  assert.ok(gitState.getRepoRoot(), 'the fixture document must belong to the repository');
+  let notifyRepositoryChanged: (() => void) | undefined;
+  gitExtension = { isActive: true, exports: { getAPI: () => ({ repositories: [{
+    rootUri: URI.file(repository),
+    state: { onDidChange(listener: () => void) { notifyRepositoryChanged = listener; return { dispose() {} }; } }
+  }] }) } };
+  const refreshed: GitBaselineRefreshOptions[] = [];
+  const watcher = await createGitApiWatcher(root => refreshRepositorySessions([{
+    getGitRepoRoot: () => gitState.getRepoRoot(),
+    refreshGitBaseline: (options) => { refreshed.push(options); }
+  }], root));
+  notifyRepositoryChanged!();
+  watcher!.dispose();
+  assert.deepEqual(refreshed, [{ forceReload: true }],
+    'a repository change must refresh the open panel whose root came from Git itself');
+} finally {
+  fs.rmSync(repository, { recursive: true, force: true });
+}
+console.log('Git repository changes refresh only the panels in that repository');

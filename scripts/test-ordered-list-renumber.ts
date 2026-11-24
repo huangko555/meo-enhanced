@@ -1,4 +1,6 @@
 import { EditorState } from '@codemirror/state';
+import { markdown } from '@codemirror/lang-markdown';
+import { ensureSyntaxTree } from '@codemirror/language';
 import assert from 'node:assert/strict';
 import { orderedListRenumberTransactionFilter, listMarkerData, continuedListMarker } from '../webview/src/helpers/listMarkers';
 import { hasMarkdownListPrefix, readMarkdownListPrefix } from '../src/foundation/markdownListPrefix';
@@ -54,6 +56,47 @@ const expected = '1. First!\n2. Second\n3. Third\n  4. Nested first\n  5. Nested
 
 if (renumbered !== expected) {
   throw new Error(`Nested ordered lists must preserve an explicit start. Received:\n${renumbered}`);
+}
+
+// `|` marks the edited position.
+for (const [source, insert, expected] of [
+  ['```text\n10. A|\n20. B\n30. C\n```', '!', '```text\n10. A!\n20. B\n30. C\n```'],
+  ['```text\n10. A\n20. B|\n```', '\n7. C', '```text\n10. A\n20. B\n7. C\n```'],
+  ['```|\n10. A\n20. B\n```', 'text', '```text\n10. A\n20. B\n```'],
+  ['```text\n10. A\n20. B\n```|', '\n', '```text\n10. A\n20. B\n```\n'],
+  ['~~~\n10. A|\n20. B\n~~~', '!', '~~~\n10. A!\n20. B\n~~~'],
+  ['```\n10. A|\n20. B', '!', '```\n10. A!\n20. B'],
+  ['```\n10. A|', '\n20. B', '```\n10. A\n20. B'],
+  ['p\n\n    10. A|\n    20. B\n', '!', 'p\n\n    10. A!\n    20. B\n'],
+  ['- ```\n  10. A|\n  20. B\n  ```', '!', '- ```\n  10. A!\n  20. B\n  ```'],
+  ['1. a\n   ```\n   10. A|\n   20. B\n   ```\n2. b', '!', '1. a\n   ```\n   10. A!\n   20. B\n   ```\n2. b'],
+  ['|', '```text\n10. A\n20. B\n```\n1. a\n1. b', '```text\n10. A\n20. B\n```\n1. a\n2. b'],
+  ['|10. A\n20. B\n30. C', '```\n', '```\n10. A\n20. B\n30. C'],
+  ['``|\n10. A\n20. B\n30. C', '`', '```\n10. A\n20. B\n30. C'],
+  ['|', '    10. A\n    20. B\n    30. C', '    10. A\n    20. B\n    30. C'],
+  ['|', '```text\n' + '10. A\n'.repeat(6_000) + '```', '```text\n' + '10. A\n'.repeat(6_000) + '```'],
+  ['1. a|\n1. b\n1. c', '!', '1. a!\n2. b\n3. c'],
+  ['```\n10. A\n20. B\n```\n1. a|\n1. b', '!', '```\n10. A\n20. B\n```\n1. a!\n2. b'],
+  ['1. a\n    5. b|\n    9. c\n9. d', '!', '1. a\n    5. b!\n    6. c\n2. d']
+] as const) {
+  const at = source.indexOf('|');
+  const doc = source.replace('|', '');
+  const before = EditorState.create({ doc, extensions: [markdown(), orderedListRenumberTransactionFilter(() => true)] });
+  ensureSyntaxTree(before, doc.length, 5_000);
+  assert.equal(before.update({ changes: { from: at, insert } }).newDoc.toString(), expected, source);
+}
+
+const largePrefix = 'Ordinary paragraph.\n\n'.repeat(1_800);
+for (const [source, expected] of [
+  ['1. Parent\n    5. First\n    9. Second\n', '1. Parent\n    5. First!\n    6. Second\n'],
+  ['    5. First\n    9. Second\n', '    5. First!\n    9. Second\n']
+]) {
+  const doc = largePrefix + source;
+  const before = EditorState.create({ doc, extensions: [markdown(), orderedListRenumberTransactionFilter(() => true)] });
+  assert.ok(ensureSyntaxTree(before, doc.length, 5_000), 'the large document has accepted syntax');
+  const at = doc.indexOf('First') + 'First'.length;
+  assert.equal(before.update({ changes: { from: at, insert: '!' } }).newDoc.sliceString(largePrefix.length),
+    expected, 'typing keeps verified nested lists and indented code distinct in a large document');
 }
 
 console.log('ordered list nesting renumber checks passed');

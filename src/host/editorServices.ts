@@ -1,5 +1,6 @@
 import MarkdownIt from 'markdown-it';
 import { markdownHeadingCandidates } from '../application/markdownHeadingCandidates';
+import { blankMarkdownFrontmatter } from '../foundation/markdownFrontmatter';
 import { candidateTextMatch } from '../foundation/candidateText';
 import * as vscode from 'vscode';
 import * as os from 'node:os';
@@ -32,7 +33,7 @@ async function headingCandidates(target: string, query: string, document: vscode
   if (!open && (await vscode.workspace.fs.stat(uri)).size > 2_000_000) return [];
   const text = open?.getText() ?? Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
   if (Buffer.byteLength(text) > 2_000_000) return [];
-  const tokens = new MarkdownIt({ html: true }).parse(text, {});
+  const tokens = new MarkdownIt({ html: true }).parse(blankMarkdownFrontmatter(text), {});
   const headings = tokens.flatMap((token, index) => {
     if (token.type !== 'heading_open') return [];
     const inline = tokens[index + 1];

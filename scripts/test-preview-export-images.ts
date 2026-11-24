@@ -105,6 +105,23 @@ try {
     }
   }
 
+  const networkImage = '//images.example.test/image.png';
+  for (const target of ['html', 'pdf', 'docx'] as const) for (const [text, expected] of [
+    [`![remote](${networkImage})`, `src="https:${networkImage}"`],
+    [`<img src="${networkImage}" alt="remote">`, `src="https:${networkImage}"`],
+    [`<img srcset="${networkImage} 2x" alt="remote">`, `srcset="https:${networkImage} 2x"`],
+    [`<video poster="${networkImage}"></video>`, `poster="https:${networkImage}"`],
+    [`<p style="background-image:url(${networkImage})">remote</p>`, `https:${networkImage}`],
+    [`<p style="background-image:url(' ${networkImage} ')">remote</p>`, `https:${networkImage}`]
+  ] as const) {
+    const { htmlDocument } = await exportRuntime.renderExportHtmlDocument({
+      ...baseOptions, target, outputFilePath: path.join(tempDir, 'output', `network.${target}`),
+      readingSnapshot: { snapshotId: `network-path-${target}`, text, appearance: 'dark', uiLanguage: 'en', environment: {} }
+    });
+    assert.ok(htmlDocument.includes(expected), `${target} export resolves ${text}`);
+    assert.ok(!htmlDocument.includes('file://images.example.test'), `${target} export writes no file address on another host: ${text}`);
+  }
+
   console.log('Preview and export image checks passed');
 } finally {
   fs.rmSync(tempDir, { recursive: true, force: true });

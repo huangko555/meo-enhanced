@@ -243,6 +243,7 @@ function extractExportFootnotes(source: SourceMappedMarkdown, sourcePositions: b
   }
 
   const bodyLines: string[] = [], bodySourceLines: number[] = [];
+  let removedBlankIndex = -1;
   for (let index = 0; index < lines.length; index++) {
     if (sourcePositions && definitionStarts.has(index)) {
       // A block boundary keeps neighboring prose separate after extracting a
@@ -250,9 +251,17 @@ function extractExportFootnotes(source: SourceMappedMarkdown, sourcePositions: b
       bodyLines.push('', sourceFootnoteMarker, '');
       bodySourceLines.push(...Array<number>(3).fill(source.sourceLines[index] ?? index + 1));
     }
-    if (!consumedLineNumbers.has(index)) {
-      bodyLines.push(lines[index]!); bodySourceLines.push(source.sourceLines[index] ?? index + 1);
+    if (consumedLineNumbers.has(index)) {
+      if (!lines[index]!.trim()) removedBlankIndex = index;
+      continue;
     }
+    // A blank line extracted with a definition still separates the kept lines
+    // around it. withoutLines never reuses code lines across such a cut.
+    if (removedBlankIndex >= 0 && bodyLines.at(-1)?.trim()) {
+      bodyLines.push(''); bodySourceLines.push(source.sourceLines[removedBlankIndex] ?? removedBlankIndex + 1);
+    }
+    removedBlankIndex = -1;
+    bodyLines.push(lines[index]!); bodySourceLines.push(source.sourceLines[index] ?? index + 1);
   }
   return {
     bodyLines,
@@ -280,7 +289,7 @@ function replaceFootnoteReferencesInLine(
   while (index < line.length) {
     const ch = line[index];
 
-    if (ch === '\\' && index + 1 < line.length) {
+    if (!inCodeSpan && ch === '\\' && index + 1 < line.length) {
       out += line.slice(index, index + 2);
       index += 2;
       continue;

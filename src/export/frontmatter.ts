@@ -1,3 +1,4 @@
+import { markdownFrontmatterLineCount } from '../foundation/markdownFrontmatter';
 import { sliceSourceMappedMarkdown, type SourceMappedMarkdown } from './sourceMappedMarkdown';
 import {
   findYamlMappingSeparator,
@@ -35,16 +36,7 @@ type FrontmatterValueKind = 'string' | 'number' | 'literal' | 'link' | 'comment'
 
 export function extractExportFrontmatter(source: SourceMappedMarkdown, propertiesLabel: string): ExtractedExportFrontmatter {
   const lines = String(source.markdown ?? '').split(/\r?\n/);
-  if (lines.length < 2) {
-    return { frontmatterHtml: '', body: source };
-  }
-
-  const firstLine = stripLeadingBom(lines[0] ?? '');
-  if (firstLine.trim() !== '---') {
-    return { frontmatterHtml: '', body: source };
-  }
-
-  const closingLineIndex = findFrontmatterClosingLine(lines);
+  const closingLineIndex = markdownFrontmatterLineCount(lines) - 1;
   if (closingLineIndex < 1) {
     return { frontmatterHtml: '', body: source };
   }
@@ -68,16 +60,6 @@ export function extractExportFrontmatter(source: SourceMappedMarkdown, propertie
     ),
     body: sliceSourceMappedMarkdown(source, closingLineIndex + 1)
   };
-}
-
-function findFrontmatterClosingLine(lines: string[]): number {
-  for (let index = 1; index < lines.length; index += 1) {
-    if ((lines[index] ?? '').trim() === '---') {
-      return index;
-    }
-  }
-
-  return -1;
 }
 
 function renderFrontmatterHtml(contentLines: string[], sourceLine: number, sourceEndLine: number, propertiesLabel: string): string {
@@ -334,10 +316,6 @@ function parseSimpleYamlFlowArrayItems(lineText: string, valueFromOffset: number
   }
 
   return items.length ? items : null;
-}
-
-function stripLeadingBom(text: string): string {
-  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
 function escapeHtml(value: string): string {

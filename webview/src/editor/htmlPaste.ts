@@ -7,6 +7,10 @@ export function safeClipboardUrl(value: string): string | null {
 
 const escapeText = (value: string) => value.replace(/\s+/g, ' ').replaceAll('&', '&amp;').replace(/[\\`*_\[\]]/g, '\\$&').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 const destination = (value: string) => value.trim().replace(/\s/g, '%20').replaceAll('\\', '%5C').replaceAll('(', '%28').replaceAll(')', '%29');
+// Both ends of a pasted code line carry this mark, so prose clean-up leaves its
+// blank lines and trailing spaces alone. The HTML parser drops or replaces
+// U+0000, so clipboard text cannot contain it.
+const literalEdge = '\u0000';
 const ignoredTags = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'META', 'LINK', 'IFRAME', 'OBJECT', 'SVG'];
 function allowedDestination(value: string): boolean {
   value = value.trim();
@@ -51,7 +55,8 @@ export function clipboardHtmlToMarkdown(html: string | Element, tableToMarkdown?
       const value = (node.textContent ?? '').replace(/\r\n?/g, '\n');
       let length = 3; for (const match of value.matchAll(/`+/g)) length = Math.max(length, match[0].length + 1);
       const fence = '`'.repeat(length);
-      return '\n\n' + fence + '\n' + value.replace(/\n$/, '') + '\n' + fence + '\n\n';
+      const code = value.replace(/\n$/, '').split('\n').map(line => literalEdge + line + literalEdge).join('\n');
+      return '\n\n' + fence + '\n' + code + '\n' + fence + '\n\n';
     }
     if (tag === 'CODE') {
       const value = node.textContent ?? '';
@@ -69,8 +74,13 @@ export function clipboardHtmlToMarkdown(html: string | Element, tableToMarkdown?
     }
     const content = children(node);
     const styled = (marker: string) => content.trim() ? content.replace(/^(\s*)([\s\S]*?)(\s*)$/, (_match, before: string, text: string, after: string) => before + marker + text + marker + after) : content;
-    if (['B', 'STRONG'].includes(tag)) return styled('**');
-    if (['I', 'EM'].includes(tag)) return styled('*');
+    // Clipboard wrappers can cancel the tag's own style. Read the parsed
+    // property: Word's mso-bidi-font-weight does not change the weight.
+    if (['B', 'STRONG'].includes(tag)) {
+      const { fontWeight } = (node as HTMLElement).style;
+      return fontWeight === 'normal' || parseInt(fontWeight) <= 400 ? content : styled('**');
+    }
+    if (['I', 'EM'].includes(tag)) return (node as HTMLElement).style.fontStyle === 'normal' ? content : styled('*');
     if (['S', 'STRIKE', 'DEL'].includes(tag)) return styled('~~');
     if (tag === 'MARK') return styled('==');
     if (tag === 'U') return '<u>' + content + '</u>';
@@ -87,14 +97,27 @@ export function clipboardHtmlToMarkdown(html: string | Element, tableToMarkdown?
     if (tag === 'BLOCKQUOTE') return '\n\n' + content.trim().split('\n').map(line => '> ' + line).join('\n') + '\n\n';
     if (tag === 'UL' || tag === 'OL') {
       const start = tag === 'OL' ? Number(node.getAttribute('start') ?? 1) : 1;
-      return '\n\n' + Array.from(node.children).filter(child => child.tagName === 'LI').map((item, index) => {
-        const marker = tag === 'OL' ? `${Number.isFinite(start) ? start + index : index + 1}. ` : '- ';
-        return marker + children(item).trim().split('\n').map((line, lineIndex) => lineIndex ? ' '.repeat(marker.length) + line : line).join('\n');
-      }).join('\n') + '\n\n';
+      const items: { marker: string; content: string }[] = [];
+      let index = 0;
+      for (const child of node.children) {
+        if (child.tagName === 'LI') {
+          items.push({ marker: tag === 'OL' ? `${Number.isFinite(start) ? start + index : index + 1}. ` : '- ', content: children(child) });
+          index++;
+        } else if (child.tagName === 'UL' || child.tagName === 'OL') {
+          // Rich-text editors also place a sub-list after its item instead of
+          // inside it. Without a preceding item it keeps its own markers here.
+          if (!items.length) items.push({ marker: '', content: '' });
+          items[items.length - 1].content += convert(child);
+        }
+      }
+      return '\n\n' + items.map(({ marker, content }) => marker
+        + content.trim().split('\n').map((line, lineIndex) => lineIndex ? ' '.repeat(marker.length) + line : line).join('\n')
+      ).join('\n') + '\n\n';
     }
     if (tag === 'TD' || tag === 'TH') return content.trim() + '\t';
     if (['P', 'DIV', 'SECTION', 'ARTICLE', 'TR', 'TABLE'].includes(tag)) return '\n\n' + content.trim() + '\n\n';
     return content;
   };
-  return children(root).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim() || null;
+  // The second alternative trims a list or quote prefix before an empty code line.
+  return children(root).replace(/[ \t]+(?=\n|\u0000\u0000)/g, '').replace(/\n{3,}/g, '\n\n').trim().replaceAll(literalEdge, '') || null;
 }

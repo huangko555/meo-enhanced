@@ -1,11 +1,12 @@
 import MarkdownIt from 'markdown-it';
 import { markdownHeadingCandidates } from '../../../src/application/markdownHeadingCandidates';
+import { blankMarkdownFrontmatter } from '../../../src/foundation/markdownFrontmatter';
 import type { LinkCandidate } from '../../../src/protocol/editorServices';
 
 /** Parse only on a heading lookup; ATX and Setext headings share Preview's rules. */
 export function currentMarkdownHeadings(text: string) {
   if (text.length > 2_000_000) return [];
-  const tokens = new MarkdownIt({ html: true }).parse(text, {});
+  const tokens = new MarkdownIt({ html: true }).parse(blankMarkdownFrontmatter(text), {});
   const headings = tokens.flatMap((token, index) => {
     if (token.type !== 'heading_open') return [];
     const inline = tokens[index + 1];

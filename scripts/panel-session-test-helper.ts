@@ -62,6 +62,7 @@ export const createPanelSessionVscodeMock = (
   overrides: VscodeMockOverrides = {}
 ): Record<string, unknown> => ({
   ConfigurationTarget: { Global: 1 },
+  EndOfLine: { LF: 1, CRLF: 2 },
   Range: overrides.Range ?? class PanelSessionTestRange {},
   RelativePattern: class PanelSessionTestRelativePattern {},
   TextDocumentSaveReason: { Manual: 1, AfterDelay: 2, FocusOut: 3 },

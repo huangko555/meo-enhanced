@@ -1,7 +1,8 @@
 import { sourceTablePaste, sourceTableAt } from './sourceTableCommands';
-import { EditorSelection, Transaction } from '@codemirror/state';
+import { EditorSelection, Transaction, type EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
+import type { SyntaxNode } from '@lezer/common';
 import type MarkdownIt from 'markdown-it';
 import type { InputAssistance } from '../../../src/foundation/editingPreferences';
 import { getIndentedCodeLinePrefix, indentedCodeBlockAt } from './codeBlockSource';
@@ -15,6 +16,7 @@ import { pasteOptionsMenu } from './pasteOptionsMenu';
 // The editor owner supplies formula context; paste dispatch keeps its own
 // history/input rules without depending on rendered widgets.
 type MathPasteText = (view: EditorView, text: string) => string | null;
+type LinkTarget = (state: EditorState, link: SyntaxNode) => string;
 
 function hasInputSyntax(view: EditorView, position: number, names: RegExp): boolean {
   let node = syntaxTree(view.state).resolveInner(position, -1);
@@ -23,6 +25,45 @@ function hasInputSyntax(view: EditorView, position: number, names: RegExp): bool
     if (!node.parent) return false;
     node = node.parent;
   }
+}
+
+/** Bracketed text without a destination or reference label is ordinary prose. */
+function enclosingLink(view: EditorView, position: number, linkTarget: LinkTarget): SyntaxNode | null {
+  for (let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(position, -1); node; node = node.parent) {
+    if (node.from >= position || position >= node.to) continue;
+    if (node.name === 'Autolink' || node.name === 'LinkReference'
+      || (node.name === 'Link' || node.name === 'Image')
+        && (node.getChild('LinkLabel') || node.getChildren('LinkMark').length > 2
+          || linkTarget(view.state, node))) return node;
+  }
+  return null;
+}
+
+function urlInLink(view: EditorView, link: SyntaxNode, from: number, to: number, url: string): string {
+  if (link.name !== 'Link' && link.name !== 'Image') return url;
+  const state = view.state;
+  const marks = link.getChildren('LinkMark');
+  const labelClose = marks[1];
+  if (labelClose && from > link.from && to <= labelClose.from) return url.replace(/[\\[\]]/g, '\\$&');
+  const opening = marks.find(mark => state.sliceDoc(mark.from, mark.to) === '(');
+  if (!opening) return url;
+  const destination = link.getChild('URL');
+  const start = destination?.from ?? opening.to;
+  const end = destination?.to ?? start;
+  if (from < start || to > end) return url;
+  const target = url.replaceAll('<', '%3C').replaceAll('>', '%3E');
+  if (destination && state.sliceDoc(start, start + 1) === '<') {
+    return from === to ? target : (from === start ? '<' : '') + target + (to === end ? '>' : '');
+  }
+  let balance = 0;
+  for (const character of url) {
+    if (character === '(') balance++;
+    if (character === ')' && --balance < 0) break;
+  }
+  if (balance === 0) return target;
+  // An angle-delimited destination keeps literal parentheses in a whole URL.
+  if (from === start && to === end) return '<' + target + '>';
+  return target.replaceAll('(', '%28').replaceAll(')', '%29');
 }
 
 export function isCodeInput(view: EditorView, position = view.state.selection.main.head): boolean {
@@ -59,7 +100,7 @@ const maxPasteOptionsCharacters = 128 * 1024;
 type PasteDefaults = Pick<InputAssistance, 'convertTables' | 'pasteHtml' | 'pasteUrl'>;
 
 export const pasteAssistance = (
-  mathPasteText: MathPasteText, markdown: MarkdownIt, captureScrollCurrentness: () => () => boolean
+  mathPasteText: MathPasteText, markdown: MarkdownIt, captureScrollCurrentness: () => () => boolean, linkTarget: LinkTarget
 ) => [pasteOptionsMenu, EditorView.domEventHandlers({
   paste(event, view) {
     // Multiple selections use CodeMirror's literal paste distribution.
@@ -116,14 +157,38 @@ export const pasteAssistance = (
       }
     }
 
+    const url = safeClipboardUrl(text);
+    const fromLink = url ? enclosingLink(view, selection.from, linkTarget) : null;
+    const link = fromLink ?? (url && selection.to !== selection.from ? enclosingLink(view, selection.to, linkTarget) : null);
+    // A shortcut reference uses its visible label as its destination key.
+    // Make that destination explicit before replacing any part of the label.
+    if (url && fromLink && (fromLink.name === 'Link' || fromLink.name === 'Image') && !fromLink.getChild('LinkLabel')) {
+      const marks = fromLink.getChildren('LinkMark');
+      const closing = marks.length === 2 ? marks[1] : undefined;
+      if (closing && selection.from >= marks[0]!.to && selection.to <= closing.from) {
+        const label = view.state.sliceDoc(marks[0]!.to, closing.from);
+        const pasted = urlInLink(view, fromLink, selection.from, selection.to, url);
+        const remaining = view.state.sliceDoc(selection.to, fromLink.to);
+        event.preventDefault();
+        view.dispatch({
+          changes: { from: selection.from, to: fromLink.to, insert: pasted + remaining + '[' + label + ']' },
+          selection: EditorSelection.cursor(selection.from + pasted.length),
+          annotations: Transaction.userEvent.of('input.paste'),
+          scrollIntoView: true
+        });
+        return true;
+      }
+    }
     const convertedText = (defaults: PasteDefaults, matrix: ReturnType<typeof readMatrix>): string | null => {
       if (nestedTable || (!defaults.convertTables && (matrix || tables.length))
         || (!meoMatrix && tables.length && !defaults.pasteHtml && !singleTable)) return null;
       let insert: string | null = null;
       let htmlConverted = false;
-      if (defaults.pasteUrl && !selection.empty && safeClipboardUrl(text)) {
+      if (url && link) {
+        insert = urlInLink(view, link, selection.from, selection.to, url);
+      } else if (defaults.pasteUrl && !selection.empty && url) {
         const label = view.state.sliceDoc(selection.from, selection.to).replace(/[\\\[\]]/g, '\\$&');
-        insert = '[' + label + '](' + text.trim().replaceAll('(', '%28').replaceAll(')', '%29') + ')';
+        insert = '[' + label + '](' + url.replaceAll('(', '%28').replaceAll(')', '%29') + ')';
       } else if (defaults.convertTables) {
         if (matrix) insert = markdownTableFromCells(matrix.cells, matrix.source === 'meo');
         else if (html && tables.length && defaults.pasteHtml) {

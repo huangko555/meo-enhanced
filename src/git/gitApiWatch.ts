@@ -1,4 +1,6 @@
+import * as path from 'node:path';
 import * as vscode from 'vscode';
+import type { GitBaselineRefreshOptions } from '../application/gitBaselineRefreshCoordinator';
 
 type GitRepository = {
   rootUri?: vscode.Uri;
@@ -16,6 +18,31 @@ type GitApi = {
 type GitExtensionExports = {
   getAPI?: (version: number) => GitApi | undefined;
 };
+
+type GitRepositorySession = {
+  getGitRepoRoot(): string | null;
+  refreshGitBaseline(options: GitBaselineRefreshOptions): void;
+};
+
+// On Windows Git prints `C:/repo`, while `Uri.fsPath` gives `c:\repo`.
+function isSameRepoRoot(left: string, right: string, platform: NodeJS.Platform): boolean {
+  if (platform !== 'win32') return left === right;
+  return path.win32.normalize(left).toLowerCase() === path.win32.normalize(right).toLowerCase();
+}
+
+export function refreshRepositorySessions(
+  sessions: Iterable<GitRepositorySession>,
+  repoRootFsPath: string,
+  platform: NodeJS.Platform = process.platform
+): void {
+  for (const session of sessions) {
+    const sessionRepoRoot = session.getGitRepoRoot();
+    if (sessionRepoRoot === null || !isSameRepoRoot(sessionRepoRoot, repoRootFsPath, platform)) {
+      continue;
+    }
+    session.refreshGitBaseline({ forceReload: true });
+  }
+}
 
 function normalizeRepoKey(repo: GitRepository): string | null {
   const root = repo.rootUri?.fsPath;

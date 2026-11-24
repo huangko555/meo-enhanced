@@ -377,6 +377,7 @@
       "scripts/test-footnote-code-line-reuse.ts",
       "scripts/test-formatting-preservation.ts",
       "scripts/test-git-baseline-refresh-coordinator.ts",
+      "scripts/test-git-head-baseline.ts",
       "scripts/test-git-diff-line-highlights-setting.ts",
       "scripts/test-github-readme-compatibility.ts",
       "scripts/test-history-rendered-block-interaction.ts",

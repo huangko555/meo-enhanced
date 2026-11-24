@@ -9,7 +9,8 @@ const vscodeWindow: { activeTextEditor: unknown; visibleTextEditors: unknown[] }
   activeTextEditor: undefined,
   visibleTextEditors: []
 };
-mock.module('vscode', () => ({ Position, window: vscodeWindow }));
+const EndOfLine = { LF: 1, CRLF: 2 };
+mock.module('vscode', () => ({ EndOfLine, Position, window: vscodeWindow }));
 
 const { createVscodeViewNavigationAdapter } = await import('../src/host/vscodeViewNavigationAdapter');
 
@@ -94,5 +95,48 @@ assert.deepEqual(
   'invalid line syntax must degrade to a document fragment'
 );
 invalidAdapter.dispose();
+
+const textLines = ['alpha', 'bravo', 'x target y'];
+const createTextDocument = (uri: FakeUri, eol: '\n' | '\r\n') => ({
+  uri,
+  lineCount: textLines.length,
+  eol: eol.length === 2 ? EndOfLine.CRLF : EndOfLine.LF,
+  lineAt: (line: number) => ({ range: { end: { character: textLines[line]!.length } } }),
+  offsetAt: (position: Position) => textLines.slice(0, position.line)
+    .reduce((offset, line) => offset + line.length + eol.length, position.character)
+});
+const revealInTextDocument = async (
+  eol: '\n' | '\r\n',
+  fragment: string,
+  selection?: { start: Position; end: Position }
+): Promise<unknown> => {
+  const textDocument = createTextDocument(createUri('D:/docs/eol.md', fragment), eol);
+  vscodeWindow.activeTextEditor = selection ? { document: textDocument, selection } : undefined;
+  const revealed: unknown[] = [];
+  const textAdapter = createVscodeViewNavigationAdapter({
+    document: textDocument as never,
+    documentUri: textDocument.uri as never,
+    getDocumentFragmentHref: () => null,
+    resolveLocalLinkTarget: async () => null,
+    post: async (message) => { revealed.push(message); return true; }
+  });
+  await textAdapter.ready();
+  textAdapter.dispose();
+  return revealed[0];
+};
+for (const [label, eol] of [['LF', '\n'], ['CRLF', '\r\n']] as const) {
+  assert.deepEqual(
+    await revealInTextDocument(eol, '', { start: new Position(0, 1), end: new Position(2, 8) }),
+    { type: 'revealSelection', anchor: 1, head: 20, focus: undefined, preserveViewport: false },
+    `${label} text-editor selection must use the Webview's LF offsets`
+  );
+  for (const [fragment, offset] of [['L1C3', 2], ['L3C3', 14], ['L3C99', 22]] as const) {
+    assert.deepEqual(
+      await revealInTextDocument(eol, fragment),
+      { type: 'revealSelection', anchor: offset, head: offset, focus: undefined, preserveViewport: false },
+      `${label} #${fragment} must use the Webview's LF offsets`
+    );
+  }
+}
 
 console.log('VS Code view navigation adapter checks passed');
