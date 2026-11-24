@@ -3,6 +3,14 @@
 This changelog retains the release history of the original Markdown Editor
 Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
+## 0.4.6
+- Kept nested ordered lists numbered correctly while editing large documents and preserved numbering inside code blocks. Pasting HTML retains nested lists, code whitespace, and inline text styles.
+- Preserved punctuation in explicit Markdown links and kept pasted URLs literal inside existing links. Corrected case-insensitive search and replace ranges for Unicode text and preserved selections when opening CRLF documents in MEO.
+- Refreshed Git HEAD comparisons after repository changes on Windows, showed files newly staged for addition, and ignored a leading UTF-8 byte order mark when comparing text.
+- Gave duplicate headings distinct anchors, kept frontmatter out of heading suggestions, and limited alert styling to the quote that owns the directive.
+- Preserved footnotes and surrounding block boundaries during export. Kept protocol-relative images and CSS image URLs on the network in Preview and exports.
+- Improved Live HTML interactions and rendering. A plain click on a rendered HTML link opens its source, dragging selects text, and Ctrl/Cmd-click follows the link. Quoted attribute values containing `>` remain intact, and supported empty styled blocks retain their visual appearance.
+
 ## 0.4.5
 - Kept the document and line numbers steady when typing, pasting, or inserting blocks at the end. Split preview follows new content. Live and Source honor the VS Code setting for scrolling beyond the last line. (#40)
 - Improved table editing. New tables place the caret in the first cell, and adding rows at the end keeps the active cell in view. Row height and line numbers remain stable as cells switch between editing and rendered content. Path suggestions resume when the caret returns to an unfinished link in a cell.
