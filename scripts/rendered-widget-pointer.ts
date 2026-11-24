@@ -7,13 +7,15 @@ export async function checkHtmlReadingPointer(page: Page): Promise<void> {
   }, count);
   const tail = '\n\nFiller paragraph for the optimized reading path.'.repeat(7000);
   let cases = 0;
-  for (const large of [false, true]) for (const inline of [false, true]) {
+  for (const large of [false, true]) for (const kind of ['block', 'inline', 'block-link', 'inline-link'] as const) {
+    const inline = kind.startsWith('inline');
+    const opening = kind.endsWith('link') ? '<a href="#after">' : '<span>';
+    const closing = kind.endsWith('link') ? '</a>' : '</span>';
+    const content = `${opening}ALPHA BETA GAMMA DELTA${closing}`;
     for (const action of ['drag', 'control-drag', 'return-drag', 'click', 'cancel', 'enter'] as const) {
-      const fragment = inline
-        ? 'Inline <span>ALPHA BETA GAMMA DELTA</span> tail.'
-        : '<div><p>ALPHA BETA GAMMA DELTA</p></div>';
+      const fragment = inline ? `Inline ${content} tail.` : `<div><p>${content}</p></div>`;
       const text = `Before.\n\n${fragment}\n\nAfter.${large ? tail : ''}`;
-      const label = `${inline ? 'inline' : 'block'}/${large ? 'optimized' : 'ordinary'}/${action}`;
+      const label = `${kind}/${large ? 'optimized' : 'ordinary'}/${action}`;
       await page.evaluate(text => {
         const host = window as any;
         host.__htmlEditor?.destroy();
@@ -58,17 +60,16 @@ export async function checkHtmlReadingPointer(page: Page): Promise<void> {
         root.addEventListener('pointerdown', event => { host.readingPointerId = (event as PointerEvent).pointerId; }, { once: true });
         return [point(0), point(5), point(10), point(16)];
       }, { inline, large });
-      const read = () => page.evaluate(() => {
+      const read = () => page.evaluate(({ inline, opening }) => {
         const host = window as any;
         return { connected: host.readingPointerTarget.isConnected,
           native: window.getSelection()?.toString() ?? '',
           text: host.__htmlEditor.getText(),
           head: host.__htmlEditor.view.state.selection.main.head,
           focus: document.activeElement?.className,
-          source: !!document.querySelector('.meo-md-html-live-result')
-            || Array.from(host.__htmlEditor.view.contentDOM.querySelectorAll('.cm-line'))
-              .some((line: any) => line.textContent.includes('<span>')) };
-      });
+          source: inline ? Array.from(host.__htmlEditor.view.contentDOM.querySelectorAll('.cm-line'))
+            .some((line: any) => line.textContent.includes(opening)) : !!document.querySelector('.meo-md-html-live-result') };
+      }, { inline, opening });
       await page.mouse.move(points[0]!.x, points[0]!.y);
       await page.mouse.down();
       await frames();

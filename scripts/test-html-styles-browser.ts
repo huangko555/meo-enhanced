@@ -36,6 +36,8 @@ ${htmlStyleResourceFixture}
 
 <div id="empty-background" style="padding:8px;background:red;background-color:blue;background:rgba(59,130,246,.2);width:180px"></div>
 
+<div id="empty-background-image" style="width:120px;height:64px;background-image:url(' //example.invalid/empty-background.png ');background-size:contain;background-repeat:no-repeat"></div>
+
 <div id="width-only-border" style="border:3px"></div>
 
 <div id="hidden-border" style="border:3px solid transparent"></div>
@@ -180,6 +182,18 @@ export async function checkHtmlStyleRendering(): Promise<void> {
           assert.equal(resources.color,'rgb(16, 78, 112)'); assert.match(resources.image,/data:image\/png/);
           assert.equal(resources.transform,'matrix(1, 0, 0, 1, 7, 0)'); assert.equal(resources.overflow,'auto');
           assert.equal(resources.before,'"Loaded "'); assert.match(resources.family,/meo-html-font-/); assert.equal(resources.list,'upper-alpha');
+          await page.waitForFunction(live => {
+            const doc = live ? document : document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+            const box = doc?.getElementById('empty-background-image');
+            return box && doc!.defaultView!.getComputedStyle(box).backgroundImage.includes('data:image/png');
+          }, {}, surface === 'live');
+          assert.deepEqual(await page.evaluate(live => {
+            const doc = live ? document : document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
+            const box = doc.getElementById('empty-background-image')!;
+            const { width, height } = box.getBoundingClientRect();
+            const { backgroundSize, backgroundRepeat } = doc.defaultView!.getComputedStyle(box);
+            return { width, height, backgroundSize, backgroundRepeat };
+          }, surface === 'live'), { width:120, height:64, backgroundSize:'contain', backgroundRepeat:'no-repeat' });
           assert.equal(await page.evaluate(live => {
             const doc=live ? document : document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!;
             return doc.defaultView!.getComputedStyle(doc.getElementById('compat-order')!).color;

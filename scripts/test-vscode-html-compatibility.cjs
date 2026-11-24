@@ -95,6 +95,44 @@ exports.run = async () => {
       && document.querySelector('.editor-loading')?.hidden === true
       && document.querySelector('.editor-host')?.inert === false
       && document.querySelector('button[data-mode="preview"]')?.disabled === false);
+    await editorFrame.click('button[data-mode="live"]');
+    const link = '.meo-md-html-link[data-meo-link-href="#audit-link-target"]';
+    const anchor = await editorFrame.waitForSelector(link, { visible: true });
+    await editorFrame.evaluate(() => {
+      window.__nativeFragmentReveals = [];
+      const scrollIntoView = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = function (...args) {
+        if (this.id === 'audit-link-target') window.__nativeFragmentReveals.push(this.id);
+        return scrollIntoView.apply(this, args);
+      };
+    });
+    const editorPage = editorFrame.page();
+    const bounds = await anchor.boundingBox();
+    assert.ok(bounds, 'The rendered link must have pointer bounds');
+    const middle = bounds.y + bounds.height / 2;
+    await editorPage.mouse.move(bounds.x + 1, middle);
+    await editorPage.mouse.down();
+    await editorPage.mouse.move(bounds.x + bounds.width - 1, middle, { steps: 8 });
+    await editorPage.mouse.up();
+    await editorFrame.waitForFunction(() => window.getSelection()?.toString() === 'HTML link label');
+    assert.ok(await editorFrame.$(link), 'Dragging keeps the rendered link in Live');
+    assert.deepEqual(await editorFrame.evaluate(() => window.__nativeFragmentReveals), [],
+      'Dragging a rendered link leaves the fragment target alone');
+    result.liveLinkDrag = true;
+    await editorFrame.evaluate(() => window.getSelection()?.removeAllRanges());
+    await editorFrame.click(link);
+    assert.deepEqual(await editorFrame.evaluate(() => window.__nativeFragmentReveals), [],
+      'Plain Live clicks must not invoke native Webview fragment navigation');
+    await editorFrame.waitForFunction(() => document.querySelector('.cm-activeLine')?.textContent.includes('<a href="#audit-link-target"'));
+    await editorFrame.click('.cm-content .cm-line:first-child');
+    await editorFrame.waitForSelector(link, { visible: true });
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await editorPage.keyboard.down(modifier);
+    try { await editorFrame.click(link); } finally { await editorPage.keyboard.up(modifier); }
+    await editorFrame.waitForFunction(() => document.querySelector('.cm-activeLine')?.textContent.includes('Native fragment target.'));
+    assert.deepEqual(await editorFrame.evaluate(() => window.__nativeFragmentReveals), [],
+      'Live modifier clicks must reveal the target through MEO alone');
+    result.liveLinkGestures = true;
     await editorFrame.click('button[data-mode="preview"]');
     await editorFrame.waitForFunction(() => {
       const doc=document.querySelector('.preview-frame')?.contentDocument;

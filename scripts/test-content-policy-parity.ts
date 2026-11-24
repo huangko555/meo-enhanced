@@ -53,6 +53,7 @@ const formatting = [
   '<style>code:where(.author-code-color) { color:rgb(45,67,89) }</style>', '',
   '<p><code id="html-code-stylesheet" class="author-code-color">Stylesheet code color</code></p>'
 ].join('\n');
+const nestedAlert = '> [!NOTE]\n> Top level note.\n\n> > [!TIP]\n> > Nested tip body.\n\nAFTER';
 
 // HTML fragments and reading prose consume the same grammar, including literal code.
 for (const [source, expected] of [['`   `', '<code>   </code>'], ['``  ``', '<code>  </code>'],
@@ -76,6 +77,55 @@ try {
   await page.addScriptTag({ content: await build.outputs[0]!.text() });
   for (const large of [false, true]) {
     for (const appearance of ['light', 'dark'] as const) {
+      const alertHtml = renderMarkdownToHtml({ markdownText: nestedAlert, markdownFilePath: 'D:/fixture/content.md', target: 'html' }).html;
+      const alertCss = buildPreviewStyles({ previewFontFamily: '' }, appearance);
+      const alert = await page.evaluate(async ({ source, alertHtml, alertCss, appearance }) => {
+        document.documentElement.dataset.editorAppearance = appearance;
+        const harness = (window as any).ListEditingHarness;
+        harness.applyBuiltInVisualBaseline(appearance);
+        const host = document.querySelector('#live')!;
+        const editor = harness.createEditor({ parent: host, text: source, initialMode: 'live', onApplyChanges() {} });
+        editor.view.dispatch({ selection: { anchor: source.indexOf('AFTER') } });
+        for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame);
+        const doc = document.querySelector<HTMLIFrameElement>('#preview')!.contentDocument!;
+        doc.open(); doc.write('<!doctype html><style>' + alertCss + '</style><article class="meo-export-doc">' + alertHtml + '</article>'); doc.close();
+        const previewTip = doc.querySelector('blockquote > blockquote.meo-export-alert-tip')!;
+        const lines = Array.from(host.querySelectorAll('.cm-line.meo-md-alert-tip'));
+        const note = host.querySelector('.cm-line.meo-md-alert-note')!;
+        const colors = (line: Element) => {
+          const background = getComputedStyle(line, '::before').backgroundImage;
+          return [...background.matchAll(/linear-gradient\((.+?), \1\)/g)].map(match => match[1]);
+        };
+        const probe = document.createElement('span');
+        const palette = (property: string) => {
+          probe.style.color = `var(--meo-semantic-${property})`;
+          return getComputedStyle(probe).color;
+        };
+        // Alert styles color their descendants, so read the palette outside the row.
+        editor.view.dom.appendChild(probe);
+        const quote = palette('blockquoteBorder'), tip = palette('alertTipBorder'),
+          tipForeground = palette('alertTipForeground'), noteBorder = palette('alertNoteBorder');
+        probe.remove();
+        const result = { live: lines.map(line => ({ bars: colors(line), fill: getComputedStyle(line).webkitTextFillColor })),
+          note: colors(note), expected: { bars: [quote, tip], fill: tipForeground }, noteBorder,
+          optimized: harness.usesLargeDocumentDerivedWorkBudget(editor.view.state),
+          inset: lines.every(line => getComputedStyle(line).backgroundImage.startsWith('linear-gradient(to right,')),
+          preview: { outerIsQuote: !previewTip.parentElement!.classList.contains('meo-export-alert'),
+            distinctBorders: doc.defaultView!.getComputedStyle(previewTip).borderLeftColor
+              !== doc.defaultView!.getComputedStyle(previewTip.parentElement!).borderLeftColor } };
+        (window as any).__alertEditor = editor;
+        return result;
+      }, { source: nestedAlert + (large ? '\n\n' + 'padding text\n'.repeat(8100) : ''), alertHtml, alertCss, appearance });
+      if (process.env.MEO_TEST_SCREENSHOTS && !large) {
+        await page.screenshot({ path: path.join(process.env.MEO_TEST_SCREENSHOTS, `content-nested-alert-${appearance}.png`),
+          clip: { x: 0, y: 0, width: 1200, height: 285 } });
+      }
+      await page.evaluate(() => { (window as any).__alertEditor.destroy(); delete (window as any).__alertEditor; });
+      assert.equal(alert.optimized, large);
+      assert.deepEqual(alert.preview, { outerIsQuote: true, distinctBorders: true });
+      assert.deepEqual(alert.note, [alert.noteBorder]);
+      assert.deepEqual(alert.live, [alert.expected, alert.expected], 'The nested Alert colors only its own rule and text');
+      assert.equal(alert.inset, true, 'The nested Alert tint starts at the inner quote');
       for (const fixture of fixtures) {
         const finite = fixture.text + '\n\nAFTER';
         const source = finite + (large ? '\n\n' + 'padding text\n'.repeat(8100) : '');

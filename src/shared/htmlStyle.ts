@@ -220,7 +220,12 @@ export const htmlSanitizedStyleRules: Record<string, RegExp[]> = Object.fromEntr
 
 function boxProjection(properties: Record<string, string>, name: string, value: string, direction: 'ltr' | 'rtl'): void {
   properties[name] = value;
-  if (name === 'background') { properties['background-color'] = value; return; }
+  if (name === 'background') {
+    const lastLayer = split(value, ',')?.at(-1) ?? '';
+    properties['background-color'] = wide.test(value) ? value : split(lastLayer, ' ')?.find(color) ?? 'transparent';
+    properties['background-image'] = value;
+    return;
+  }
   const physical = (side: string): string => side === 'inline-start' ? direction === 'rtl' ? 'right' : 'left'
     : side === 'inline-end' ? direction === 'rtl' ? 'left' : 'right' : logicalSides[side] ?? side;
   const targets = (side: string): string[] => side === '' ? sides : side === 'block' ? ['top', 'bottom']

@@ -455,6 +455,10 @@ const alertLineDecos: Record<AlertType, ReturnType<typeof Decoration.line>> = {
   WARNING: Decoration.line({ class: 'meo-md-alert meo-md-alert-warning' }),
   CAUTION: Decoration.line({ class: 'meo-md-alert meo-md-alert-caution' })
 };
+const alertBorderRoles: Record<AlertType, string> = {
+  NOTE: 'alertNoteBorder', TIP: 'alertTipBorder', IMPORTANT: 'alertImportantBorder',
+  WARNING: 'alertWarningBorder', CAUTION: 'alertCautionBorder'
+};
 
 const alertMarkerDeco = Decoration.mark({ class: 'meo-md-alert-marker' });
 const alertLabelActiveDeco = Decoration.mark({ class: 'meo-md-alert-label-active' });
@@ -2172,7 +2176,7 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
   const activeImageGroups = new Map<number, ActiveImageGroup>();
   const parsedTableRanges: SourceRange[] = [];
   const quoteDepthByLine = new Map<number, number>();
-  const quoteBarsByLine = new Map<number, { columns: number[]; taskIndents: TaskListIndent[]; insideList: boolean }>();
+  const quoteBarsByLine = new Map<number, Map<number, { taskIndent: TaskListIndent; alertType?: AlertType }>>();
   const proseContinuationColumns = new Map<number, number>();
   const footnoteDefinitionFirstLines = new Set(footnotes.definitions.map(definition => definition.lineFrom));
   let tableDepth = 0;
@@ -2315,11 +2319,10 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
           return;
         }
         let depth = 1;
-        let insideList = false;
         for (let parent = node.node.parent; parent; parent = parent.parent) {
           if (parent.name === 'Blockquote') depth += 1;
-          if (parent.name === 'ListItem') insideList = true;
         }
+        const alertBlock = detectAlertInBlockquote(state, node);
         // Quote glyphs and list widgets retain their source column widths.
         const initialColumn = countColumn(line.text, state.tabSize, node.from - line.from);
         const lastLine = state.doc.lineAt(Math.max(node.from, node.to - 1)).number;
@@ -2330,16 +2333,15 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
           const lineStart = state.doc.line(lineNo).from;
           const marks = parsedContainers.quoteMarks.get(lineNo) ?? [];
           const explicitMark = marks[depth - 1];
-          const column = explicitMark
+          const column = Math.max(0, explicitMark
             ? countColumn(state.doc.line(lineNo).text, state.tabSize, explicitMark.from - lineStart)
-            : initialColumn;
-          const bars = quoteBarsByLine.get(lineNo) ?? { columns: [], taskIndents: [], insideList: false };
-          bars.columns.push(Math.max(0, column));
-          bars.taskIndents.push(getLiveTaskListIndent(state, lineStart, node.node));
-          bars.insideList ||= insideList;
+            : initialColumn);
+          const bars = quoteBarsByLine.get(lineNo) ?? new Map();
+          if (!bars.has(column)) bars.set(column, {
+            taskIndent: getLiveTaskListIndent(state, lineStart, node.node), alertType: alertBlock?.type
+          });
           quoteBarsByLine.set(lineNo, bars);
         }
-        const alertBlock = detectAlertInBlockquote(state, node);
         if (alertBlock) {
           addAlertBlockDecorations(ranges, state, node, alertBlock, activeLines, scope);
           return;
@@ -2713,22 +2715,27 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
         } }).range(line.from + match.index, line.from + match.index + match[0].length));
       }
     }
-    const columns = [...new Set(bars.columns)].sort((left, right) => left - right);
-    const taskOffsets = columns.map(column => liveTaskListIndentCssValue(bars.taskIndents[bars.columns.indexOf(column)]!));
-    const first = columns[0];
+    const orderedBars = [...bars].sort(([left], [right]) => left - right);
+    const taskOffsets = orderedBars.map(([, bar]) => liveTaskListIndentCssValue(bar.taskIndent));
+    const first = orderedBars[0][0];
     const sourceFirstColumn = definition
       ? 'calc(' + (Math.max(0, first - 4) + String(definition.number).length + 1) + ' * var(--meo-live-container-ch) + 0.45 * var(--meo-user-editor-font-size, var(--meo-font-live-size)))'
       : 'calc(' + first + ' * var(--meo-live-container-ch))';
     const firstColumn = 'calc(' + sourceFirstColumn + ' + ' + taskOffsets[0] + ')';
-    const ruleColor = 'var(--meo-quote-rule-color, var(--meo-semantic-blockquoteBorder))';
-    const backgrounds = columns.map((column, index) =>
-      `linear-gradient(${ruleColor}, ${ruleColor}) calc(${column - first} * var(--meo-live-container-ch) + ${taskOffsets[index]} - ${taskOffsets[0]}) 0 / 3px 100% no-repeat`
-    ).join(',');
+    const relativeColumns = orderedBars.map(([column], index) =>
+      `calc(${column - first} * var(--meo-live-container-ch) + ${taskOffsets[index]} - ${taskOffsets[0]})`);
+    const backgrounds = orderedBars.map(([, bar], index) => {
+      const role = bar.alertType ? alertBorderRoles[bar.alertType] : 'blockquoteBorder';
+      const ruleColor = `var(--meo-semantic-${role})`;
+      return `linear-gradient(${ruleColor}, ${ruleColor}) ${relativeColumns[index]} 0 / 3px 100% no-repeat`;
+    }).join(',');
+    const firstAlert = orderedBars.findIndex(([, bar]) => bar.alertType !== undefined);
+    const alertIndent = firstAlert > 0 ? `--meo-alert-indent:calc(${firstColumn} + ${relativeColumns[firstAlert]});` : '';
     const firstListMarker = parsedContainers.markers.get(lineNo)?.[0]?.listMarkFrom;
     const leadingQuote = firstListMarker !== undefined && (parsedContainers.quoteMarks.get(lineNo)?.at(-1)?.to ?? line.from) <= firstListMarker;
     ranges.push(Decoration.line({ attributes: {
-      class: 'meo-md-quote-source-order' + (leadingQuote ? ' meo-md-quote-leading' : ''),
-      style: `--meo-quote-first-column:${firstColumn};--meo-quote-bars:${backgrounds};`
+      class: 'meo-md-quote-source-order' + (leadingQuote ? ' meo-md-quote-leading' : '') + (alertIndent ? ' meo-md-alert-indented' : ''),
+      style: `--meo-quote-first-column:${firstColumn};--meo-quote-bars:${backgrounds};${alertIndent}`
     } }).range(state.doc.line(lineNo).from));
   }
 

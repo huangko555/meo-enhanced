@@ -39,7 +39,10 @@ export async function resolveFixtureHtmlStyles(css: string): Promise<string> {
       if (source === undefined) throw new Error('Missing stylesheet fixture');
       return { css: sanitizeHtmlStylesheet(source), url };
     },
-    async asset(url) { return url.endsWith('.woff2') ? font : htmlCompatibilityImage; }
+    async asset(url) {
+      if (url.endsWith('/empty-background.png') && url !== 'https://example.invalid/empty-background.png') return '';
+      return url.endsWith('.woff2') ? font : htmlCompatibilityImage;
+    }
   });
 }
 

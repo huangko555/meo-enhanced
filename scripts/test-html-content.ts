@@ -73,6 +73,22 @@ const repoRoot = path.resolve(import.meta.dir, '..');
   for (const fragment of ['<svg><polygon points="0,0 10,0 0,10">', '<div><span>Unclosed</span>']) {
     assert.deepEqual(collect(fragment), [], 'A missing root end must not be invented');
   }
+  const backgroundImage = `url(' //example.invalid/logo.png ')`;
+  for (const [style, visible] of [
+    [`width:120px;height:64px;background-image:${backgroundImage}`, true],
+    [`width:120px;height:64px;background:${backgroundImage} center / contain no-repeat`, true],
+    ['width:120px;height:64px;background-image:linear-gradient(red, blue)', true],
+    [`width:120px;height:64px;background-image:${backgroundImage};background:transparent`, false],
+    [`width:120px;height:64px;background-image:${backgroundImage} !important;background:transparent`, true],
+    [`width:120px;background-image:${backgroundImage}`, false],
+    [`width:120px;height:64px;background-image:${backgroundImage};display:none`, false],
+    ['width:120px;height:64px;background-image:url(javascript:bad)', false]
+  ] as const) {
+    const fragment = `<div style="${style}"></div>`;
+    const state = EditorState.create({ doc: fragment, extensions: [editorMarkdownLanguage, detailsBlockStateExtensions()] });
+    ensureSyntaxTree(state, state.doc.length, 1000);
+    assert.equal(collectRenderableHtmlBlocks(state)[0]?.visible, visible, `Background paint: ${style}`);
+  }
 }
 {
   const doc = '<hr>\nRaw text\n\n**Markdown paragraph**\n\n<div>Separate HTML</div>';
@@ -468,6 +484,43 @@ async function resetHtmlEditor(page: Page, text: string): Promise<void> {
   await frames(page, 12);
 }
 
+async function checkInlineHtmlLinkClick(page: Page): Promise<void> {
+  const href = 'https://example.com/';
+  const text = `First paragraph.\n\n<a href="${href}" title="A > B">HTML link label</a> · <kbd title="A > B">Ctrl</kbd>`;
+  const selector = 'a[title="A > B"]';
+  await resetHtmlEditor(page, text);
+  await page.evaluate(() => {
+    // The VS Code Webview forwards trusted anchor clicks from Window even if
+    // a listener has already canceled the browser's default action.
+    (window as any).__hostAnchorClicks = [];
+    window.addEventListener('click', event => {
+      const anchor = event.composedPath().find(node => node instanceof HTMLAnchorElement && node.href);
+      if (event.isTrusted && anchor instanceof HTMLAnchorElement) (window as any).__hostAnchorClicks.push(anchor.href);
+    }, { once: true });
+  });
+  const location = page.url();
+  const opened = () => page.evaluate(() => (window as any).__htmlLinks as string[]);
+  await page.click(selector);
+  await frames(page);
+  assert.deepEqual(await page.evaluate(() => (window as any).__hostAnchorClicks), [],
+    'Plain Live click cannot reach the VS Code Webview native link forwarder');
+  assert.equal(page.url(), location, 'Plain Live click does not invoke native anchor navigation');
+  assert.deepEqual(await opened(), [], 'Plain Live click does not open a rendered HTML link');
+  assert.equal(await page.$(selector), null, 'Plain Live click expands the HTML link source');
+  assert.ok(await page.$eval('.cm-activeLine', line => line.textContent?.includes('<a href=')),
+    'The source owning the link gets the editing caret');
+  assert.ok(await page.$('kbd[title="A > B"]'), 'The adjacent HTML fragment stays rendered');
+  await select(page, 'First paragraph.');
+  await page.keyboard.down(process.platform === 'darwin' ? 'Meta' : 'Control');
+  await page.click(selector);
+  await page.keyboard.up(process.platform === 'darwin' ? 'Meta' : 'Control');
+  await frames(page);
+  assert.deepEqual(await opened(), [href], 'Modifier click opens the HTML link exactly once');
+  await page.click('.meo-md-html-inline-link-button');
+  await frames(page);
+  assert.deepEqual(await opened(), [href, href], 'The explicit open-link button is a separate action');
+}
+
 async function checkHtmlPasteEditing(page: Page): Promise<void> {
   const before = 'Before.\n\n\n\nAfter.';
   const insertAt = before.indexOf('\n\n') + 2;
@@ -779,6 +832,7 @@ async function main(): Promise<void> {
     await page.setContent('<!doctype html><style>html,body,#app{height:100%;margin:0}</style><body class="vscode-light"><div id="app"></div></body>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview/src/styles.css') });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
+    await checkInlineHtmlLinkClick(page);
     await resetHtmlEditor(page, source);
     assert.deepEqual(errors, [], 'Editor initialization');
     if (process.argv.includes('--paste-only')) {

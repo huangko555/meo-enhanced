@@ -35,6 +35,7 @@ import { rememberHtmlNativeContent, updateHtmlContentDom } from './htmlContentDo
 import { isExternalDocumentPresentation } from '../editor/externalDocumentPresentation';
 import { scanHtmlTags, splitHtmlBlockFragments } from '../../../src/foundation/htmlSyntax';
 import { renderHtmlMarkdown } from '../../../src/shared/htmlMarkdown';
+import { mapHtmlStyleUrls } from '../../../src/shared/htmlStyleResources';
 import { createOpenLinkButton } from './linkOpenButton';
 import { isPrimaryModifierPointerClick } from './linkNavigation';
 import { currentSyntaxTree, resolvedSyntaxTree, resolvedSyntaxTreeAt } from './markdownSyntax';
@@ -172,8 +173,17 @@ function htmlHasVisibleContent(source: string, styled = false): boolean {
       && (display === 'block' || paddedWidth || parseFloat(style.width ?? '0') > 0);
     const layout = media || sizedBox || borders.some(border => border.layout) || children.some(child => child.layout);
     const background = style['background-color'];
+    const backgroundImage = style['background-image'] ?? '';
+    let hasBackgroundImage = /(?:^|,)\s*(?:repeating-)?(?:linear|radial|conic)-gradient\(/i.test(backgroundImage);
+    if (layout && !hasBackgroundImage && /url\(/i.test(backgroundImage)) {
+      mapHtmlStyleUrls(backgroundImage, url => {
+        hasBackgroundImage ||= Boolean(url.trim());
+        return url;
+      });
+    }
     return { layout, visible: children.some(child => child.visible)
-      || visibility && (media || borders.some(border => border.visible) || Boolean(background && hasInk(background, color) && layout)) };
+      || visibility && (media || borders.some(border => border.visible)
+        || layout && (hasBackgroundImage || Boolean(background && hasInk(background, color)))) };
   };
   return parseDocument(source).children.some(node => paint(node).visible);
 }
@@ -593,7 +603,7 @@ function annotateHtmlSourceLines(root: ParentNode, source: string, startLine: nu
   }
 }
 
-const htmlReadingControls = 'summary, button, a, input, select, textarea, label, audio, video, .meo-md-image';
+const htmlReadingControls = 'summary, button, a:not(.meo-md-html-link), input, select, textarea, label, audio, video, .meo-md-image';
 
 function prepareHtmlReadingContent(content: HTMLElement, root: HTMLElement): void {
   // A native reading host owns its DOM selection independently of CodeMirror's
@@ -618,6 +628,14 @@ function prepareHtmlReadingContent(content: HTMLElement, root: HTMLElement): voi
   content.addEventListener('compositionstart', preventReadingInput);
   content.addEventListener('pointerdown', event => {
     if (event.button === 0 && !root.classList.contains('meo-md-html-live-result')) content.contentEditable = 'true';
+  });
+  root.addEventListener('click', event => {
+    const anchor = event.target instanceof Element ? event.target.closest('a[href]') : null;
+    if (!anchor || !content.contains(anchor)) return;
+    // Keep the click available to bindWidgetClick on this root. VS Code's
+    // Window listener would otherwise forward it despite default prevention.
+    event.preventDefault();
+    event.stopPropagation();
   });
   root.addEventListener('keydown', event => {
     const target = event.target instanceof Element ? event.target : null;
@@ -702,7 +720,6 @@ function enhanceLinks(root: ParentNode, inline: boolean, uiLanguage: UiLanguage)
       }
     });
     linkText.addEventListener('click', (event) => {
-      event.preventDefault();
       if (!isPrimaryModifierPointerClick(event)) return;
       const currentHref = linkText.dataset.meoLinkHref;
       if (currentHref && isSafeHtmlUrl(currentHref, 'href')) {

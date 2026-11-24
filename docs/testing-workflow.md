@@ -464,8 +464,10 @@ zero/variable margins and a partly filled last page. DOM color checks or a PDF f
 header alone cannot catch a contrasting frame in the printed page margins.
 `scripts/test-html-content.ts` covers shared HTML tag/style filtering in default
 HTML/PDF/DOCX output, adjacent and nested fragments, CommonMark boundaries, image
-dimensions, and Live source-above-result editing. Its browser checks preserve
-native text selection, disclosure/link actions, undo and mode continuity,
+dimensions, and Live source-above-result editing. Plain clicks on inline and
+block HTML links enter the same source editing paths as surrounding HTML text.
+Native drags keep the rendered selection through release and copy. The browser
+checks also cover disclosure/link actions, undo and mode continuity,
 tag/attribute completion, closing tags, literal paste and IME input. They
 use the shared input candidate menu. `scripts/test-html-completion-production.ts`
 covers its Live/Source tag, attribute and value insertion, single-step undo/redo,
@@ -486,7 +488,10 @@ a held stylesheet request and reject its late result after a newer link wins.
 The separate native command `bun scripts/test-vscode-html-compatibility.ts --code
 <Code executable>` compares 26 witnesses with the real installed built-in Preview
 and records explicit font isolation, embedded-resource and literal-code differences.
-Build first for its production smoke. The same native owner then opens MEO Preview,
+Build first for its production smoke. In Live, a plain click on a rendered HTML
+fragment link opens its source and leaves VS Code's native fragment handler idle.
+Dragging retains the rendered text selection, and Ctrl/Cmd-click reveals the
+target in the editor. The test then opens MEO Preview,
 verifies Host-loaded CSS/imports/fonts/backgrounds and saves the linked CSS through
 the VS Code API to verify automatic refresh. Cold Webview admission has its own
 120-second budget; subsequent resource checks retain their 30-second conditions.

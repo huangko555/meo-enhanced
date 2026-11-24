@@ -19,7 +19,12 @@ fs.mkdirSync(path.join(output,'extensions'));
 fs.writeFileSync(path.join(output,'profile','User','settings.json'),JSON.stringify({
   'workbench.startupEditor':'none','telemetry.telemetryLevel':'off','git.enabled':false,'update.mode':'none'
 }));
-const markdown = htmlCompatibilityParityCases.map(item => item.source).join('\n\n');
+const markdown = [
+  'First paragraph.',
+  '<a href="#audit-link-target" title="A > B">HTML link label</a> · <kbd title="A > B">Ctrl</kbd>',
+  '<div id="audit-link-target">Native fragment target.</div>',
+  ...htmlCompatibilityParityCases.map(item => item.source)
+].join('\n\n');
 fs.writeFileSync(path.join(workspace,'audit.md'),markdown);
 fs.writeFileSync(path.join(workspace,'效果演示.css'),'#audit-linked{color:rgb(12,34,56)}');
 fs.writeFileSync(path.join(workspace,'imported.css'),'#audit-imported{color:rgb(21,43,65)}');

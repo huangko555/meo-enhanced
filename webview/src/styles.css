@@ -8278,6 +8278,7 @@ html[data-meo-ui-contrast='high'] .cm-editor :is(.meo-md-html-table-context-trig
 .cm-editor .meo-md-alert {
   border-left: 3px solid;
   border-radius: 0;
+  background-color: var(--meo-alert-background);
   min-height: calc(var(--meo-active-editor-line-height) * 1em);
   padding-left: 3ch;
   text-indent: -1ch;
@@ -8331,45 +8332,47 @@ html[data-meo-ui-contrast='high'] .cm-editor :is(.meo-md-html-table-context-trig
 
 .cm-editor .meo-md-alert-note {
   --meo-alert-color: var(--meo-semantic-alertNoteForeground);
-  --meo-quote-rule-color: var(--meo-semantic-alertNoteBorder);
+  --meo-alert-background: var(--meo-semantic-alertNoteBackground);
   border-left-color: var(--meo-semantic-alertNoteBorder);
-  background-color: var(--meo-semantic-alertNoteBackground);
 }
 
 .cm-editor .meo-md-alert-tip {
   --meo-alert-color: var(--meo-semantic-alertTipForeground);
-  --meo-quote-rule-color: var(--meo-semantic-alertTipBorder);
+  --meo-alert-background: var(--meo-semantic-alertTipBackground);
   border-left-color: var(--meo-semantic-alertTipBorder);
-  background-color: var(--meo-semantic-alertTipBackground);
 }
 
 .cm-editor .meo-md-alert-important {
   --meo-alert-color: var(--meo-semantic-alertImportantForeground);
-  --meo-quote-rule-color: var(--meo-semantic-alertImportantBorder);
+  --meo-alert-background: var(--meo-semantic-alertImportantBackground);
   border-left-color: var(--meo-semantic-alertImportantBorder);
-  background-color: var(--meo-semantic-alertImportantBackground);
 }
 
 .cm-editor .meo-md-alert-warning {
   --meo-alert-color: var(--meo-semantic-alertWarningForeground);
-  --meo-quote-rule-color: var(--meo-semantic-alertWarningBorder);
+  --meo-alert-background: var(--meo-semantic-alertWarningBackground);
   border-left-color: var(--meo-semantic-alertWarningBorder);
-  background-color: var(--meo-semantic-alertWarningBackground);
 }
 
 .cm-editor .meo-md-alert-caution {
   --meo-alert-color: var(--meo-semantic-alertCautionForeground);
-  --meo-quote-rule-color: var(--meo-semantic-alertCautionBorder);
+  --meo-alert-background: var(--meo-semantic-alertCautionBackground);
   border-left-color: var(--meo-semantic-alertCautionBorder);
-  background-color: var(--meo-semantic-alertCautionBackground);
+}
+
+.cm-editor .cm-line.meo-md-alert.meo-md-alert-indented:not(.meo-md-code-block):not(.meo-mermaid-block) {
+  background-color: transparent;
+  background-image: linear-gradient(to right, transparent var(--meo-alert-indent), var(--meo-alert-background) var(--meo-alert-indent));
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-alert:not(.meo-md-code-block):not(.meo-mermaid-block) {
   color: var(--meo-alert-color) !important;
+  -webkit-text-fill-color: currentColor !important;
 }
 
 .cm-editor.meo-mode-live .cm-line.meo-md-alert:not(.meo-md-code-block):not(.meo-mermaid-block) * {
   color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
 }
 
 .cm-editor .cm-line.meo-md-alert:is(.meo-md-code-block, .meo-mermaid-block) {
