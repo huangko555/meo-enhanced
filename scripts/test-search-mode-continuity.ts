@@ -201,6 +201,12 @@ try {
       if (count !== 6000 || controller.adapter.countMatches() !== 6000) throw new Error('Cancelled matching left stale or missing marks: ' + count);
       controller.adapter.setSearchQuery('');
       if (doc.querySelector('.meo-preview-search-match')) throw new Error('Clear left large-search marks');
+      root.textContent = 'İ Cat and cat end';
+      controller.adapter.setSearchQuery('cat');
+      controller.surfaceReady();
+      await waitForMatches();
+      const folded = [...doc.querySelectorAll('.meo-preview-search-match')].map(match => match.textContent);
+      if (folded.join('|') !== 'Cat|cat') throw new Error('Case folding moved Preview matches: ' + JSON.stringify(folded));
       return count;
     } finally {
       controller.dispose();

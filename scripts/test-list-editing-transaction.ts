@@ -526,6 +526,50 @@ async function main(): Promise<void> {
     assert.deepEqual(cross.history, { undo: 1, redo: 0 });
     assert.deepEqual(cross.snapshot.insertedRows, [{ id: 'row-1', from: 66, to: 73 }]);
 
+    const filler = Array.from({ length: 9_000 }, (_, index) => `Paragraph ${index} with **bold** text.\n`).join('\n');
+    for (const mode of ['source', 'live']) for (const large of [false, true]) {
+      const suffix = large ? '\n' + filler : '';
+      const open = async (text: string, at: number) => {
+        const optimized = await page.evaluate(({ text, at, mode }) => {
+          const harness = (window as any).ListEditingHarness;
+          (window as any).__codeListEditor?.destroy();
+          const host = document.getElementById('first')!;
+          host.replaceChildren();
+          const editor = (window as any).__codeListEditor = harness.createEditor({ parent: host, text, initialMode: mode, onApplyChanges() {} });
+          editor.view.dispatch({ selection: { anchor: at } });
+          editor.focus();
+          return harness.usesLargeDocumentDerivedWorkBudget(editor.view.state);
+        }, { text: text + suffix, at, mode });
+        assert.equal(optimized, large, 'code list cases must cover the ordinary and the optimized document path');
+        await waitForFrames(page);
+      };
+      const read = () => page.evaluate(() => (window as any).__codeListEditor.getText() as string);
+      const fence = '```text\n10. A\n20. B\n30. C\n```\n';
+      const yaml = '```yaml\nsteps:\n  - name: x\n    - b\n```\n';
+      for (const { source, at, act, expected } of [
+        { source: fence, at: fence.indexOf('A') + 1, act: () => page.keyboard.type('xy'), expected: fence.replace('A', 'Axy') },
+        { source: fence, at: fence.length - 1, act: () => page.keyboard.press('Enter'), expected: fence + '\n' },
+        { source: yaml, at: yaml.indexOf('name'), act: () => page.keyboard.press('Backspace'), expected: yaml.replace('- name', '-name') },
+        { source: '1. A\n1. B\n1. C\n', at: 4, act: () => page.keyboard.type('x'), expected: '1. Ax\n2. B\n3. C\n' },
+        { source: '- A\n  - B\n', at: 2, act: () => page.keyboard.press('Backspace'), expected: 'A\n- B\n' }
+      ]) {
+        await open(source, at);
+        await act();
+        assert.equal(await read(), expected + suffix, JSON.stringify({ mode, large, source, at }));
+        assert.equal(await page.evaluate(() => (window as any).__codeListEditor.undo()), true);
+        assert.equal(await read(), source + suffix, 'one undo restores the code or list');
+      }
+      await open('', 0);
+      await page.evaluate(text => {
+        const data = new DataTransfer();
+        data.setData('text/plain', text);
+        (window as any).__codeListEditor.view.contentDOM.dispatchEvent(
+          new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data }));
+      }, fence);
+      assert.equal(await read(), fence + suffix, 'a pasted fence keeps its own numbers');
+    }
+    await page.evaluate(() => (window as any).__codeListEditor.destroy());
+
     console.log('list editing production transaction checks passed');
   } finally {
     await browser.close();

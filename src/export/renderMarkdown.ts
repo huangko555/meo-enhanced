@@ -1,4 +1,5 @@
-import { markdownHeadingAnchor } from '../foundation/markdownHeadingAnchor';
+import { createMarkdownHeadingAnchors } from '../foundation/markdownHeadingAnchor';
+import { readMarkdownAlertDirective, type AlertType } from '../foundation/markdownAlert';
 import { markdownTaskContentPrefix } from '../foundation/markdownTaskList';
 import { normalizeLinkDestination, isLocalFileLinkDestination } from '../foundation/linkDestination';
 import { splitMarkdownTableRow } from '../foundation/markdownTableRow';
@@ -28,7 +29,7 @@ import {
 } from '../shared/htmlPolicy';
 import { isSupportedHtmlTag, isCustomHtmlTag } from '../shared/htmlPolicy';
 import { inspectHtmlStylesheets } from '../shared/htmlStylesheet';
-import { splitHtmlBlockFragments } from '../foundation/htmlSyntax';
+import { scanHtmlTags, splitHtmlBlockFragments } from '../foundation/htmlSyntax';
 import type { UiLanguage } from '../foundation/uiLanguage';
 import { getReadingUiStrings } from './readingUiLanguage';
 import { normalizeFenceLanguage } from './fenceLanguage';
@@ -45,7 +46,7 @@ import { installWikiReferenceTransform } from './wikiReferences';
 import type { ResolvedWikiResources } from '../foundation/wikiReference';
 import { addGithubDetailsSummary, createGithubHtmlSanitizer, githubHtmlAttributes, githubHtmlTags, installGithubInlineRules, isGithubImageSource, isGithubLink, linkifyGithubFilteredHtml, replaceGithubEmoji, stripGithubSelectMarkup } from './githubReadme';
 
-const OPENING_KBD_TAG_RE = /^<kbd\b[^>]*>$/i;
+const OPENING_KBD_TAG_RE = /^<kbd\b[\s\S]*>$/i;
 const CLOSING_KBD_TAG_RE = /^<\/kbd\s*>$/i;
 const DEFERRED_IMAGE_ATTRIBUTE = 'data-meo-deferred-image-src';
 const DEFERRED_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
@@ -785,11 +786,11 @@ function installSafeHtmlTransform(
     const closingTag = /^<\/\s*([a-z][a-z\d-]*)\s*>$/i.exec(trimmed);
     if (closingTag) return `</${canonicalHtmlTagName(closingTag[1]!)}>`;
 
-    const openingTag = /^<\s*([a-z][a-z\d-]*)\b[^>]*>$/i.exec(trimmed);
-    if (!openingTag || /<\/\s*[a-z]/i.test(trimmed)) {
+    const openingTag = scanHtmlTags(trimmed)[0];
+    if (!openingTag || openingTag.closing || openingTag.from !== 0 || openingTag.to !== trimmed.length) {
       return sanitizeHtml(source, safeHtmlSanitizerOptions);
     }
-    const tagName = openingTag[1].toLowerCase();
+    const tagName = openingTag.name;
     if (tagName === 'br' || tagName === 'img' || /\/\s*>$/.test(trimmed)) {
       return sanitizeHtml(source, safeHtmlSanitizerOptions);
     }
@@ -848,7 +849,9 @@ function installSourcePositionAndHeadingAnchorTransform(
   const assignAnchors = (state: any) => {
     if (state.env?.meoTableCell) return;
     const slugCounts = new Map<string, number>();
+    const headingAnchor = createMarkdownHeadingAnchors();
     const tokens = state.tokens as any[];
+    // GitHub preserves each space and existing hyphen, including gaps left by punctuation.
     const githubId = (text: string) => {
       const base = text.trim().toLowerCase().replace(/<[^>]*>/g, '')
         .replace(/[^\p{Letter}\p{Number}\p{Mark} _-]/gu, '').replace(/ /g, '-');
@@ -895,19 +898,7 @@ function installSourcePositionAndHeadingAnchorTransform(
 
       const inlineContent = tokens[index + 1];
       const headingSource = github ? extractHeadingText(inlineContent, true) : String(inlineContent?.content ?? '');
-      // GitHub preserves each space and existing hyphen, including gaps left by punctuation.
-      const baseSlug = github
-        ? headingSource.trim().toLowerCase().replace(/<[^>]*>/g, '')
-          .replace(/[^\p{Letter}\p{Number}\p{Mark} _-]/gu, '').replace(/ /g, '-')
-        : markdownHeadingAnchor(headingSource);
-      let id = baseSlug;
-      if (github) {
-        id = githubId(headingSource);
-      } else {
-        const occurrence = (slugCounts.get(baseSlug) ?? 0) + 1;
-        slugCounts.set(baseSlug, occurrence);
-        id = occurrence === 1 ? baseSlug : `${baseSlug}-${occurrence}`;
-      }
+      const id = github ? githubId(headingSource) : headingAnchor(headingSource);
       headingOpen.attrSet('id', id);
       if (!state.env?.meoFootnote) onHeading?.({
         level: Number.parseInt(String(headingOpen.tag).slice(1), 10),
@@ -1446,9 +1437,6 @@ function convertHtmlInlineTagTokenToText(token: any): void {
   token.nesting = 0;
 }
 
-const ALERT_TYPES = ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'] as const;
-type AlertType = typeof ALERT_TYPES[number];
-
 type IconNode = [string, Record<string, string>][];
 
 function renderLucideIcon(iconNode: IconNode): string {
@@ -1474,7 +1462,9 @@ function installAlertTransform(md: MarkdownIt, alertLabel: (type: string) => str
   md.renderer.rules.blockquote_open = (tokens: any, idx: number, opts: any, env: any, self: any) => {
     const openToken = tokens[idx];
     if (github && openToken.level > 0) return defaultBlockquoteRender(tokens, idx, opts, env, self);
-    if (github && (tokens[idx + 1]?.type !== 'paragraph_open' || tokens[idx + 2]?.type !== 'inline')) {
+    // The directive is literal text opening this blockquote's own first paragraph.
+    // Links are already resolved here, so "[!NOTE](url)" is not a directive.
+    if (tokens[idx + 1]?.type !== 'paragraph_open' || tokens[idx + 2]?.children?.[0]?.type !== 'text') {
       return defaultBlockquoteRender(tokens, idx, opts, env, self);
     }
     let alertType: AlertType | null = null;
@@ -1486,16 +1476,17 @@ function installAlertTransform(md: MarkdownIt, alertLabel: (type: string) => str
       if (token.type === 'blockquote_close') break;
       if (token.type === 'paragraph_open') continue;
       if (token.type === 'inline' && token.content) {
-        const match = (github ? /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?=\s*(?:\n|$))/i : /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i).exec(token.content.trim());
+        const content = token.content.trimStart();
+        const match = readMarkdownAlertDirective(content, github);
         if (match) {
-          alertType = match[1].toUpperCase() as AlertType;
+          alertType = match.type;
           headerHtml = [
             '<span class="meo-export-alert-header">',
             `<span class="meo-export-alert-icon">${ALERT_ICONS[alertType]}</span>`,
             `<span class="meo-export-alert-label">${escapeHtml(alertLabel(alertType))}</span>`,
             '</span>'
           ].join('');
-          token.content = token.content.replace(match[0], '').trim();
+          token.content = content.slice(match.length).trim();
           if (!token.content && tokens[i + 1]?.type === 'paragraph_close') {
             token.content = '';
             token.children = [];
@@ -1505,7 +1496,7 @@ function installAlertTransform(md: MarkdownIt, alertLabel: (type: string) => str
       }
     }
 
-    if (alertType && ALERT_TYPES.includes(alertType)) {
+    if (alertType) {
       openToken.attrJoin('class', `meo-export-alert meo-export-alert-${alertType.toLowerCase()}`);
 
       let insertedHeader = false;
@@ -1539,7 +1530,8 @@ function installAlertTransform(md: MarkdownIt, alertLabel: (type: string) => str
 
         for (const child of token.children) {
           if (child.type === 'text') {
-            child.content = child.content.replace(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i, '').trimLeft();
+            const directive = readMarkdownAlertDirective(child.content);
+            if (directive) child.content = child.content.slice(directive.length).trimStart();
             break;
           }
         }

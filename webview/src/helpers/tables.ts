@@ -32,7 +32,8 @@ import {
   type ImagePresentationFactory
 } from '../editor/imagePresentation';
 import { parseKbdTagAt } from './kbd';
-import { AlertIconWidget, type AlertType } from './alerts';
+import { AlertIconWidget } from './alerts';
+import { readMarkdownAlertDirective } from '../../../src/foundation/markdownAlert';
 import { parseFootnotes } from './footnotes';
 import { createLatexMathElement, parseLatexMathAt } from './math';
 import { hrefFromMarkdownReference, isPrimaryModifierPointerClick, markdownReferenceTargetSignature } from './linkNavigation';
@@ -78,6 +79,7 @@ import { updateGitDiffMarkerElement } from './gitDiffMarkerDom';
 import { gitDiffLineFlagsFacet } from './gitDiffPresentation';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { getUiStrings, type UiLanguage } from '../application/uiLanguage';
+import { createTextSearch } from '../application/searchCaseFolding';
 import { getTableHistoryFocus, type TableHistoryFocusTarget } from '../adapters/tableHistoryFocus';
 import {
   getTableTransactionProvenance,
@@ -929,21 +931,10 @@ function findTableSearchMatchRanges(text: string, searchState: TableSearchState 
     return [];
   }
 
-  const haystack = searchState?.caseSensitive ? text : text.toLocaleLowerCase();
-  const needle = searchState?.caseSensitive ? query : query.toLocaleLowerCase();
+  const nextMatch = createTextSearch(query, searchState?.caseSensitive)(text);
   const matches: TableSearchMatchRange[] = [];
-  let offset = 0;
-  while (offset <= text.length) {
-    const index = haystack.indexOf(needle, offset);
-    if (index < 0) {
-      break;
-    }
-
-    const end = index + query.length;
-    if (!searchState?.wholeWord || isWholeWordTableSearchRange(text, index, end)) {
-      matches.push({ start: index, end });
-    }
-    offset = end;
+  for (let match = nextMatch(); match; match = nextMatch()) {
+    if (!searchState?.wholeWord || isWholeWordTableSearchRange(text, match.start, match.end)) matches.push(match);
   }
   return matches;
 }
@@ -2338,13 +2329,16 @@ function appendTableCellRenderedPreview(
 
   const appendAlertContent = (parent: HTMLElement, content: string, from: number): boolean => {
     if (parent.tagName !== 'BLOCKQUOTE' || parent.hasChildNodes()) return false;
-    const alert = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*/.exec(content);
+    const alert = readMarkdownAlertDirective(content);
     if (!alert) return false;
-    parent.classList.add('meo-md-alert-' + alert[1].toLowerCase());
+    const syntax = parseTableInlineSyntax(content, from, view.state.facet(latexDelimitersFacet));
+    if (parseTableInlineMarkdownLink(content, 0, syntax, from, { referenceState: view.state })) return false;
+    parent.classList.add('meo-md-alert-' + alert.type.toLowerCase());
     const header = document.createElement('div');
-    header.appendChild(new AlertIconWidget(alert[1] as AlertType).toDOM(view));
+    header.appendChild(new AlertIconWidget(alert.type).toDOM(view));
     parent.appendChild(header);
-    if (content.length > alert[0].length) appendInline(parent, content.slice(alert[0].length), from + alert[0].length);
+    const body = content.slice(alert.length).trimStart();
+    if (body) appendInline(parent, body, from + content.length - body.length);
     return true;
   };
 

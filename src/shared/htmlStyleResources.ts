@@ -148,9 +148,11 @@ export async function resolveHtmlStyleResources(css: string, resources: HtmlStyl
           const urls = new Map<string, string>();
           mapHtmlStyleUrls(node.value, raw => { urls.set(raw, ''); return raw; });
           await Promise.all([...urls.keys()].map(async raw => {
-            if (!isSafeHtmlStyleUrl(raw)) return;
-            if (raw.startsWith('#')) { urls.set(raw, raw); return; }
-            const url = resources.resolve(raw, from);
+            const target = raw.trim();
+            if (!isSafeHtmlStyleUrl(target)) return;
+            if (target.startsWith('#')) { urls.set(raw, target); return; }
+            // Like images, // stays on the network; a local stylesheet base would make it a file address.
+            const url = resources.resolve(target.startsWith('//') ? `https:${target}` : target, from);
             let request = assets.get(url);
             if (!request) { request = resources.asset(url).catch(() => ''); assets.set(url, request); }
             urls.set(raw, await request);

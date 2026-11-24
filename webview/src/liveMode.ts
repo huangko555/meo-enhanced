@@ -2881,7 +2881,7 @@ function addAlertBlockDecorations(
     builder.push(lineDeco.range(line.from));
   }
 
-  if (!activeLines.has(startLine.number)) {
+  if (!activeLines.has(state.doc.lineAt(alertBlock.lineFrom).number)) {
     builder.push(
       Decoration.widget({
         widget: new AlertIconWidget(alertBlock.type),

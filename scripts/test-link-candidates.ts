@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { mock } from 'bun:test';
+import { markdown } from '@codemirror/lang-markdown';
+import { EditorState } from '@codemirror/state';
 import { URI, Utils } from 'vscode-uri';
 import { searchWikiCandidates, shortestWikiTarget } from '../src/application/wikiCandidateSearch';
 import { candidateMatchPositions } from '../src/foundation/candidateText';
@@ -63,6 +65,9 @@ const { runEditorService } = await import('../src/host/editorServices');
 const { resolveLocalLinkTargetUri, resolveLocalImageTargetUri } = await import('../src/shared/documentLinks');
 const { resolveWikiResource, onDidChangeWikiResources, disposeWikiResources } = await import('../src/host/wikiResources');
 const { rewriteExportImageSrc } = await import('../src/export/assetPaths');
+const { renderMarkdownToHtml } = await import('../src/export/renderMarkdown');
+const { currentHeadingSuggestions } = await import('../webview/src/editor/headingSuggestions');
+const { findDocumentFragmentPosition } = await import('../webview/src/helpers/linkNavigation');
 const document = Utils.joinPath(vault, 'notes', 'current.md');
 add(document); addDirectory(Utils.joinPath(vault, '.obsidian'));
 const plan = Utils.joinPath(vault, 'notes', 'project-plan.md');
@@ -139,12 +144,51 @@ try {
   assert.equal(alias.insert, 'project-plan|项目规划');
   assert.equal((await lookup('documents', '项目说明'))[0].insert, 'project-plan|项目说明');
   assert.deepEqual((await lookup('headings', 'Setup', 'project-plan', true)).map(item => item.anchor), ['setup', 'setup-2']);
+  for (const [headings, anchors] of [
+    [['Notes', 'Notes', 'Notes 2'], ['notes', 'notes-2', 'notes-2-2']],
+    [['Notes 2', 'Notes', 'Notes', 'Notes'], ['notes-2', 'notes', 'notes-3', 'notes-4']],
+    [['Notes', 'Notes', 'Notes 3'], ['notes', 'notes-2', 'notes-3']]
+  ] as const) {
+    const text = headings.map(heading => `# ${heading}`).join('\n\n');
+    const repeated = Utils.joinPath(vault, 'notes', 'repeated.md'); add(repeated, text);
+    try {
+      assert.deepEqual((await lookup('headings', '', 'repeated.md')).map(item => item.anchor), anchors, 'every heading candidate has its own anchor');
+      assert.deepEqual(currentHeadingSuggestions(text).map(item => item.anchor), anchors);
+      const rendered = renderMarkdownToHtml({ markdownText: text, markdownFilePath: repeated.fsPath, target: 'html' }).html;
+      assert.deepEqual([...rendered.matchAll(/<h1\b[^>]*\bid="([^"]*)"/g)].map(match => match[1]), anchors, 'candidates match rendered ids');
+      const state = EditorState.create({ doc: text, extensions: [markdown()] });
+      assert.deepEqual(anchors.map(anchor => state.doc.lineAt(findDocumentFragmentPosition(state, '#' + anchor)!).number),
+        headings.map((_, index) => index * 2 + 1), 'Live and Source navigate each anchor to its own heading');
+    } finally { files.delete(repeated.toString()); }
+  }
   const updatedMetadata = metadataChange();
   add(plan, '---\naliases: [新规划]\n---\n# Updated'); watchers.forEach(watcher => watcher.change?.(plan));
   await lookup('documents', '新规划');
   await updatedMetadata;
   assert.equal((await lookup('documents', '新规划'))[0].insert, 'project-plan|新规划');
   assert.deepEqual(await lookup('documents', '项目规划'), [], 'old aliases are invalidated');
+  for (const [frontmatter, anchors] of [
+    ['---\ntitle: My Post\ndate: 2026-11-24\n---\n', ['intro', 'setup']],
+    ['---\n# internal note\ntags: [a]\n---\n', ['intro', 'setup']],
+    ['﻿---\r\ntitle: My Post\r\n--- \r\n', ['intro', 'setup']],
+    ['---\ntitle: [unclosed\n---\n', ['intro', 'setup']],
+    ['---\ntitle: My Post\n\n', ['intro', 'setup']],
+    ['Text\n\n---\n', ['intro', 'setup']],
+    ['Title\n---\n', ['title', 'intro', 'setup']]
+  ] as const) {
+    const text = frontmatter + '# Intro\n\n***\n\n## Setup\n', post = Utils.joinPath(vault, 'notes', 'post.md'); add(post, text);
+    try {
+      for (const wiki of [false, true]) {
+        assert.deepEqual((await lookup('headings', '', wiki ? 'notes/post' : 'post.md', wiki)).map(item => item.anchor), anchors, frontmatter);
+      }
+      assert.deepEqual(currentHeadingSuggestions(text).map(item => item.anchor), anchors, frontmatter);
+      const rendered = renderMarkdownToHtml({ markdownText: text, markdownFilePath: post.fsPath, target: 'html' }).html;
+      assert.deepEqual([...rendered.matchAll(/<h[12]\b[^>]*\bid="([^"]*)"/g)].map(match => match[1]), anchors, 'candidates match rendered ids');
+      const state = EditorState.create({ doc: text, extensions: [markdown()] });
+      assert.equal(state.doc.lineAt(findDocumentFragmentPosition(state, '#intro')!).text, '# Intro', 'the frontmatter lines still count');
+      assert.equal(findDocumentFragmentPosition(state, '#title-my-post-date-2026-11-24'), null);
+    } finally { files.delete(post.toString()); }
+  }
   const newNote = Utils.joinPath(vault, 'notes', 'fresh.md'), namesChanged = metadataChange(false);
   add(newNote); watchers.forEach(watcher => watcher.create?.(newNote));
   await namesChanged;

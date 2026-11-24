@@ -7,7 +7,7 @@ import exportRuntime from '../src/export/runtime';
 const vscodeWindow: { activeTextEditor: any; visibleTextEditors: any[] } = {
   activeTextEditor: undefined, visibleTextEditors: []
 };
-mock.module('vscode', () => ({ window: vscodeWindow }));
+mock.module('vscode', () => ({ EndOfLine: { LF: 1, CRLF: 2 }, window: vscodeWindow }));
 const { createVscodeViewNavigationAdapter } = await import('../src/host/vscodeViewNavigationAdapter');
 const uri = { scheme: 'file', fsPath: 'C:/tmp/tab-reading.md', fragment: '', toString: () => 'file:///tab-reading.md' };
 const text = Array.from({ length: 180 }, (_, index) => `Paragraph ${index + 1}: reading position witness.\n`).join('\n');

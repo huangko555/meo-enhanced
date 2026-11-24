@@ -2,6 +2,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
+import assert from 'node:assert/strict';
+import { createTextSearch } from '../webview/src/application/searchCaseFolding';
+
+for (const locale of ['en', 'tr']) {
+  const next = createTextSearch('istanbul', false, locale)('İstanbul I\u0307stanbul');
+  assert.deepEqual(next(), { start: 0, end: 8 });
+  assert.deepEqual(next(), { start: 9, end: 18 });
+  assert.equal(next(), null);
+}
+const lithuanianMatches = createTextSearch('cat', false, 'lt')('Ì cat I\u0301 cat');
+assert.deepEqual(lithuanianMatches(), { start: 2, end: 5 });
+assert.deepEqual(lithuanianMatches(), { start: 9, end: 12 });
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-search-replace-production-'));
@@ -287,6 +299,62 @@ async function main(): Promise<void> {
         Math.abs(result.after - result.before) > 1) {
         throw new Error(`Rich-document replace-all lost reading position (${mode}): ${JSON.stringify(result)}`);
       }
+    }
+
+    // Lower-casing U+0130 adds a code unit, so folded offsets must stay in source coordinates.
+    const filler = Array.from({ length: 9_000 }, (_, index) => `Paragraph ${index} with İ text.\n`).join('\n');
+    for (const mode of ['source', 'live']) for (const large of [false, true]) {
+      const suffix = large ? '\n' + filler : '';
+      for (const { source, query, matches, replaced } of [
+        { source: 'I\u0307stanbul has a cat here.', query: 'istanbul', matches: ['I\u0307stanbul'], replaced: 'dog has a cat here.' },
+        { source: 'İstanbul has a cat here.', query: 'cat', matches: ['cat'], replaced: 'İstanbul has a dog here.' },
+        { source: 'CAT İİ Cat and cat', query: 'cat', matches: ['CAT', 'Cat', 'cat'], replaced: 'dog İİ dog and dog' },
+        { source: 'x İstanbul, İSTANBUL', query: 'İstanbul', matches: ['İstanbul', 'İSTANBUL'], replaced: 'x dog, dog' },
+        { source: 'İ ΟΔΟΣ end', query: 'οδος', matches: ['ΟΔΟΣ'], replaced: 'İ dog end' },
+        { source: 'İ 𐐀 Cat', query: '𐐨 cat', matches: ['𐐀 Cat'], replaced: 'İ dog' }
+      ]) {
+        const result = await page.evaluate(({ text, mode, query }) => {
+          (window as any).__replaceAllEditor.destroy();
+          document.getElementById('search')!.replaceChildren();
+          const editor = (window as any).__replaceAllEditor = (window as any).__createInputCursorEditor({
+            parent: document.getElementById('search')!, text, initialMode: mode, onApplyChanges() {}
+          });
+          editor.setSearchQuery(query);
+          const highlighted = [...editor.view.dom.querySelectorAll('.meo-search-match')].map(match => match.textContent);
+          const total = editor.countMatches(query);
+          const selected = Array.from({ length: total }, () => {
+            editor.findNext(query, { focusEditor: false });
+            const { from, to } = editor.view.state.selection.main;
+            return editor.view.state.sliceDoc(from, to);
+          });
+          let error = '';
+          try { editor.replaceAll(query, 'dog'); } catch (reason) { error = String(reason); }
+          return { highlighted, selected: selected.sort(), error, text: editor.getText() };
+        }, { text: source + suffix, mode, query });
+        const label = JSON.stringify({ mode, large, source, query, ...result, text: result.text.slice(0, 80) });
+        if (result.error || result.text !== replaced + suffix
+          || JSON.stringify(result.highlighted) !== JSON.stringify(matches)
+          || JSON.stringify(result.selected) !== JSON.stringify([...matches].sort())) {
+          throw new Error(`Case-insensitive search left source coordinates: ${label}`);
+        }
+      }
+    }
+    await page.evaluate(() => {
+      (window as any).__replaceAllEditor.destroy();
+      document.getElementById('search')!.replaceChildren();
+      (window as any).__replaceAllEditor = (window as any).__createInputCursorEditor({
+        parent: document.getElementById('search')!, initialMode: 'live', onApplyChanges() {},
+        text: 'intro\n\n| A | B |\n| --- | --- |\n| İ Cat end | x |\n'
+      });
+    });
+    await waitForFrames(page);
+    const tableMatches = await page.evaluate(() => {
+      const editor = (window as any).__replaceAllEditor;
+      editor.setSearchQuery('cat');
+      return [...editor.view.dom.querySelectorAll('tbody td .meo-search-match')].map(match => match.textContent);
+    });
+    if (JSON.stringify(tableMatches) !== '["Cat"]') {
+      throw new Error(`Table cell highlight left source coordinates: ${JSON.stringify(tableMatches)}`);
     }
 
     console.log('search and replace production contracts passed');

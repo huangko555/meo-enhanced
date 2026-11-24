@@ -27,6 +27,10 @@ const isSameResource = (left: vscode.Uri, right: vscode.Uri): boolean => {
   return left.with({ query: '', fragment: '' }).toString() === right.with({ query: '', fragment: '' }).toString();
 };
 
+// `offsetAt` counts CRLF as two characters; the Webview document uses LF.
+const normalizedOffsetAt = (document: vscode.TextDocument, position: vscode.Position): number =>
+  document.offsetAt(position) - (document.eol === vscode.EndOfLine.CRLF ? position.line : 0);
+
 const parseLineFragmentSelection = (document: vscode.TextDocument): ViewSelection | null => {
   const fragment = document.uri.fragment?.trim() ?? '';
   const match = /^(?:L)?(\d+)(?:(?:,|:|C)(\d+))?$/i.exec(fragment);
@@ -38,7 +42,7 @@ const parseLineFragmentSelection = (document: vscode.TextDocument): ViewSelectio
   const oneBasedColumn = match[2] ? Number.parseInt(match[2], 10) : 1;
   const zeroBasedColumn = Number.isFinite(oneBasedColumn) && oneBasedColumn > 0 ? oneBasedColumn - 1 : 0;
   const character = Math.min(line.range.end.character, Math.max(0, zeroBasedColumn));
-  const offset = document.offsetAt(new vscode.Position(clampedLine - 1, character));
+  const offset = normalizedOffsetAt(document, new vscode.Position(clampedLine - 1, character));
   return { anchor: offset, head: offset };
 };
 
@@ -55,8 +59,8 @@ export function createVscodeViewNavigationAdapter(
     return vscode.window.visibleTextEditors.find(isEditorForDocument);
   };
   const readSelection = (editor: vscode.TextEditor): ViewSelection => ({
-    anchor: editor.document.offsetAt(editor.selection.start),
-    head: editor.document.offsetAt(editor.selection.end)
+    anchor: normalizedOffsetAt(editor.document, editor.selection.start),
+    head: normalizedOffsetAt(editor.document, editor.selection.end)
   });
 
   const initialEditor = findEditor();

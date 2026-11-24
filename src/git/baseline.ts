@@ -70,6 +70,19 @@ async function isTracked(repoRoot: string, gitPath: string): Promise<boolean> {
   }
 }
 
+async function isAbsentFromCommit(repoRoot: string, headOid: string, gitPath: string): Promise<boolean> {
+  try {
+    // An empty result means the path was absent from this exact baseline.
+    const result = await runGit(['ls-tree', '--name-only', headOid, '--', gitPath], { cwd: repoRoot });
+    return result.stdout.length === 0;
+  } catch (error) {
+    if (error instanceof GitCliFailure) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 async function isIgnored(repoRoot: string, gitPath: string): Promise<boolean> {
   try {
     await runGit(['check-ignore', '-q', '--', gitPath], { cwd: repoRoot, maxBytes: 64 * 1024 });
@@ -157,7 +170,7 @@ export async function hydrateGitBaselineText(payload: GitBaselinePayload): Promi
 
   let baselineResult;
   try {
-    baselineResult = await runGit(['cat-file', '-p', `HEAD:${payload.gitPath}`], {
+    baselineResult = await runGit(['cat-file', '-p', `${payload.headOid}:${payload.gitPath}`], {
       cwd: payload.repoRoot,
       maxBytes: gitBaselineMaxBytes + 1
     });
@@ -169,6 +182,13 @@ export async function hydrateGitBaselineText(payload: GitBaselinePayload): Promi
           baseText: null,
           reason: 'too-large',
           maxBytesExceeded: true
+        };
+      }
+      // A staged new or renamed file is tracked by the index but has no HEAD content.
+      if (await isAbsentFromCommit(payload.repoRoot, payload.headOid, payload.gitPath)) {
+        return {
+          ...payload,
+          baseText: ''
         };
       }
       return {
@@ -198,9 +218,10 @@ export async function hydrateGitBaselineText(payload: GitBaselinePayload): Promi
     };
   }
 
+  const baselineText = baselineBytes.toString('utf8');
   return {
     ...payload,
-    baseText: baselineBytes.toString('utf8')
+    baseText: baselineText.charCodeAt(0) === 0xfeff ? baselineText.slice(1) : baselineText
   };
 }
 

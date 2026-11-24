@@ -450,6 +450,42 @@ try {
   assert.ok(incrementalCodeSteps < 5_000, `a code edit must reuse existing inner-language fragments: ${incrementalCodeSteps} LR steps`);
   await page.evaluate(() => (window as any).__codeEditor.destroy());
 
+  stage = 'ordered-list numbering waits for pending background syntax';
+  const numberedCode = '\n```text\n10. START\n20. WAIT\n30. STOP\n```\n\n1. one\n1. two\n';
+  await page.evaluate(numberedCode => {
+    const scope = window as any;
+    scope.__numberedEditor = scope.__liveHistory.create({ parent: document.getElementById('editor'),
+      text: scope.__original + numberedCode, initialMode: 'source' });
+  }, numberedCode);
+  await page.waitForFunction(() => (window as any).__liveHistory.markdownReady((window as any).__numberedEditor));
+  const numbering = await page.evaluate(() => {
+    const scope = window as any, editor = scope.__numberedEditor, api = scope.__liveHistory;
+    const tail = () => editor.getText().slice(scope.__original.length);
+    const type = (after: string, text: string) => api.input(editor, editor.getText().lastIndexOf(after) + after.length, text);
+    scope.__holdParseReplies = true;
+    type('START', 'a');
+    const pending = !api.markdownReady(editor);
+    type('STARTa', 'b');
+    const code = tail();
+    type('one', '!');
+    return { pending, code, list: tail() };
+  });
+  assert.equal(numbering.pending, true, 'the second and third edits must precede the Worker reply');
+  assert.equal(numbering.code, numberedCode.replace('START', 'STARTab'), 'pending syntax must not renumber code');
+  assert.equal(numbering.list, numbering.code.replace('one', 'one!'), 'pending syntax does not prove a list');
+  await page.evaluate(() => {
+    const scope = window as any; scope.__holdParseReplies = false;
+    for (const { worker, data } of scope.__heldParseReplies.splice(0)) worker.dispatchEvent(new MessageEvent('message', { data }));
+  });
+  await page.waitForFunction(() => (window as any).__liveHistory.markdownReady((window as any).__numberedEditor));
+  assert.equal(await page.evaluate(() => {
+    const scope = window as any, editor = scope.__numberedEditor;
+    scope.__liveHistory.input(editor, editor.getText().lastIndexOf('one!') + 4, '!');
+    const text = editor.getText().slice(scope.__original.length);
+    editor.destroy();
+    return text;
+  }), numbering.list.replace('1. one!', '1. one!!').replace('1. two', '2. two'), 'the next confirmed edit renumbers the list only');
+
   for (const dispose of [false, true]) {
     stage = dispose ? 'dispose during syntax reception' : 'input during syntax reception';
     await page.evaluate(() => {

@@ -62,7 +62,7 @@ import { continueLiteralSourceNewline, insertIndentedCodeNewline, insertLiteralS
 import { getCodeBlockSourceLines } from './helpers/blockIndent';
 import { markdownContentStyleTheme } from './helpers/markdownContentStyleTheme';
 import { markdownTagField } from './helpers/tags';
-import { findDocumentFragmentPosition, getLinkHrefAtPointer, getLinkHrefAtSourcePosition, isPrimaryModifierPointerClick } from './helpers/linkNavigation';
+import { findDocumentFragmentPosition, getLinkHrefAtPointer, getLinkHrefAtSourcePosition, hrefFromSourceLinkNode, isPrimaryModifierPointerClick } from './helpers/linkNavigation';
 import { documentBlocksFacet } from './editor/documentBlocks';
 import type { DocumentBlocksPort } from './editor/documentBlocks';
 import {
@@ -2518,7 +2518,8 @@ export function createEditor({
       Prec.highest(pasteAssistance(
         (view, text) => mermaidPasteText(view, text) ?? displayMathPasteText(view, text),
         createMarkdownContentParser().set({ linkify: false }),
-        () => viewportController.captureUserScrollCurrentness()
+        () => viewportController.captureUserScrollCurrentness(),
+        hrefFromSourceLinkNode
       )),
       Prec.highest(createInputSuggestions({ inputContext, protectedBlockRange, mathContext: getMathCompletionBody, requestLinks: requestLinkCandidates, currentHeadings: () => currentHeadingSuggestions(readDocumentTextProjection(view.state.doc)),
         openSettings: openInputSuggestionSettings,

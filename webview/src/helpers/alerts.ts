@@ -3,40 +3,12 @@ import { mapLiveWidgetPositions } from '../editor/liveWidgetPositions';
 import { createElement, Info, Lightbulb, AlertCircle, AlertTriangle, XCircle } from 'lucide';
 import { getUiStrings } from '../application/uiLanguage';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
+import type { EditorState } from '@codemirror/state';
+import type { SyntaxNodeRef } from '@lezer/common';
+import { readMarkdownAlertDirective, type AlertType } from '../../../src/foundation/markdownAlert';
+import { hrefFromSourceLinkNode } from './linkNavigation';
 
-export type AlertType = 'NOTE' | 'TIP' | 'IMPORTANT' | 'WARNING' | 'CAUTION';
-
-export const ALERT_TYPES: readonly AlertType[] = ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'];
-
-const ALERT_DIRECTIVE_REGEX = />\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/;
-
-function getAlertDirectiveDetails(lineText: string, lineFrom: number): {
-  type: AlertType;
-  directiveFrom: number;
-  directiveTo: number;
-  labelFrom: number;
-  labelTo: number;
-} | null {
-  const match = ALERT_DIRECTIVE_REGEX.exec(lineText);
-  if (!match) {
-    return null;
-  }
-  const type = match[1] as AlertType;
-  if (!ALERT_TYPES.includes(type)) {
-    return null;
-  }
-  const directiveFrom = lineFrom + match.index;
-  const directiveTo = directiveFrom + match[0].length;
-  const labelOffset = match[0].indexOf(match[1]);
-  const labelFrom = directiveFrom + labelOffset;
-  return {
-    type,
-    directiveFrom,
-    directiveTo,
-    labelFrom,
-    labelTo: labelFrom + match[1].length
-  };
-}
+export type { AlertType } from '../../../src/foundation/markdownAlert';
 
 function getAlertIconElement(type: AlertType): Element {
   const iconProps = { 'aria-hidden': 'true', width: 16, height: 16 };
@@ -99,13 +71,24 @@ export interface AlertBlock {
   labelTo: number;
 }
 
-export function detectAlertInBlockquote(state: any, node: any): AlertBlock | null {
-  const line = state.doc.lineAt(node.from);
-  const lineText = state.doc.sliceString(line.from, line.to);
-  const directive = getAlertDirectiveDetails(lineText, line.from);
-  if (!directive) {
-    return null;
+export function detectAlertInBlockquote(state: EditorState, node: SyntaxNodeRef): AlertBlock | null {
+  let marker = node.node.firstChild;
+  const paragraph = marker?.nextSibling;
+  if (marker?.name !== 'QuoteMark' || paragraph?.name !== 'Paragraph') return null;
+  let firstInline = paragraph.firstChild;
+  // Leading blank quote lines may be included in Lezer's first paragraph.
+  while (firstInline?.name === 'QuoteMark' && !state.doc.sliceString(marker.to, firstInline.from).trim()) {
+    marker = firstInline;
+    firstInline = firstInline.nextSibling;
   }
+  const line = state.doc.lineAt(marker.from);
+  const afterMarker = state.doc.sliceString(marker.to, line.to);
+  const text = afterMarker.trimStart();
+  const start = marker.to + afterMarker.length - text.length;
+  const directive = readMarkdownAlertDirective(text);
+  if (!directive) return null;
+  if (firstInline?.name === 'Link' && firstInline.from === start
+    && (firstInline.getChildren('LinkMark').length > 2 || hrefFromSourceLinkNode(state, firstInline))) return null;
 
   return {
     type: directive.type,
@@ -113,9 +96,9 @@ export function detectAlertInBlockquote(state: any, node: any): AlertBlock | nul
     to: node.to,
     lineFrom: line.from,
     lineTo: line.to,
-    directiveFrom: directive.directiveFrom,
-    directiveTo: directive.directiveTo,
-    labelFrom: directive.labelFrom,
-    labelTo: directive.labelTo
+    directiveFrom: marker.from,
+    directiveTo: start + directive.length,
+    labelFrom: start + 2,
+    labelTo: start + directive.length - 1
   };
 }

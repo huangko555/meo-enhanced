@@ -155,6 +155,46 @@ try {
     assert.equal(await choose('plain'), 'https://example.com', mode + ': text choice replaces the auto-generated link');
     await undoRedo('label', 'https://example.com');
 
+    const next = 'https://new.example/a_(b)';
+    const anchor = '<a href="' + next + '">New page</a>';
+    for (const [original, selected, expected] of [
+      ['[docs](https://old.example/page)', 'https://old.example/page', '[docs](' + next + ')'],
+      ['![logo](https://old.example/logo.png "Title")', 'https://old.example/logo.png', '![logo](' + next + ' "Title")'],
+      ['<https://old.example>', 'https://old.example', '<' + next + '>'],
+      ['[docs][id]\n\n[id]: https://old.example', 'https://old.example', '[docs][id]\n\n[id]: ' + next],
+      ['[docs](https://old.example)', 'docs', '[' + next + '](https://old.example)'],
+      ['[docs][id]', 'docs', '[' + next + '][id]'],
+      ['[docs]\n\n[docs]: https://old.example', 'docs', '[' + next + '][docs]\n\n[docs]: https://old.example'],
+      ['![logo](logo.png)', 'logo', '![' + next + '](logo.png)'],
+      ['[docs]()', '', '[docs](' + next + ')']
+    ] as const) for (const html of ['', anchor]) for (const pasteUrl of [true, false]) {
+      const from = selected ? original.indexOf(selected) : original.length - 1;
+      await prepare(mode, original, from, from + selected.length, { pasteUrl });
+      assert.equal(await paste(next, html), expected, `${mode}: no link inside ${original}, ${html ? 'rich' : 'plain'} URL, pasteUrl ${pasteUrl}`);
+      await undoRedo(original, expected);
+    }
+    for (const [original, selected] of [
+      ['[docs](https://old.example)', 'https://old.example'],
+      ['[docs](<https://old.example>)', 'https://old.example'],
+      ['[docs](<https://old.example>)', '<https://old.example>']
+    ] as const) {
+      const from = original.indexOf(selected);
+      const expected = '[docs](<https://new.example/a)b>)';
+      await prepare(mode, original, from, from + selected.length);
+      assert.equal(await paste('https://new.example/a)b', ''), expected, mode + ': a literal parenthesis stays in the destination');
+      await undoRedo(original, expected);
+    }
+    const link = '[word](https://new.example/a_%28b%29)';
+    for (const [before, after] of [
+      ['read ', ' today'], ['see [', '] here'], ['[a](https://a.example)', ''], ['', '[a](https://a.example)'],
+      ['[^1]: ', ''], ['- [ ] ', ' done'], ['', ' <https://a.example>']
+    ] as const) {
+      const original = before + 'word' + after;
+      await prepare(mode, original, before.length, before.length + 4);
+      assert.equal(await paste(next, ''), before + link + after, `${mode}: the selected word in ${original} becomes the label`);
+      await undoRedo(original, before + link + after);
+    }
+
     await prepare(mode);
     const formatted = '# Heading\n\n**Word**\n\n| A | B |\n| --- | --- |\n| **1** | 2 |';
     assert.equal(await paste('Heading\nWord\nA\tB\n1\t2',
@@ -203,6 +243,44 @@ try {
       await prepare(mode, original, position, position, { pasteHtml: true });
       assert.equal(await paste('plain fallback', html), expected, `${mode}: block edges for ${html.slice(0, 30)}`);
       await undoRedo(original, expected);
+    }
+    const code = 'import os\n\n\ndef a():  \n \t\n\n    return 1';
+    for (const [html, expected] of [
+      ['<p>Before</p><pre><code>' + code + '\n</code></pre><p>After</p>', 'Before\n\n```\n' + code + '\n```\n\nAfter'],
+      ['<pre>\n\n\na\n\n\n\n</pre>', '```\n\n\na\n\n\n\n```'],
+      ['<ul><li>Step<pre>a  \n\n\n \nb</pre></li></ul>', '- Step\n\n  ```\n  a  \n\n\n   \n  b\n  ```'],
+      ['<blockquote><pre>a  \n\n\nb</pre></blockquote>', '> ```\n> a  \n>\n>\n> b\n> ```'],
+      ['<p>one \u00000\u0000</p><pre>x\u0000\n\n\n\u0000y</pre>', 'one 0\n\n```\nx\n\n\ny\n```'],
+      ['<p>one  </p>\n\n\n\n<p>two</p>', 'one\n\ntwo']
+    ] as const) {
+      await prepare(mode);
+      assert.equal(await paste('plain fallback', html), expected, `${mode}: code and prose whitespace for ${JSON.stringify(html)}`);
+      await undoRedo('', expected);
+    }
+    for (const [html, expected] of [
+      ['<ul><li>Alpha<ul><li>Beta</li></ul></li><li>Gamma</li></ul>', '- Alpha\n\n  - Beta\n- Gamma'],
+      ['<ul><li>Alpha</li><ul><li>Beta</li></ul><li>Gamma</li></ul>', '- Alpha\n\n  - Beta\n- Gamma'],
+      ['<ol start="3"><li>Alpha</li><ol><li>Beta</li><li>More</li></ol><li>Gamma</li></ol>', '3. Alpha\n\n   1. Beta\n   2. More\n4. Gamma'],
+      ['<ul><li>Alpha</li><ol><li>Beta</li><ul><li>Deep</li></ul></ol><ul><li>Second</li></ul></ul>', '- Alpha\n\n  1. Beta\n\n     - Deep\n\n  - Second'],
+      ['<ul><ul><li>Beta</li></ul><li>Gamma</li></ul>', '- Beta\n- Gamma'],
+      ['<ul><ol><ol><li>Deep</li></ol></ol></ul>', '1. Deep'],
+      ['<ul><li>Alpha</li><ul><ul><li>Deep</li></ul><li>Beta</li></ul></ul>', '- Alpha\n\n  - Deep\n  - Beta']
+    ] as const) {
+      await prepare(mode);
+      assert.equal(await paste('plain fallback', html), expected, `${mode}: nested list ${html}`);
+      await undoRedo('', expected);
+    }
+    for (const [html, expected] of [
+      ['<b style="font-weight:normal;" id="docs-internal-guid-1"><span style="font-weight:400">Hello world</span></b>', 'Hello world'],
+      ['<b style="font-weight:normal"><p>para one</p><p>para two</p></b>', 'para one\n\npara two'],
+      ['<b style="font-weight:normal"><h2>Title</h2><p>a <strong>bold</strong> b</p></b>', '## Title\n\na **bold** b'],
+      ['<p><strong style="font-weight: 400">a</strong> <em style="font-style: normal">b</em> <i style="font-style:normal">c</i></p>', 'a b c'],
+      ['<p><b>a</b> <b style="color:red">b</b> <strong style="font-weight:700">c</strong> <b style="font-weight:600">d</b></p>', '**a** **b** **c** **d**'],
+      ['<p><b style="mso-bidi-font-weight:normal">a</b> <i style="mso-bidi-font-style:normal">b</i> <em style="font-style:italic">c</em></p>', '**a** *b* *c*']
+    ] as const) {
+      await prepare(mode);
+      assert.equal(await paste('plain fallback', html), expected, `${mode}: inline style over the tag for ${html}`);
+      await undoRedo('', expected);
     }
     for (const src of ['', 'data:image/png;base64,ignored', 'javascript:ignored']) {
       const image = '<img src="' + src + '">';
@@ -282,6 +360,16 @@ try {
   const edgeHtml = '<h2>Modes</h2>' + table + '<p>After the table.</p>';
   for (const mode of ['source', 'live']) for (const large of [false, true]) {
     const prefix = 'Earlier paragraph.\n\n'.repeat(large ? 4200 : 45);
+    const linked = prefix + '[docs](https://old.example)';
+    await prepare(mode, linked, prefix.length + 7, linked.length - 1);
+    await page.evaluate(() => (window as any).editor.view.dispatch({ scrollIntoView: true }));
+    assert.equal(await page.evaluate(() => {
+      const scope = window as any;
+      return scope.EditingFeaturesHarness.usesLargeDocumentDerivedWorkBudget(scope.editor.view.state);
+    }), large, `${mode}: link paste exercises the expected document-scale policy`);
+    await page.waitForFunction(() => [...(window as any).editor.view.contentDOM.querySelectorAll('.cm-line')].at(-1)?.querySelector('span'));
+    assert.equal(await paste('https://new.example', ''), prefix + '[docs](https://new.example)', `${mode}/${large}: a pasted URL replaces the destination`);
+    await undoRedo(linked, prefix + '[docs](https://new.example)');
     for (const [text, html] of [[edgePlain, edgeHtml], [edgeMarkdown, '']]) {
       await prepare(mode, prefix);
       await page.evaluate(() => (window as any).editor.view.dispatch({ scrollIntoView: true }));

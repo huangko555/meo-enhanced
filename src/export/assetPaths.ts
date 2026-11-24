@@ -67,6 +67,11 @@ export function rewriteExportImageSrc(rawSrc: string, options: RewriteExportImag
     return input;
   }
 
+  // An exported file has no network scheme to inherit. Preview uses HTTPS too.
+  if (input.startsWith('//')) {
+    return `https:${input}`;
+  }
+
   const { pathPart, suffix, hash } = splitPathAndSuffix(input);
   if (!pathPart) {
     return input;
