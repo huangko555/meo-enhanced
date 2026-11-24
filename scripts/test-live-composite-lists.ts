@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
 import { assessLargeDocument } from '../src/foundation/largeDocument';
+import { getBuiltInVisuals } from '../src/shared/builtInVisualBaseline';
 
 const root = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-composite-lists-'));
@@ -338,7 +339,12 @@ async function main(): Promise<void> {
     await page.addStyleTag({ path: path.join(root, 'webview', 'src', 'styles.css') });
     // VS Code's host quote background can differ from the editor appearance.
     await page.addStyleTag({ content: 'blockquote { background: #1c2128; }' });
-    await page.addStyleTag({ content: ':root { --meo-semantic-blockquoteBorder: #777; --meo-semantic-blockquoteForeground: #444; }' });
+    const { alertNoteBorder } = getBuiltInVisuals('dark').semanticColors;
+    await page.addStyleTag({ content: `:root {
+      --meo-semantic-blockquoteBorder: #777;
+      --meo-semantic-blockquoteForeground: #444;
+      --meo-semantic-alertNoteBorder: ${alertNoteBorder};
+    }` });
     await page.addStyleTag({ content: '#host { width: 280px; } #host .cm-editor { width: 280px; } #host .cm-gutters { display: none; }' });
     await page.addStyleTag({ content: '#order-host { width: 280px; } #order-host .cm-editor { width: 280px; } #order-host .cm-gutters { display: none; }' });
     await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
