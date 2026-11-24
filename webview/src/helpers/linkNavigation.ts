@@ -9,7 +9,7 @@ import { isSafeHtmlUrl } from '../../../src/shared/htmlPolicy';
 import { normalizeLinkDestination } from '../../../src/foundation/linkDestination';
 import { extractHeadings, resolvedSyntaxTree } from './markdownSyntax';
 import { isWikiLinkNode, parseWikiLinkData } from './wikiLinks';
-import { findRawSourceUrlMatches, linkSchemeRe, normalizeSourceHref } from './rawUrls';
+import { findRawSourceUrlMatches, linkSchemeRe, normalizeExplicitSourceHref } from './rawUrls';
 
 const linkReferenceCache = new WeakMap<object, { tree: Tree; links: Map<string, string> }>();
 type SourceHtmlLink = { from: number; to: number; href: string };
@@ -148,7 +148,7 @@ function getReferenceLinkMap(state: EditorState): Map<string, string> {
         return;
       }
       const label = parseReferenceLabel(state.doc.sliceString(labelNode.from, labelNode.to));
-      const href = normalizeSourceHref(state.doc.sliceString(urlNode.from, urlNode.to));
+      const href = normalizeExplicitSourceHref(state.doc.sliceString(urlNode.from, urlNode.to));
       if (!label || !href || resolved.has(label)) {
         return;
       }
@@ -165,11 +165,7 @@ function inlineLinkDestinationFromText(linkText: string): string {
   if (!match) {
     return '';
   }
-  const rawDestination = match[1].trim();
-  const unwrapped = rawDestination.startsWith('<') && rawDestination.endsWith('>')
-    ? rawDestination.slice(1, -1)
-    : rawDestination;
-  return normalizeSourceHref(unwrapped);
+  return normalizeExplicitSourceHref(match[1]);
 }
 
 export function hrefFromSourceLinkNode(state: EditorState, linkNode: any, referenceState = state): string {
@@ -178,7 +174,7 @@ export function hrefFromSourceLinkNode(state: EditorState, linkNode: any, refere
   }
   const urlNode = childNodeByName(linkNode, 'URL');
   if (urlNode) {
-    return normalizeSourceHref(state.doc.sliceString(urlNode.from, urlNode.to));
+    return normalizeExplicitSourceHref(state.doc.sliceString(urlNode.from, urlNode.to));
   }
   const inlineDestination = inlineLinkDestinationFromText(state.doc.sliceString(linkNode.from, linkNode.to));
   if (inlineDestination) {
@@ -314,7 +310,7 @@ export function getLinkHrefAtSourcePosition(state: EditorState, pos: number, opt
           if (href) return href;
         }
         const urlNode = childNodeByName(node, 'URL');
-        const href = urlNode ? normalizeSourceHref(state.doc.sliceString(urlNode.from, urlNode.to)) : '';
+        const href = urlNode ? normalizeExplicitSourceHref(state.doc.sliceString(urlNode.from, urlNode.to)) : '';
         if (href) {
           return href;
         }
@@ -322,7 +318,7 @@ export function getLinkHrefAtSourcePosition(state: EditorState, pos: number, opt
       }
 
       if (node.name === 'URL') {
-        const href = normalizeSourceHref(state.doc.sliceString(node.from, node.to));
+        const href = normalizeExplicitSourceHref(state.doc.sliceString(node.from, node.to));
         if (href) {
           return href;
         }

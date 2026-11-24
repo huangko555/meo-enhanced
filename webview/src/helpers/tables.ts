@@ -39,7 +39,7 @@ import { createLatexMathElement, parseLatexMathAt } from './math';
 import { hrefFromMarkdownReference, isPrimaryModifierPointerClick, markdownReferenceTargetSignature } from './linkNavigation';
 import { wikiLinkScheme } from './wikiLinks';
 import { isWikiImageTarget, parseWikiReference, wikiImageSrc } from '../../../src/foundation/wikiReference';
-import { normalizeSourceHref } from './rawUrls';
+import { normalizeExplicitSourceHref, normalizeSourceHref } from './rawUrls';
 import type { EditorDiagnostic } from './diagnostics';
 import {
   handleBackspaceAtListContentStart,
@@ -1630,7 +1630,7 @@ function parseTableInlineMarkdownLink(text: string, index: number, syntax: Retur
   if (!link || link.image !== image) return null;
   let url = 'referenceLabel' in link
     ? hrefFromMarkdownReference(referenceState!, link.referenceLabel)
-    : normalizeSourceHref(text.slice(link.urlFrom - offset, link.urlTo - offset).trim());
+    : normalizeExplicitSourceHref(text.slice(link.urlFrom - offset, link.urlTo - offset));
   if ('referenceLabel' in link && !url) return null;
   if (url.startsWith('<') && url.endsWith('>') && url.length >= 2) {
     url = url.slice(1, -1).trim();

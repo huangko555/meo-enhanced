@@ -43,7 +43,12 @@ function trimMatchingUrlQuotes(value: string): string {
 }
 
 export function normalizeSourceHref(value: string): string {
-  const trimmed = normalizeLinkDestination(trimMatchingUrlQuotes(trimTrailingUrlPunctuation((value ?? '').trim())));
+  return normalizeExplicitSourceHref(trimMatchingUrlQuotes(trimTrailingUrlPunctuation((value ?? '').trim())));
+}
+
+/** A syntax-delimited address already has exact boundaries. */
+export function normalizeExplicitSourceHref(value: string): string {
+  const trimmed = normalizeLinkDestination(value);
   if (!trimmed) {
     return '';
   }
