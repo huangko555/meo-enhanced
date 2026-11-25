@@ -489,7 +489,7 @@ async function assertPreviewRuntime() {
     editorLongLabelLayout.clippingOverflow === 'visible' ||
     editorLongLabelLayout.lineCount < 2 ||
     editorLongLabelLayout.whiteSpace !== 'normal' ||
-    editorLongLabelLayout.overflowWrap !== 'anywhere' ||
+    editorLongLabelLayout.overflowWrap !== 'break-word' ||
     editorLongLabelLayout.label.left < editorLongLabelLayout.clipping.left - 0.5 ||
     editorLongLabelLayout.label.top < editorLongLabelLayout.clipping.top - 0.5 ||
     editorLongLabelLayout.label.right > editorLongLabelLayout.clipping.right + 0.5 ||

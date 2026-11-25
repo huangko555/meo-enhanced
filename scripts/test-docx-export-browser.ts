@@ -72,27 +72,32 @@ async function assertLongMermaidLabelMaterializesWithoutCropping(): Promise<void
     const png = await archive.file(name)!.async('nodebuffer');
     const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     const lines: number[] = [];
-    let firstInk = info.width, lastInk = -1;
+    let firstInk = info.width, lastInk = -1, previousInkRow = -Infinity;
     for (let y = 0; y < info.height; y++) {
-      let rowHasInk = false;
+      let rowStart = info.width, rowEnd = -1;
       for (let x = 0; x < info.width; x++) {
         const offset = (y * info.width + x) * info.channels;
         // Label ink is darker than the node border and diagram background.
         if (data[offset]! >= 90 || data[offset + 1]! >= 100 || data[offset + 2]! >= 110) continue;
-        firstInk = Math.min(firstInk, x);
-        lastInk = Math.max(lastInk, x);
-        rowHasInk = true;
+        rowStart = Math.min(rowStart, x);
+        rowEnd = x;
       }
-      if ((!rowHasInk || y === info.height - 1) && lastInk >= firstInk) {
+      if (rowEnd < 0) continue;
+      // Underscores can leave a small gap below the other glyphs on the same line.
+      if (y - previousInkRow > 5 && lastInk >= firstInk) {
         lines.push(lastInk - firstInk + 1);
         firstInk = info.width;
         lastInk = -1;
       }
+      firstInk = Math.min(firstInk, rowStart);
+      lastInk = Math.max(lastInk, rowEnd);
+      previousInkRow = y;
     }
-    return { name, width: info.width, height: info.height, lines, totalSpan: lines.reduce((sum, span) => sum + span, 0) };
+    if (lastInk >= firstInk) lines.push(lastInk - firstInk + 1);
+    return { name, width: info.width, height: info.height, lines };
   }));
-  assert.ok(inkSpans.some(image => image.lines.length > 1 && image.totalSpan >= 170),
-    `DOCX Mermaid PNG must rasterize the full wrapped identifier: ${JSON.stringify(inkSpans)}`);
+  assert.ok(inkSpans.some(image => image.lines.length === 1 && image.lines[0]! >= 170),
+    `DOCX Mermaid PNG must rasterize the full identifier on one line: ${JSON.stringify(inkSpans)}`);
   console.log('DOCX long Mermaid label materialization passed.');
 }
 

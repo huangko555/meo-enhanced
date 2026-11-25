@@ -82,7 +82,9 @@ export async function installPackagedMermaid(page: Page, options?: PackagedMerma
 export async function assertMermaidLabelLayout(
   scope: Pick<Page, '$$eval'>,
   selector: string,
-  samples: readonly { readonly labels: readonly string[]; readonly width?: number }[],
+  samples: readonly { readonly labels: readonly string[]; readonly width?: number;
+    readonly singleLine?: readonly string[]; readonly wrapped?: readonly string[]; readonly intactWords?: readonly string[];
+    readonly centered?: readonly string[] }[],
   surface: string
 ): Promise<void> {
   const layouts = await scope.$$eval(selector, (diagrams, samples) => diagrams.map((diagram, index) => {
@@ -102,8 +104,21 @@ export async function assertMermaidLabelLayout(
         || glyphs.left < boundary.left - tolerance || glyphs.right > boundary.right + tolerance
         || glyphs.top < boundary.top - tolerance || glyphs.bottom > boundary.bottom + tolerance;
       const paragraph = label.querySelector('p')!;
+      const textNodes = doc.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+      const splitWords: string[] = [];
+      while (textNodes.nextNode()) {
+        const node = textNodes.currentNode;
+        for (const word of sample.intactWords ?? []) {
+          const start = node.textContent?.indexOf(word) ?? -1;
+          if (start < 0) continue;
+          range.setStart(node, start);
+          range.setEnd(node, start + word.length);
+          if (range.getClientRects().length > 1) splitWords.push(word);
+        }
+      }
       return { text, clipped, width: parseFloat(view.getComputedStyle(label.parentElement!).width),
         wraps: paragraph.getBoundingClientRect().height > parseFloat(view.getComputedStyle(paragraph).lineHeight) * 1.5,
+        splitWords, centerOffset: Math.abs(glyphs.left + glyphs.width / 2 - boundary.left - boundary.width / 2),
         glyphs: glyphs.toJSON(), boundary: boundary.toJSON() };
     });
   }), samples);
@@ -111,7 +126,12 @@ export async function assertMermaidLabelLayout(
   for (const [index, labels] of layouts.entries()) {
     for (const label of labels) {
       assert.ok(!label.missing && !label.clipped, `${surface}: label outside the rendered box ${JSON.stringify(label)}`);
-      const width = samples[index]!.width;
+      const sample = samples[index]!;
+      assert.deepEqual(label.splitWords, [], `${surface}: a word is split across lines in ${label.text}`);
+      if (sample.singleLine?.includes(label.text)) assert.ok(!label.wraps, `${surface}: ${label.text} must fit on one line`);
+      if (sample.wrapped?.includes(label.text)) assert.ok(label.wraps, `${surface}: ${label.text} must wrap`);
+      if (sample.centered?.includes(label.text)) assert.ok(label.centerOffset < 1, `${surface}: ${label.text} must remain centered`);
+      const width = sample.width;
       if (width !== undefined) {
         assert.equal(label.width, width, `${surface}: the author's wrapping width applies`);
         assert.ok(label.wraps, `${surface}: the label wraps at the author's width`);

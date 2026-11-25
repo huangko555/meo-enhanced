@@ -16,6 +16,12 @@ worker source in a loadable module. Layout still runs in a dedicated Blob Worker
 with the existing queue, timeout, cancellation and idle-retirement policy.
 Rendering loads only packaged resources.
 
+Ordinary HTML labels wrap at natural boundaries. The renderer measures intact
+words before laying out the graph and can grow the default label width up to
+twice its usual value. Words wider than that can break at separators or within
+the word when needed. An explicit `flowchart.wrappingWidth`, manual line breaks
+and the GitHub README preset follow their own layout rules.
+
 Live, full Preview and Source split Preview prepare a bounded SVG cache while
 idle, independently of mounted diagram DOM. The shared cache approach band is
 2400–4800px on either side of the viewport; each pass warms at most two missing

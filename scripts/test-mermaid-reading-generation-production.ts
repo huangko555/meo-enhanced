@@ -119,20 +119,24 @@ try {
       }, { mode, position: text.indexOf('```mermaid'), after: text.indexOf('AFTER_GRAPH') });
       await page.mouse.move(point.x, point.y);
       // Deliberately no idle/readiness wait before the first trusted wheel.
-      for (let i = 0; i < 50; i++) {
+      // The browser can deliver fewer wheel events than dispatched. Keep the
+      // observed-wheel minimum and bound additional attempts.
+      for (let i = 0; i < 54; i++) {
         const packet = await page.evaluate(({ mode, position }) => {
+          const wheels: number = (window as any).__mermaidReading.wheels;
           if (mode === 'live') {
             const view = document.querySelector<any>('.editor-host .cm-content').cmTile.root.view, bounds = view.scrollDOM.getBoundingClientRect();
             const top = view.documentTop + view.lineBlockAt(position).top - bounds.top;
             return { x: bounds.left + bounds.width * .65, y: bounds.top + 180,
-              delta: top > bounds.height * .6 ? 140 : top < 100 ? -60 : 18, admitEngine: top < bounds.height - 32 };
+              delta: top > bounds.height * .6 ? 140 : top < 100 ? -60 : 18, admitEngine: top < bounds.height - 32, wheels };
           }
           const frame = document.querySelector<HTMLIFrameElement>('.preview-frame')!, doc = frame.contentDocument!, bounds = frame.getBoundingClientRect();
           const top = doc.querySelector('.meo-export-mermaid')?.getBoundingClientRect().top ?? 1000;
           return { x: bounds.left + bounds.width * .65, y: bounds.top + 180,
             delta: top > doc.defaultView!.innerHeight * .6 ? 140 : top < 100 ? -60 : 18,
-            admitEngine: top < doc.defaultView!.innerHeight - 32 };
+            admitEngine: top < doc.defaultView!.innerHeight - 32, wheels };
         }, { mode, position: text.indexOf('```mermaid') });
+        if (i >= 50 && packet.wheels >= 48) break;
         if (packet.admitEngine && !engineReleased) {
           engineReleased = true;
           releaseEngine();
@@ -209,7 +213,9 @@ try {
       for (let index = 0; index < 50; index++) {
         const delta = await page.evaluate(() => {
           const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')!.contentDocument!, block = doc.querySelector('.meo-export-mermaid');
-          if (!block) return 1400;
+          // The target is windowed out. Approach within half a viewport so the
+          // reading window can mount it before another wheel passes it.
+          if (!block) return Math.floor(doc.defaultView!.innerHeight * 0.44);
           const top = block.getBoundingClientRect().top;
           return top > doc.defaultView!.innerHeight * .6 ? 140 : top < 100 ? -60 : 18;
         });
