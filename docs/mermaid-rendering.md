@@ -16,11 +16,14 @@ worker source in a loadable module. Layout still runs in a dedicated Blob Worker
 with the existing queue, timeout, cancellation and idle-retirement policy.
 Rendering loads only packaged resources.
 
-Ordinary HTML labels wrap at natural boundaries. The renderer measures intact
-words before laying out the graph and can grow the default label width up to
-twice its usual value. Words wider than that can break at separators or within
-the word when needed. An explicit `flowchart.wrappingWidth`, manual line breaks
-and the GitHub README preset follow their own layout rules.
+Ordinary HTML labels wrap at natural boundaries and preserve authored line
+breaks and paragraphs. The renderer measures intact words before laying out the
+graph and can grow the default label width up to twice its usual value. An
+explicit `flowchart.wrappingWidth` sets the maximum width of node labels. Edge
+labels keep their adaptive width. Identifiers wider than their label's limit
+break at hyphens or underscores where possible, with character wrapping for
+segments that still exceed the limit. The GitHub README preset uses its own
+label styles.
 
 Live, full Preview and Source split Preview prepare a bounded SVG cache while
 idle, independently of mounted diagram DOM. The shared cache approach band is

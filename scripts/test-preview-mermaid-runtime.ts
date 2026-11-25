@@ -35,7 +35,7 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-mermaid-runti
 async function assertReadingMermaidLabels(browser: Awaited<ReturnType<typeof launchTestBrowser>>, entry: string) {
   const page = await browser.newPage();
   try {
-    await page.setViewport({ width: 780, height: 1700 });
+    await page.setViewport({ width: 780, height: 2100 });
     await page.setContent('<!doctype html><style>html,body{height:100%;margin:0}.editor-host{height:500px}</style><body></body>');
     await page.addStyleTag({ path: path.join(repoRoot, 'webview/src/styles.css') });
     await installPackagedMermaid(page);
@@ -62,7 +62,7 @@ async function assertReadingMermaidLabels(browser: Awaited<ReturnType<typeof lau
       }, {}, { layout, count: mermaidLabelSamples.length });
       await assertMermaidLabelLayout((await frame.contentFrame())!, '.meo-export-mermaid.is-rendered', mermaidLabelSamples, `Preview ${layout}`);
     }
-    const liveSamples = [mermaidLabelSamples[0], mermaidLabelSamples[3]];
+    const liveSamples = [mermaidLabelSamples[0], mermaidLabelSamples[3], mermaidLabelSamples[5], mermaidLabelSamples[6]];
     await page.evaluate(sources => {
       const testWindow = window as any;
       testWindow.__previewController.dispose();

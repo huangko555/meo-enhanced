@@ -4,6 +4,8 @@ const chinese = '读取配置后核对环境变量并生成生产发布审计记
 const sentenceWithIdentifier = 'Run VERY_LONG_TEXT before publishing the settlement record';
 const hardBreak = 'First line<br/>Second line';
 const continuous = 'ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const handoff = 'ROUTE_HANDOFF_IDENTIFIER';
+const paragraphs = 'VERY-LONG-TEXT\n\nANOTHER-LONG-NAME';
 
 export const mermaidLabelSamples = [
   {
@@ -41,9 +43,12 @@ config:
     wrappingWidth: 80
 ---
 flowchart LR
-  A[EXPLICIT_WRAP_WIDTH] --> B["${hardBreak}"]`,
-    labels: ['EXPLICIT_WRAP_WIDTH', 'First lineSecond line'],
+  A[EXPLICIT_WRAP_WIDTH] -->|${handoff}| B["${hardBreak}"]`,
+    labels: ['EXPLICIT_WRAP_WIDTH', 'First lineSecond line', handoff],
     centered: ['EXPLICIT_WRAP_WIDTH', 'First lineSecond line'],
+    singleLine: [handoff],
+    intactWords: ['EXPLICIT_', 'WRAP_', 'WIDTH'],
+    manualBreaks: ['First lineSecond line'],
     width: 80
   },
   {
@@ -51,6 +56,25 @@ flowchart LR
     A["${prose}"] --> B["${chinese}"]
     B --> C["${hardBreak}"]`,
     labels: [prose, chinese, 'First lineSecond line'],
-    wrapped: [prose, chinese, 'First lineSecond line']
+    wrapped: [prose, chinese, 'First lineSecond line'],
+    manualBreaks: ['First lineSecond line']
+  },
+  {
+    source: `flowchart LR\n  A["\`${paragraphs}\`"]`,
+    labels: [paragraphs.replace('\n\n', '')],
+    intactWords: ['VERY-LONG-TEXT', 'ANOTHER-LONG-NAME'],
+    paragraphCount: 2
+  },
+  {
+    source: `---
+config:
+  flowchart:
+    wrappingWidth: 48
+---
+flowchart LR
+  A[${handoff}]`,
+    labels: [handoff],
+    centered: [handoff],
+    width: 48
   }
 ] as const;

@@ -1,34 +1,42 @@
 import type { MermaidConfig } from 'mermaid';
 
-const adaptiveLabels = 'data-meo-adaptive-labels';
+const labelLayout = 'data-meo-label-layout';
 const htmlNamespace = 'http://www.w3.org/1999/xhtml';
 
 /** Use Mermaid's parsed author configuration before it draws the diagram. */
-export function enableAdaptiveMermaidLabels(svg: SVGElement, config: MermaidConfig, authored: MermaidConfig, defaultLabelCss: string): void {
-  if (config.themeCSS === defaultLabelCss && config.markdownAutoWrap !== false
-    && authored.flowchart?.wrappingWidth === undefined) svg.setAttribute(adaptiveLabels, '');
+export function configureMermaidLabelLayout(svg: SVGElement, config: MermaidConfig, authored: MermaidConfig, defaultLabelCss: string): void {
+  if (config.themeCSS !== defaultLabelCss || config.markdownAutoWrap === false) return;
+  svg.setAttribute(labelLayout, authored.flowchart?.wrappingWidth === undefined ? 'adaptive' : 'fixed-nodes');
 }
 
 /** Reuse Mermaid's first measurement to size the longest natural word. */
 export function prepareMermaidLabelMeasurement(box: HTMLElement, width: number, minWidth: number): ((minimum: number) => void) | undefined {
-  if (!Number.isFinite(width) || width <= 0 || !box.closest('svg')?.hasAttribute(adaptiveLabels)) return;
-  const paragraph = box.querySelector<HTMLElement>(':scope > :is(.nodeLabel, .edgeLabel) > p');
-  if (!paragraph || paragraph.nextElementSibling) return;
+  if (!Number.isFinite(width) || width <= 0) return;
+  const layout = box.closest('svg')?.getAttribute(labelLayout);
+  if (!layout) return;
+  const label = box.querySelector(':scope > :is(.nodeLabel, .edgeLabel)');
+  if (!label) return;
+  const paragraphs = label.querySelectorAll<HTMLElement>(':scope > p');
+  if (!paragraphs.length) return;
 
-  const cap = width * 2;
-  const identifiers = keepIdentifierWords(paragraph);
-  paragraph.style.setProperty('overflow-wrap', 'break-word', 'important');
+  const fixedWidth = layout === 'fixed-nodes' && label.classList.contains('nodeLabel');
+  const cap = fixedWidth ? width : width * 2;
+  const identifiers: HTMLElement[] = [];
+  for (const paragraph of paragraphs) {
+    identifiers.push(...keepIdentifierWords(paragraph));
+    paragraph.style.setProperty('overflow-wrap', 'break-word', 'important');
+  }
   box.style.setProperty('width', 'min-content', 'important');
   box.style.maxWidth = `${cap}px`;
 
   return minimum => {
     if (minimum >= cap - 0.5) {
       const oversized = identifiers.filter(word => word.getBoundingClientRect().width > cap);
-      for (const word of oversized) allowIdentifierBreaks(word, paragraph);
+      for (const word of oversized) allowIdentifierBreaks(word);
     }
     box.style.removeProperty('width');
     box.style.maxWidth = `${Math.min(cap, Math.max(width, Math.ceil(minimum)))}px`;
-    if (minWidth > 0) box.style.minWidth = `${minWidth}px`;
+    if (!fixedWidth && minWidth > 0) box.style.minWidth = `${minWidth}px`;
   };
 }
 
@@ -60,9 +68,9 @@ function keepIdentifierWords(paragraph: HTMLElement): HTMLElement[] {
   return identifiers;
 }
 
-function allowIdentifierBreaks(word: HTMLElement, paragraph: HTMLElement): void {
+function allowIdentifierBreaks(word: HTMLElement): void {
   const segments = word.textContent!.split(/(?<=[_-])/u);
-  const document = paragraph.ownerDocument;
+  const document = word.ownerDocument;
   const contents = document.createDocumentFragment();
   for (const [index, segment] of segments.entries()) {
     if (index > 0) contents.append(document.createElementNS(htmlNamespace, 'wbr'));

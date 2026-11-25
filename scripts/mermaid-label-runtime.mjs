@@ -6,8 +6,8 @@ export function mermaidLabelPlugin(adapter, labelStyles) {
       name: 'SVG configuration',
       filter: /[\\/]mermaid[\\/]dist[\\/]mermaid\.core\.mjs$/,
       marker: '  const svg = element.firstChild;\n  const firstChild = svg.firstChild;',
-      edit: `  const svg = element.firstChild;\n  enableAdaptiveMermaidLabels(svg, config, processed.config, mermaidLabelThemeCss);\n  const firstChild = svg.firstChild;`,
-      helper: 'enableAdaptiveMermaidLabels',
+      edit: `  const svg = element.firstChild;\n  configureMermaidLabelLayout(svg, config, processed.config, mermaidLabelThemeCss);\n  const firstChild = svg.firstChild;`,
+      helper: 'configureMermaidLabelLayout',
       imports: `import { mermaidLabelThemeCss } from ${JSON.stringify(labelStyles)};\n`
     },
     {
