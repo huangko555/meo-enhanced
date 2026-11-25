@@ -8,6 +8,7 @@ import sharp from 'sharp';
 import exportRuntime from '../src/export/runtime';
 import { renderPdfFromHtmlExport } from '../src/export/pdfRenderer';
 import { complexMermaidSamples } from './fixtures/mermaid-community-samples';
+import { mermaidLabelSamples } from './fixtures/mermaid-labels';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-docx-browser-'));
@@ -70,21 +71,28 @@ async function assertLongMermaidLabelMaterializesWithoutCropping(): Promise<void
   const inkSpans = await Promise.all(images.map(async name => {
     const png = await archive.file(name)!.async('nodebuffer');
     const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-    let firstInk = info.width;
-    let lastInk = -1;
-    for (let pixel = 0; pixel < data.length; pixel += info.channels) {
-      const [red, green, blue] = [data[pixel]!, data[pixel + 1]!, data[pixel + 2]!];
-      // Mermaid label text is dark; node borders are neutral gray and arrows are blue.
-      if (red < 90 && green < 100 && blue < 110) {
-        const x = (pixel / info.channels) % info.width;
+    const lines: number[] = [];
+    let firstInk = info.width, lastInk = -1;
+    for (let y = 0; y < info.height; y++) {
+      let rowHasInk = false;
+      for (let x = 0; x < info.width; x++) {
+        const offset = (y * info.width + x) * info.channels;
+        // Label ink is darker than the node border and diagram background.
+        if (data[offset]! >= 90 || data[offset + 1]! >= 100 || data[offset + 2]! >= 110) continue;
         firstInk = Math.min(firstInk, x);
         lastInk = Math.max(lastInk, x);
+        rowHasInk = true;
+      }
+      if ((!rowHasInk || y === info.height - 1) && lastInk >= firstInk) {
+        lines.push(lastInk - firstInk + 1);
+        firstInk = info.width;
+        lastInk = -1;
       }
     }
-    return { name, width: info.width, height: info.height, firstInk, lastInk, span: lastInk - firstInk + 1 };
+    return { name, width: info.width, height: info.height, lines, totalSpan: lines.reduce((sum, span) => sum + span, 0) };
   }));
-  assert.ok(inkSpans.some(image => image.lastInk >= image.firstInk && image.span >= 170),
-    `DOCX Mermaid PNG must rasterize the full long identifier, not its 120px prefix: ${JSON.stringify(inkSpans)}`);
+  assert.ok(inkSpans.some(image => image.lines.length > 1 && image.totalSpan >= 170),
+    `DOCX Mermaid PNG must rasterize the full wrapped identifier: ${JSON.stringify(inkSpans)}`);
   console.log('DOCX long Mermaid label materialization passed.');
 }
 
@@ -196,7 +204,8 @@ try {
   const pdf = await exportRuntime.renderExportHtmlDocument({
     readingSnapshot: {
       snapshotId: 'pdf-rich-media',
-      text: '# PDF fixture\n\n```mermaid\ngraph LR\n  A --> B\n```\n\n$$x^2 + y^2 = z^2$$\n\n![Missing shown image](absent.png)\n\n<img hidden src="hidden-absent.png" alt="Hidden image">',
+      text: ['# PDF fixture', `\`\`\`mermaid\n${mermaidLabelSamples[0].source}\n\`\`\``, '$$x^2 + y^2 = z^2$$',
+        '![Missing shown image](absent.png)', '<img hidden src="hidden-absent.png" alt="Hidden image">'].join('\n\n'),
       appearance: 'dark', uiLanguage: 'en',
       environment: { previewFontFamily: '', previewSourceColoring: true }
     },

@@ -3,6 +3,7 @@ import { readingPreparationRange, readingResourceDistance } from '../application
 import type { EditorAppearance } from '../../../src/protocol/editorCommands';
 import { getGithubMermaidConfig } from '../../../src/preview/githubMermaid';
 import { getMermaidColorVariables, getMermaidPalette } from '../../../src/shared/mermaidPalette';
+import { mermaidLabelThemeCss } from '../../../src/shared/mermaidLabelStyles';
 import { getPreviewMermaidResourceIndex, getPreviewViewportResources, hasBoundedPreviewResources, previewMermaidBlockIndex } from './previewViewportResources';
 import type { PreviewDocumentChunk } from '../../../src/foundation/previewDocument';
 
@@ -369,6 +370,7 @@ function initializePreviewMermaid(mermaid: Awaited<ReturnType<typeof loadMermaid
       ...Object.fromEntries(palette.chartColors.map((color, index) => [`pie${index + 1}`, color])),
       pieOpacity: 1, darkMode: appearance === 'dark' },
     htmlLabels: true, markdownAutoWrap: true, flowchart: { htmlLabels: true },
+    themeCSS: mermaidLabelThemeCss,
     legacyMathML: true, forceLegacyMathML: true
   });
 }

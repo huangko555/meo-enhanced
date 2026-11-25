@@ -1,4 +1,4 @@
-import { installPackagedMermaid, readMermaidTestAsset } from './mermaid-runtime-test-helpers';
+import { assertMermaidLabelLayout, installPackagedMermaid, readMermaidTestAsset } from './mermaid-runtime-test-helpers';
 import assert from 'node:assert/strict';
 import { assertReadableMermaidTasks } from './mermaid-contrast-helpers';
 import fs from 'node:fs';
@@ -10,6 +10,8 @@ import { renderMarkdownToHtml } from '../src/export/renderMarkdown';
 import { buildPreviewStyles } from '../src/export/exportStyles';
 import { getMermaidPalette } from '../src/shared/mermaidPalette';
 import { complexMermaidSamples } from './fixtures/mermaid-community-samples';
+import { mermaidLabelSamples } from './fixtures/mermaid-labels';
+import exportRuntime from '../src/export/runtime';
 import { createPreviewMermaidRenderer } from '../webview/src/helpers/previewMermaid';
 import {
   MermaidDiagramResourceUnavailableError,
@@ -29,6 +31,47 @@ assert.equal(shouldPreloadMermaid('~'.repeat(100_000) + 'mermaid'), true);
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-preview-mermaid-runtime-'));
+
+async function assertReadingMermaidLabels(browser: Awaited<ReturnType<typeof launchTestBrowser>>, entry: string) {
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 780, height: 1700 });
+    await page.setContent('<!doctype html><style>html,body{height:100%;margin:0}.editor-host{height:500px}</style><body></body>');
+    await page.addStyleTag({ path: path.join(repoRoot, 'webview/src/styles.css') });
+    await installPackagedMermaid(page);
+    await page.addScriptTag({ content: entry });
+    const text = mermaidLabelSamples.map(({ source }) => `\`\`\`mermaid\n${source}\n\`\`\``).join('\n\n');
+    for (const layout of ['full', 'side'] as const) {
+      const rendered = exportRuntime.renderPreviewDocument({ markdownText: text, layout,
+        sourceDocumentPath: 'C:/tmp/mermaid-labels.md', styleEnvironment: { previewFontFamily: '' } });
+      await page.evaluate(({ text, rendered, layout }) => {
+        const testWindow = window as any;
+        const controller = testWindow.__previewController;
+        controller.setLayout(layout);
+        controller.setVisible(true);
+        controller.host.style.height = '100vh';
+        controller.requestRender(text, { force: true, restoreLine: 1 });
+        const requestId = testWindow.__previewMessages.findLast((message: any) => message.type === 'requestPreviewRender').requestId;
+        controller.acceptRenderResponse({ type: 'previewRenderResult', requestId, result: { ok: true, value: rendered } });
+      }, { text, rendered, layout });
+      const frame = (await page.waitForSelector<HTMLIFrameElement>('.preview-frame'))!;
+      await page.waitForFunction(({ layout, count }) => {
+        const doc = document.querySelector<HTMLIFrameElement>('.preview-frame')?.contentDocument;
+        return doc?.documentElement.dataset.meoPreviewLayout === layout
+          && doc.querySelectorAll('.meo-export-mermaid.is-rendered').length === count;
+      }, {}, { layout, count: mermaidLabelSamples.length });
+      await assertMermaidLabelLayout((await frame.contentFrame())!, '.meo-export-mermaid.is-rendered', mermaidLabelSamples, `Preview ${layout}`);
+    }
+    await page.evaluate(source => {
+      const testWindow = window as any;
+      testWindow.__previewController.dispose();
+      testWindow.__renderEditorMermaid(source);
+    }, mermaidLabelSamples[0].source);
+    await page.waitForSelector('.editor-host .meo-mermaid-block svg[aria-roledescription]');
+    await assertMermaidLabelLayout(page, '.editor-host .meo-mermaid-block', [mermaidLabelSamples[0]], 'Live');
+    console.log('Preview, side Preview and Live Mermaid label bounds passed');
+  } finally { await page.close(); }
+}
 
 async function assertGanttPreviewContrast(browser: Awaited<ReturnType<typeof launchTestBrowser>>, entry: string) {
   // Keep this fresh Preview separate from the lifecycle/KaTeX loading cases.
@@ -220,6 +263,8 @@ async function assertPreviewRuntime() {
 
   const runtime = fs.readFileSync(path.join(repoRoot, 'webview', 'dist', 'mermaid.min.js'), 'utf8');
   const entry = fs.readFileSync(path.join(tempDir, 'test-preview-mermaid-runtime-entry.js'), 'utf8');
+  if (!process.argv.includes('--gantt-only')) await assertReadingMermaidLabels(browser, entry);
+  if (process.argv.includes('--labels-only')) return;
   const page = await browser.newPage();
   let runtimeRequests = 0;
   await page.setRequestInterception(true);

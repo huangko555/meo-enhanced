@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import assert from 'node:assert/strict';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { Page } from 'puppeteer-core';
@@ -76,4 +77,45 @@ export async function installPackagedMermaid(page: Page, options?: PackagedMerma
   options?.observe?.({ stage: 'script-loading', origin, url: assetUrl });
   await page.addScriptTag({ url: assetUrl });
   await page.evaluate(() => (window as typeof window & { __MEO_MERMAID_READY__: Promise<unknown> }).__MEO_MERMAID_READY__);
+}
+
+export async function assertMermaidLabelLayout(
+  scope: Pick<Page, '$$eval'>,
+  selector: string,
+  samples: readonly { readonly labels: readonly string[]; readonly width?: number }[],
+  surface: string
+): Promise<void> {
+  const layouts = await scope.$$eval(selector, (diagrams, samples) => diagrams.map((diagram, index) => {
+    const sample = samples[index]!;
+    const labels = [...diagram.querySelectorAll('foreignObject > div > :is(.nodeLabel, .edgeLabel)')];
+    return sample.labels.map(text => {
+      const label = labels.find(label => label.textContent === text);
+      if (!label) return { text, missing: true };
+      const doc = label.ownerDocument;
+      const view = doc.defaultView!;
+      const boundary = label.closest('foreignObject')!.getBoundingClientRect();
+      const range = doc.createRange();
+      range.selectNodeContents(label);
+      const glyphs = range.getBoundingClientRect();
+      const tolerance = 0.5;
+      const clipped = glyphs.height === 0 || glyphs.width === 0
+        || glyphs.left < boundary.left - tolerance || glyphs.right > boundary.right + tolerance
+        || glyphs.top < boundary.top - tolerance || glyphs.bottom > boundary.bottom + tolerance;
+      const paragraph = label.querySelector('p')!;
+      return { text, clipped, width: parseFloat(view.getComputedStyle(label.parentElement!).width),
+        wraps: paragraph.getBoundingClientRect().height > parseFloat(view.getComputedStyle(paragraph).lineHeight) * 1.5,
+        glyphs: glyphs.toJSON(), boundary: boundary.toJSON() };
+    });
+  }), samples);
+  assert.equal(layouts.length, samples.length, `${surface}: every label sample must render`);
+  for (const [index, labels] of layouts.entries()) {
+    for (const label of labels) {
+      assert.ok(!label.missing && !label.clipped, `${surface}: label outside the rendered box ${JSON.stringify(label)}`);
+      const width = samples[index]!.width;
+      if (width !== undefined) {
+        assert.equal(label.width, width, `${surface}: the author's wrapping width applies`);
+        assert.ok(label.wraps, `${surface}: the label wraps at the author's width`);
+      }
+    }
+  }
 }

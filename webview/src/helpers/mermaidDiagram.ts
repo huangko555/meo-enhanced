@@ -5,6 +5,7 @@ import type { EditorState } from '@codemirror/state';
 import type { SyntaxNodeRef } from '@lezer/common';
 import type { MermaidConfig } from 'mermaid';
 import { getMermaidColorVariables, getMermaidPalette } from '../../../src/shared/mermaidPalette';
+import { mermaidLabelThemeCss } from '../../../src/shared/mermaidLabelStyles';
 import { getViewportController } from './viewportController';
 import { observeReadingViewport, type ReadingViewportObserver } from '../editor/readingViewportObserver';
 import { applyLiveBlockIndent, getCodeBlockSourceLines } from './blockIndent';
@@ -81,8 +82,6 @@ export function canPrepareMermaidWhileScrolling(source: string): boolean {
   return source.length <= 32_768 && /^\s*(?:flowchart|graph)\b/i.test(source) && !/%%\{/.test(source);
 }
 const MERMAID_MATH_CLASS = 'meoMath';
-const MERMAID_LABEL_WRAP_THEME_CSS =
-  '.nodeLabel p{white-space:normal!important;overflow-wrap:anywhere!important;word-break:break-word!important;}';
 const MERMAID_DIAGRAM_START_RE =
   /^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie|mindmap|timeline|gitGraph|quadrantChart|requirementDiagram|c4Context|xychart(?:-beta)?|sankey-beta|block-beta|packet-beta|radar-beta)\b/i;
 const MERMAID_DISPLAY_MATH_RE = /^\$\$[\s\S]*\$\$$/;
@@ -321,7 +320,7 @@ function getMermaidThemeConfig(): { signature: string; config: MermaidRuntimeCon
       },
       htmlLabels: true,
       markdownAutoWrap: true,
-      themeCSS: MERMAID_LABEL_WRAP_THEME_CSS,
+      themeCSS: mermaidLabelThemeCss,
       flowchart: {
         htmlLabels: true,
         wrappingWidth: 200

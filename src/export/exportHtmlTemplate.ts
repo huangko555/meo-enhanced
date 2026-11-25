@@ -1,4 +1,5 @@
 import { getMermaidPalette, mermaidThemeColorRoles } from '../shared/mermaidPalette';
+import { mermaidLabelThemeCss } from '../shared/mermaidLabelStyles';
 import { getGithubMermaidConfig } from '../preview/githubMermaid';
 
 export type BuildExportHtmlDocumentOptions = {
@@ -652,8 +653,7 @@ function buildRuntimeScript(hasMermaid: boolean, githubStyle = false): string {
       htmlLabels: true,
       markdownAutoWrap: true,
       flowchart: { htmlLabels: true },
-      // Keep painted labels within the dimensions Mermaid measured before rasterization.
-      themeCSS: '.node .label foreignObject div { max-width: none !important; }',
+      themeCSS: ${JSON.stringify(mermaidLabelThemeCss)},
       legacyMathML: true,
       forceLegacyMathML: true,
       fontFamily: bodyStyles.fontFamily || undefined

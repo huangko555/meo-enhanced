@@ -5,8 +5,9 @@ import exportRuntime from '../src/export/runtime';
 import { getMermaidPalette } from '../src/shared/mermaidPalette';
 import { assertReadableMermaidTasks } from './mermaid-contrast-helpers';
 import { complexMermaidSamples } from './fixtures/mermaid-community-samples';
+import { mermaidLabelSamples } from './fixtures/mermaid-labels';
 import { launchTestBrowser, closeTestBrowser } from './browser-test-helpers';
-import { readMermaidTestAsset } from './mermaid-runtime-test-helpers';
+import { assertMermaidLabelLayout, readMermaidTestAsset } from './mermaid-runtime-test-helpers';
 
 const flow = `flowchart TD
   subgraph review[资料审核]
@@ -28,7 +29,8 @@ const diagrams = [flow, `---\nconfig:\n  layout: dagre\n---\n${flow}`,
   'mindmap\n  root((文档))\n    编辑\n      源码\n      预览\n    导出',
   'gantt\n  dateFormat YYYY-MM-DD\n  section 状态\n  完成 :done, a, 2026-10-01, 3d\n  进行 :active, b, after a, 4d\n  普通 :c, after b, 3d\n  这是放在短任务条外面的完成标签 :done, outside, after c, 1d',
   '---\nconfig:\n  themeVariables:\n    doneTaskBkgColor: "#ffdab9"\n    taskTextDarkColor: "#241208"\n---\ngantt\n  dateFormat YYYY-MM-DD\n  section 自定义\n  作者颜色 :done, custom, 2026-10-01, 5d',
-  'flowchart LR\n  A[自定义颜色] --> B[保留作者样式]\n  classDef custom fill:#ffdab9,stroke:#8c4a2f,color:#241208\n  class A custom\n  linkStyle 0 stroke:#8c4a2f'
+  'flowchart LR\n  A[自定义颜色] --> B[保留作者样式]\n  classDef custom fill:#ffdab9,stroke:#8c4a2f,color:#241208\n  class A custom\n  linkStyle 0 stroke:#8c4a2f',
+  ...mermaidLabelSamples.map(sample => sample.source)
 ];
 const runtime = fs.readFileSync(path.resolve(import.meta.dir, '../webview/dist/mermaid.min.js'));
 const browser = await launchTestBrowser();
@@ -50,6 +52,7 @@ try {
     } else void request.continue();
   });
   for (const target of ['html', 'pdf', 'docx'] as const) {
+    await page.emulateMediaType(target === 'pdf' ? 'print' : 'screen');
     for (const appearance of ['light', 'dark'] as const) {
       const document = await exportRuntime.renderExportHtmlDocument({
         readingSnapshot: {
@@ -73,6 +76,9 @@ try {
         throw new Error(`Export not ready (${target}/${appearance}): ${JSON.stringify({ pageErrors, state: await page.evaluate(() => ({ error: (window as any).__MEO_EXPORT_ERROR__, blocks: document.querySelectorAll('.meo-export-mermaid svg').length })) })}`, { cause: error });
       });
       assert.equal(await page.evaluate(() => (window as any).__MEO_EXPORT_ERROR__), null, `Export must render successfully (${target}/${appearance})`);
+      await assertMermaidLabelLayout(page,
+        `.meo-export-doc > .meo-export-mermaid:nth-last-child(-n+${mermaidLabelSamples.length})`,
+        mermaidLabelSamples, `${target}/${appearance}`);
       const result = await page.evaluate(async flow => {
         const blocks = Array.from(document.querySelectorAll<HTMLElement>('.meo-export-mermaid'));
         const runtime = (window as any).mermaid;
@@ -94,7 +100,7 @@ try {
           } finally { host.remove(); }
         }
         const svg = blocks[0]!.querySelector('svg')!;
-        const custom = blocks.at(-1)!.querySelector('g.node .label-container');
+        const custom = blocks[10]!.querySelector('g.node .label-container');
         return {
           rendered: blocks.map(block => Boolean(block.querySelector('svg')) && !block.classList.contains('is-error')),
           errors: blocks.map(block => block.dataset.meoExportMermaidError),
