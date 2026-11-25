@@ -40,9 +40,10 @@ config:
   flowchart:
     wrappingWidth: 80
 ---
-flowchart TD
-  A[EXPLICIT_WRAP_WIDTH] --> B[very long text very long text]`,
-    labels: ['EXPLICIT_WRAP_WIDTH'],
+flowchart LR
+  A[EXPLICIT_WRAP_WIDTH] --> B["${hardBreak}"]`,
+    labels: ['EXPLICIT_WRAP_WIDTH', 'First lineSecond line'],
+    centered: ['EXPLICIT_WRAP_WIDTH', 'First lineSecond line'],
     width: 80
   },
   {

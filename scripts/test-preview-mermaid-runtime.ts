@@ -62,13 +62,15 @@ async function assertReadingMermaidLabels(browser: Awaited<ReturnType<typeof lau
       }, {}, { layout, count: mermaidLabelSamples.length });
       await assertMermaidLabelLayout((await frame.contentFrame())!, '.meo-export-mermaid.is-rendered', mermaidLabelSamples, `Preview ${layout}`);
     }
-    await page.evaluate(source => {
+    const liveSamples = [mermaidLabelSamples[0], mermaidLabelSamples[3]];
+    await page.evaluate(sources => {
       const testWindow = window as any;
       testWindow.__previewController.dispose();
-      testWindow.__renderEditorMermaid(source);
-    }, mermaidLabelSamples[0].source);
-    await page.waitForSelector('.editor-host .meo-mermaid-block svg[aria-roledescription]');
-    await assertMermaidLabelLayout(page, '.editor-host .meo-mermaid-block', [mermaidLabelSamples[0]], 'Live');
+      for (const source of sources) testWindow.__renderEditorMermaid(source);
+    }, liveSamples.map(sample => sample.source));
+    await page.waitForFunction(count => document.querySelectorAll('.editor-host .meo-mermaid-block svg[aria-roledescription]').length === count,
+      {}, liveSamples.length);
+    await assertMermaidLabelLayout(page, '.editor-host .meo-mermaid-block', liveSamples, 'Live');
     console.log('Preview, side Preview and Live Mermaid label bounds passed');
   } finally { await page.close(); }
 }

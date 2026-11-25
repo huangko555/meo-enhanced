@@ -6,6 +6,10 @@ div:has(> .edgeLabel > p) {
   display: block !important;
   width: max-content !important;
 }
+/* Mermaid may reserve more space than the node label's wrapping width. */
+div:has(> .nodeLabel > p) {
+  margin-inline: auto;
+}
 .nodeLabel > p,
 .edgeLabel > p {
   white-space: normal !important;

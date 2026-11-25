@@ -106,8 +106,17 @@ export async function assertMermaidLabelLayout(
       const paragraph = label.querySelector('p')!;
       const textNodes = doc.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
       const splitWords: string[] = [];
+      const lines = new Map<number, { left: number; right: number }>();
       while (textNodes.nextNode()) {
         const node = textNodes.currentNode;
+        if (sample.centered?.includes(text)) {
+          range.selectNodeContents(node);
+          for (const rect of range.getClientRects()) {
+            if (!rect.width) continue;
+            const line = lines.get(rect.top);
+            lines.set(rect.top, { left: Math.min(rect.left, line?.left ?? rect.left), right: Math.max(rect.right, line?.right ?? rect.right) });
+          }
+        }
         for (const word of sample.intactWords ?? []) {
           const start = node.textContent?.indexOf(word) ?? -1;
           if (start < 0) continue;
@@ -116,9 +125,10 @@ export async function assertMermaidLabelLayout(
           if (range.getClientRects().length > 1) splitWords.push(word);
         }
       }
+      const lineOffsets = [...lines.values()].map(({ left, right }) => (left + right - boundary.left - boundary.right) / 2);
       return { text, clipped, width: parseFloat(view.getComputedStyle(label.parentElement!).width),
         wraps: paragraph.getBoundingClientRect().height > parseFloat(view.getComputedStyle(paragraph).lineHeight) * 1.5,
-        splitWords, centerOffset: Math.abs(glyphs.left + glyphs.width / 2 - boundary.left - boundary.width / 2),
+        splitWords, lineOffsets,
         glyphs: glyphs.toJSON(), boundary: boundary.toJSON() };
     });
   }), samples);
@@ -130,7 +140,10 @@ export async function assertMermaidLabelLayout(
       assert.deepEqual(label.splitWords, [], `${surface}: a word is split across lines in ${label.text}`);
       if (sample.singleLine?.includes(label.text)) assert.ok(!label.wraps, `${surface}: ${label.text} must fit on one line`);
       if (sample.wrapped?.includes(label.text)) assert.ok(label.wraps, `${surface}: ${label.text} must wrap`);
-      if (sample.centered?.includes(label.text)) assert.ok(label.centerOffset < 1, `${surface}: ${label.text} must remain centered`);
+      if (sample.centered?.includes(label.text)) {
+        assert.ok(label.lineOffsets.length && label.lineOffsets.every(offset => Math.abs(offset) < 1),
+          `${surface}: each line of ${label.text} must remain centered. Horizontal offsets: ${label.lineOffsets.map(offset => offset.toFixed(2)).join(', ')}px`);
+      }
       const width = sample.width;
       if (width !== undefined) {
         assert.equal(label.width, width, `${surface}: the author's wrapping width applies`);
