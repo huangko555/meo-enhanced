@@ -82,6 +82,9 @@ the candidate to another agent:
    the commands for remaining gaps before freezing a clean candidate. No required
    gap may be waived to meet a runtime target. Tool generalization is separate
    from release readiness once the required behavior has sufficient evidence.
+   Apply the [known-defect register](known-defects.md) within its recorded scope.
+   Record any acceptance alongside the original failure and its comparison
+   evidence. Preserve the runner's failure status, assertions and resume guards.
 6. **Complete coverage and close evidence.** Run uncovered or invalidated checks
    with their original scope and thresholds. Use the guarded complete release
    entry when evidence cannot be shown applicable or integration risk requires it,
