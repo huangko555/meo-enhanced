@@ -4035,10 +4035,13 @@ export class ViewportController {
       ?? Array.from(this.view.contentDOM.querySelectorAll<HTMLElement>(
         '.meo-md-html-table-wrap tr[data-source-line-number], [data-meo-rendered-block-kind][data-meo-rendered-block-start-line]'
       )).find((element) => this.readingBlockPosition(element) === position);
-    return line
-      ? line.getBoundingClientRect().top + this.view.scrollDOM.scrollTop
-        - this.view.scrollDOM.getBoundingClientRect().top
-      : null;
+    const box = line?.getBoundingClientRect();
+    // A retained tab can keep its elements mounted without measurable boxes.
+    // Do not adopt that projection as the baseline for its first visible frame.
+    if (!box || box.height === 0) return null;
+    const viewport = this.view.scrollDOM.getBoundingClientRect();
+    if (viewport.height === 0) return null;
+    return box.top + this.view.scrollDOM.scrollTop - viewport.top;
   }
 
   private readingBlockPosition(element: HTMLElement): number | null {

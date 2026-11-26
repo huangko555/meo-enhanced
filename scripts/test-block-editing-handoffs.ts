@@ -231,9 +231,24 @@ async function checkBlockEditingHandoffs(page: Page,
         .some(svg => svg.textContent?.includes('Stage 267')));
       // A real wheel gesture retires the input's viewport owner without
       // changing the source selection, as a real scroll to that prose would.
-      await page.mouse.move(width / 2, 400);
+      const wheelPoint = await page.evaluate(() => {
+        const scroller = (window as any).nativeEditor.view.scrollDOM as HTMLElement;
+        scroller.addEventListener('wheel', event => {
+          if (event.isTrusted) scroller.dataset.handoffWheel = 'received';
+        }, { once: true, passive: true });
+        const viewport = scroller.getBoundingClientRect();
+        return { x: viewport.right - 35, y: viewport.top + viewport.height / 2 };
+      });
+      await page.mouse.move(wheelPoint.x, wheelPoint.y);
       await page.mouse.wheel({ deltaY: 1 });
-      await center(after);
+      await page.waitForSelector('.cm-scroller[data-handoff-wheel="received"]');
+      await page.evaluate(after => {
+        const { nativeEditor, MermaidEditingHarness } = window as any;
+        const { view } = nativeEditor;
+        const viewport = MermaidEditingHarness.getViewportController(view);
+        viewport.revealPositionUntilStable(after, { y: 'center' }, viewport.beginNavigationReveal());
+      }, after);
+      await frames(10);
       point = await page.evaluate(({ after, label }) => {
         const view = (window as any).nativeEditor.view, caret = view.coordsAtPos(after);
         if (!caret) throw new Error(label + ': missing post-input click target ' + JSON.stringify({ after,

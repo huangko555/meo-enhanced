@@ -151,6 +151,12 @@ try {
             previewDocument.scrollingElement!.scrollTop = 1100;
           });
         } else {
+          await frame.waitForFunction(() => {
+            const host = document.querySelector<HTMLElement>('.editor-host');
+            const content = host?.querySelector<HTMLElement>('.cm-content');
+            return host && !host.hidden && !host.inert && content?.isContentEditable
+              && content.getBoundingClientRect().height > 0;
+          });
           await frame.focus('.cm-content');
           const bounds = await frame.$eval('.cm-scroller', element => { const rect = element.getBoundingClientRect(); return { x: rect.x + 200, y: rect.y + 150 }; });
           await page.mouse.move(bounds.x, bounds.y);

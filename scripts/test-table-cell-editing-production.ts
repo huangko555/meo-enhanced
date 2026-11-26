@@ -1752,11 +1752,22 @@ async function checkCellKeyboardViewport(page: import('puppeteer-core').Page) {
     input.setSelectionRange(index, index);
   }, index);
   const position = async (row: number, y: number, edge: 'top' | 'bottom' = 'top') => {
-    await page.$eval(cell(row), (element, y, edge) => {
-      const scroller = element.closest<HTMLElement>('.cm-scroller')!;
-      scroller.scrollTop += element.getBoundingClientRect()[edge] - scroller.getBoundingClientRect().top - y;
-    }, y, edge);
     await settle();
+    const point = await page.$eval(cell(row), (element, y, edge) => {
+      const scroller = element.closest<HTMLElement>('.cm-scroller')!;
+      const viewport = scroller.getBoundingClientRect();
+      return { x: viewport.right - 35, y: viewport.top + viewport.height / 2,
+        delta: Math.round(element.getBoundingClientRect()[edge] - viewport.top - y) };
+    }, y, edge);
+    // A wheel carries new reading intent and supersedes the previous fixture reveal.
+    if (point.delta) {
+      await page.mouse.move(point.x, point.y);
+      await page.mouse.wheel({ deltaY: point.delta });
+    }
+    await settle();
+    const actual = await page.$eval(cell(row), (element, edge) => element.getBoundingClientRect()[edge]
+      - element.closest('.cm-scroller')!.getBoundingClientRect().top, edge);
+    assert.ok(Math.abs(actual - y) < 1, `Row ${row} ${edge} must start at ${y}px, got ${actual}px`);
   };
   const state = () => page.evaluate(() => {
     const view = (window as any).__tableCellEditor.view;
@@ -1839,6 +1850,8 @@ async function checkCellKeyboardViewport(page: import('puppeteer-core').Page) {
     await focus(1, 2);
     await position(2, 130);
     const beforeEntry = await state();
+    assert.equal(beforeEntry.row, '1');
+    assert.ok(beforeEntry.cellBottom > beforeEntry.viewport.top && beforeEntry.cellBottom < beforeEntry.viewport.bottom);
     const entry = await press('ArrowDown');
     assert.equal(entry.row, '2');
     assert.ok(entry.caret && entry.caret.bottom < entry.viewport.bottom && entry.cellBottom > entry.viewport.bottom);

@@ -3,6 +3,7 @@ import { EditorView } from '@codemirror/view';
 import { isLiveInputDerivedWorkPending, isLiveInputDerivedWorkRefresh, requestLiveInputDerivedWork, usesLargeDocumentDerivedWorkBudget } from '../webview/src/editor/liveInputDerivedWork';
 import { createEditor, refreshMermaidTheme } from './test-editor-factory';
 import { editorViewportBounds } from '../webview/src/editor/editorViewportBounds';
+import { getViewportController } from '../webview/src/helpers/viewportController';
 import darkPlus from '@shikijs/themes/dark-plus';
 import lightPlus from '@shikijs/themes/light-plus';
 import { setShikiTheme, type RawVscodeTheme } from '../webview/src/helpers/shikiHighlighter';
@@ -84,9 +85,10 @@ function createMermaidDerivedPointerProbe(parent: HTMLElement) {
     refreshMermaidTheme: typeof refreshMermaidTheme;
     applyCodeTheme: typeof applyCodeTheme;
     editorViewportBounds: typeof editorViewportBounds;
+    getViewportController: typeof getViewportController;
     applyUiTheme: typeof applyUiTheme;
     applyBuiltInVisualBaseline: typeof applyBuiltInVisualBaseline;
     createMermaidToolbarWidget: typeof createMermaidToolbarWidget;
   };
-}).MermaidEditingHarness = { createEditor, createWidgetRemountProbe, refreshPresentation, usesLargeDocumentDerivedWorkBudget, createMermaidDerivedPointerProbe, refreshMermaidTheme, applyCodeTheme, editorViewportBounds, applyUiTheme, applyBuiltInVisualBaseline, createMermaidToolbarWidget,
+}).MermaidEditingHarness = { createEditor, createWidgetRemountProbe, refreshPresentation, usesLargeDocumentDerivedWorkBudget, createMermaidDerivedPointerProbe, refreshMermaidTheme, applyCodeTheme, editorViewportBounds, getViewportController, applyUiTheme, applyBuiltInVisualBaseline, createMermaidToolbarWidget,
   focusMermaidEditingOffset, setMermaidLayoutEffect, MermaidSourcePreviewWidget, getMermaidBlockViewport, mermaidEditingReadiness };

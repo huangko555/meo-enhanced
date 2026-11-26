@@ -5,7 +5,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 ---
 ## 0.4.6
 - Kept nested ordered lists numbered correctly while editing large documents and preserved numbering inside code blocks. Added a default-on option to turn off automatic renumbering and keep existing Markdown numbers. Pasting HTML retains nested lists, code whitespace, and inline text styles.
-- Preserved punctuation in explicit Markdown links and kept pasted URLs literal inside existing links. Corrected case-insensitive search and replace ranges for Unicode text and preserved selections when opening CRLF documents in MEO.
+- Preserved punctuation in explicit Markdown links and kept pasted URLs literal inside existing links. Corrected case-insensitive search and replace ranges for Unicode text and preserved selections when opening CRLF documents in MEO. Kept the visible reading position stable when switching back to an editor tab.
 - Refreshed Git HEAD comparisons after repository changes on Windows, showed files newly staged for addition, and ignored a leading UTF-8 byte order mark when comparing text.
 - Gave duplicate headings distinct anchors, kept frontmatter out of heading suggestions, and limited alert styling to the quote that owns the directive.
 - Preserved footnotes and surrounding block boundaries during export. Kept protocol-relative images and CSS image URLs on the network in Preview and exports.
