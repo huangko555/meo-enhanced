@@ -101,7 +101,7 @@ import {
   type ParsedFootnotes
 } from './helpers/footnotes';
 import { getLiveRenderedBlocks, projectUnchangedLiveRenderedBlocks, type LiveRenderedBlock } from './helpers/liveRenderedBlocks';
-import { findRawSourceUrlMatches, normalizeSourceHref } from './helpers/rawUrls';
+import { findRawSourceUrlMatches, normalizeExplicitSourceHref, normalizeSourceHref } from './helpers/rawUrls';
 import { hrefFromSourceLinkNode } from './helpers/linkNavigation';
 import { trimDecoratedUrlRange } from './helpers/urlDecorationRange';
 import { createOpenLinkButton } from './helpers/linkOpenButton';
@@ -991,11 +991,6 @@ function addForcedThematicBreakDecorations(
   }
 }
 
-function getNodeHref(state: EditorState, node: SyntaxNode): string {
-  const href = state.doc.sliceString(node.from, node.to).trim();
-  return normalizeSourceHref(href);
-}
-
 function addLinkMark(
   builder: DecorationCollector,
   from: number,
@@ -1487,7 +1482,7 @@ function addMarkdownLinkDecorations(builder: DecorationCollector, state: EditorS
   if (textFrom >= textTo) {
     return;
   }
-  const href = getNodeHref(state, urlNode);
+  const href = hrefFromSourceLinkNode(state, node.node);
   const containsImage = Boolean(findChildNode(node, 'Image'));
   addLinkMark(builder, textFrom, textTo, href, !editing && !containsImage ? textTo : null);
 
@@ -1579,8 +1574,8 @@ function addAutolinkDecorations(builder: DecorationCollector, state: EditorState
   if (!urlNode) {
     return;
   }
-  const href = getNodeHref(state, urlNode);
   const rawUrl = state.doc.sliceString(urlNode.from, urlNode.to);
+  const href = normalizeExplicitSourceHref(rawUrl);
   addTrimmedUrlLinkMark(builder, urlNode.from, urlNode.to, rawUrl, href, !editing);
 }
 
@@ -2480,8 +2475,10 @@ function buildDecorationRanges(state: EditorState, previous?: DecorationSet, cha
         if (parentName === 'LinkReference' && isFootnoteDefinitionContent(footnotes, node.from, node.to)) {
           addRange(ranges, node.from, node.to, footnoteDefinitionContentDeco);
         } else if (parentName !== 'Link' && parentName !== 'Autolink') {
-          const href = getNodeHref(state, node.node);
           const rawUrl = state.doc.sliceString(node.from, node.to);
+          const href = parentName === 'LinkReference' || parentName === 'Image'
+            ? normalizeExplicitSourceHref(rawUrl)
+            : normalizeSourceHref(rawUrl);
           if (isInsideFrontmatterContent(frontmatter, node.from)) {
             return;
           }

@@ -311,6 +311,36 @@ async function checkLinkCursor(page: import('puppeteer-core').Page): Promise<voi
   console.log('Production link cursors and modifier activation passed in light/dark themes; Source, prose and direct-action buttons passed');
 }
 
+async function checkLinkDestinations(page: import('puppeteer-core').Page): Promise<void> {
+  const cases = [
+    ['[Read](https://example.com/path!)', 'https://example.com/path!'],
+    ['<https://example.com/path!>', 'https://example.com/path!'],
+    ['[ref]: https://example.com/path!', 'https://example.com/path!'],
+    ['Visit https://example.com/path!', 'https://example.com/path']
+  ];
+  for (const large of [false, true]) for (const [markdown, href] of cases) {
+    const source = markdown + (large ? '\n\n' + 'Plain paragraph.\n\n'.repeat(5000) : '');
+    await mount(page, source);
+    assert.equal(await page.evaluate(() => {
+      const scope = window as any;
+      return scope.HtmlContentHarness.usesLargeDocumentDerivedWorkBudget(scope.__linkEditor.view.state);
+    }), large);
+    const decorated = '.meo-md-link[data-meo-link-href]';
+    await page.waitForSelector(decorated);
+    assert.equal(await page.$eval(decorated, link => link.getAttribute('data-meo-link-href')), href, markdown);
+    const point = await linkPoint(page);
+    await page.keyboard.down('Control');
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.up('Control');
+    assert.deepEqual(await page.evaluate(() => (window as any).__openedLinks), [href], markdown);
+    await mount(page, source);
+    const openButton = await page.waitForSelector('.meo-md-link-open-btn');
+    await openButton!.click();
+    assert.deepEqual(await page.evaluate(() => (window as any).__openedLinks), [href], markdown);
+  }
+  console.log('Live link destinations preserve explicit punctuation for both activation paths and document scales');
+}
+
 const browser = await launchTestBrowser();
 try {
   const build = await Bun.build({ entrypoints: [path.join(repoRoot, 'scripts/test-html-content-entry.ts')],
@@ -322,8 +352,11 @@ try {
   await page.addStyleTag({ path: path.join(repoRoot, 'webview/src/styles.css') });
   await page.addStyleTag({ content: ':root{--meo-background:#fff;--meo-foreground:#222;--meo-font-live:Arial;--meo-font-live-size:16px;--meo-font-live-weight:400;--meo-font-source:monospace;--meo-font-source-size:14px;--vscode-editor-font-family:monospace;--vscode-editor-font-size:14px;--vscode-editor-line-height:20px}' });
   await page.addScriptTag({ path: path.join(tempDir, 'bundle.js') });
-  await checkInlineActionAlignment(page);
-  if (!process.argv.includes('--alignment-only')) await checkLinkCursor(page);
+  if (!process.argv.includes('--destination-only')) await checkInlineActionAlignment(page);
+  if (!process.argv.includes('--alignment-only')) {
+    await checkLinkDestinations(page);
+    if (!process.argv.includes('--destination-only')) await checkLinkCursor(page);
+  }
 } finally {
   await browser.close();
   fs.rmSync(tempDir, { recursive: true, force: true });
