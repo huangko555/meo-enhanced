@@ -51,6 +51,12 @@ the candidate to another agent:
    the selected [native environment](#native-acceptance-environment) and its actual
    capabilities. Successful enumeration, attachment or a command return is not
    proof that a click, key, drag or OS interaction reached the intended surface.
+   Record the required environment for each wall-clock gate before execution.
+   Identify results from additional diagnostic environments separately.
+   If a diagnostic environment fails, use the published package as a same-environment
+   control and check the affected installed behavior before classifying the result.
+   If those checks establish a deployment risk, record the evidence and the required
+   environment coverage for that risk.
    If a required capability fails, record its boundary, investigate a supported
    alternative with a specific hypothesis, and continue independent work. Repeating
    the same failed setup or an unrelated full gate cannot clear that boundary.
