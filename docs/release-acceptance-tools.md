@@ -8,14 +8,15 @@ unnecessary whole-gate reruns and hand-maintained continuation scripts.
 ## Prepare the coverage checklist
 
 ```shell
-bun run acceptance:evidence -- --baseline=<accepted-commit> --document=<disposable-rich-document> --report=<previous-report.json> --output=.local/acceptance/coverage.json
+bun run acceptance:evidence -- --baseline=<accepted-commit> --environment=<required-environment> --document=<disposable-rich-document> --report=<previous-report.json> --output=.local/acceptance/coverage.json
 ```
 
 The command does not execute tests. It expands the **current complete release
 plan**, retaining every logical occurrence and exact arguments/environment while
-grouping identical executions. Supply additional `--report=` arguments for focused
-workflow reports. It lists changed paths, historical source candidates, verified
-log references, and `missing`, `rerun`, `review` or `reuse` dispositions.
+grouping identical executions. Choose the formal environment before running its
+checks and reuse that identifier with the review. Supply additional `--report=`
+arguments for focused formal workflow reports. The output carries changed paths,
+historical source candidates, verified log references and coverage dispositions.
 Omitting `--document` explicitly omits font/endurance supplements; it cannot
 establish full-document or native coverage. Supplemental ad-hoc logs still need
 the existing manual evidence review; they are not silently imported as passes.
@@ -49,6 +50,36 @@ Use `source: {reportHash, task}` when selecting one exact source task. A group
 containing historical failures also needs `failures: [{reportHash, task,
 causeAndResolution}]` for each recorded failure. Rerun groups need only IDs and
 `decision: "rerun"`; they need no applicability essay.
+
+### Resolve failures and read the summary
+
+The acceptance executor works through `summary.repair` first. Diagnose, repair
+and run the affected checks, then supply the new report and record the resolution
+alongside the original failure. Continue independent required checks as evidence
+becomes available.
+
+Use `decision: "blocked"` only when repair attempts have failed to resolve a
+formal gate or an actual prerequisite prevents an attempt. Record
+`blocker: {reason, attempts: [{action, outcome}], nextAction}`, or use
+`prerequisite` in place of attempts when appropriate. Supply `userAction` only
+for a concrete operation, authorization or decision that requires the user.
+Routine repairs, retries and environment recovery stay with the executor.
+
+For a failure accepted under the [known-defect register](known-defects.md), add
+`knownDefect: {id, comparison: {file, sha256}}` to that failure's review entry.
+In `causeAndResolution` record how the candidate, scenario, environment, behavior
+checks and measurements match the registered limits. The tool verifies the active
+registration, original failure logs and comparison file identity. The executor
+reviews the contents of the comparison and verifies a passing source for the
+other required behavior in that command. Each failure needs its own disposition.
+
+Use `--diagnostic=<environment>=<evidence-file>` for supplemental environmental
+probes, including standalone logs and receipts. They appear in
+`summary.diagnostics` with hashes and have no effect on required workflow coverage.
+The same report may only enter one evidence stream. The summary also carries
+`blocked`, `knownDefects` and the count of other required cases awaiting evidence
+or review. Resolve those cases and the existing installed/native checks before
+concluding coverage is complete.
 
 Repeat the command with `--review=<review.json>` and a **new** output path.
 The review binds source, configuration, selected document, actual dependencies,

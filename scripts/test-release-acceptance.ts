@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { applyEvidenceReview, createEvidenceItems, type ReuseReview } from './release-acceptance-evidence';
+import { applyEvidenceReview, createEvidenceItems, summarizeEvidence, type ReuseReview } from './release-acceptance-evidence';
 import { digest, type WorkflowReport } from './test-workflow-execution';
 import { executeNativePlan, runNativeCommand, validateNativePlan, validateNativeResume, verifyNativeReceipt,
   type NativePlan, type NativeState, type NativeStep } from './native-acceptance';
@@ -23,6 +23,30 @@ try {
   const items = createEvidenceItems(commands, sources);
   assert.equal(items.length, 3); assert.deepEqual(items[0]!.occurrences, ['first', 'duplicate']);
   assert.deepEqual(items.map(item => item.disposition), ['rerun', 'missing', 'missing']);
+  const diagnostics = [{ environment: 'vm-browser-probe', file: 'diagnostic.json', sha256: digest('probe result') }];
+  const summarize = (items: ReturnType<typeof createEvidenceItems>) => summarizeEvidence(items, 'host-browser', diagnostics);
+  const pending = summarize(items);
+  assert.equal(pending.environment, 'host-browser');
+  assert.deepEqual(pending.repair.map(item => item.id), [items[0]!.id]);
+  assert.deepEqual(pending.repair[0]!.failures.map(failure => failure.task), ['old-fail']);
+  assert.deepEqual(pending.blocked, []);
+  assert.deepEqual(pending.diagnostics, diagnostics);
+  assert.equal(pending.pendingEvidence, 2, 'Unexecuted required cases remain pending');
+
+  const blocking: ReuseReview = { snapshot: 'current', items: [{ ids: [items[0]!.id], decision: 'blocked',
+    blocker: { reason: 'The real pointer never reached the target', nextAction: 'Restore the native input driver' } }] };
+  assert.throws(() => applyEvidenceReview(items, 'current', blocking), /repair attempts or an unavailable prerequisite/);
+  blocking.items[0]!.blocker!.attempts = [{ action: 'Preflighted the supported alternate driver', outcome: 'No trusted input receipt' }];
+  applyEvidenceReview(items, 'current', blocking);
+  assert.equal(summarize(items).repair.length, 0);
+  assert.deepEqual(summarize(items).blocked[0]!.attempts, blocking.items[0]!.blocker!.attempts);
+  assert.equal(summarize(items).blocked[0]!.userAction, undefined, 'A formal blocker remains agent-owned by default');
+  blocking.items[0]!.blocker!.attempts = [];
+  blocking.items[0]!.blocker!.prerequisite = 'Required device enrollment';
+  blocking.items[0]!.blocker!.userAction = 'Enroll the isolated test device';
+  applyEvidenceReview(items, 'current', blocking);
+  assert.equal(summarize(items).blocked[0]!.userAction, 'Enroll the isolated test device');
+
   const review: ReuseReview = { snapshot: 'current', items: [{ ids: [items[0]!.id], decision: 'reuse',
     sourceReportHash: 'report-hash', productAndBuild: 'unchanged owning module', testAndSharedFixtures: 'fixture changes checked',
     argumentsAndScale: 'same document and exact args', dependenciesAndEnvironment: 'same verified runtimes' }] };
@@ -30,8 +54,28 @@ try {
   assert.throws(() => applyEvidenceReview(items, 'current', review), /Unresolved historical failure/);
   review.items[0]!.failures = [{ reportHash: 'report-hash', task: 'old-fail', causeAndResolution: 'Driver fault resolved; replacement owner verified' }];
   applyEvidenceReview(items, 'current', review); assert.equal(items[0]!.disposition, 'reuse');
+  assert.deepEqual(summarize(items).blocked, []);
+  assert.deepEqual(summarize(items).knownDefects, []);
   assert.equal(report.status, 'failed'); assert.equal(report.tasks[1]!.status, 'failed');
   assert.throws(() => applyEvidenceReview(items, 'current', { ...review, items: [review.items[0]!, review.items[0]!] }), /duplicate/);
+
+  const comparison = path.join(directory, 'comparison.json');
+  fs.writeFileSync(comparison, '{"samples":[400,510,410,420,430,480],"otherAssertionsPassed":true}');
+  review.items[0]!.failures![0]!.causeAndResolution = 'The installed Live wide fixture matches the registration and fixed baseline';
+  review.items[0]!.failures![0]!.knownDefect = { id: 'KD-001', comparison: { file: comparison, sha256: digest(fs.readFileSync(comparison)) } };
+  assert.throws(() => applyEvidenceReview(items, 'current', review), /active registration/);
+  const activeDefects = new Set(['KD-001']);
+  applyEvidenceReview(items, 'current', review, activeDefects);
+  const accepted = summarize(items).knownDefects[0]!;
+  assert.equal(accepted.knownDefect!.id, 'KD-001');
+  assert.equal(accepted.report, 'historical-report.json');
+  assert.equal(accepted.task, 'old-fail');
+  const twoFailures = createEvidenceItems(commands, [{ ...sources[0]!, report: { ...report,
+    tasks: [...report.tasks, { ...report.tasks[1]!, id: 'other-formal-failure' }] } }]);
+  assert.throws(() => applyEvidenceReview(twoFailures, 'current', review, activeDefects), /Unresolved historical failure.*other-formal-failure/);
+  fs.writeFileSync(comparison, 'tampered');
+  assert.throws(() => applyEvidenceReview(items, 'current', review, activeDefects), /comparison evidence is missing or changed/);
+
   fs.writeFileSync(stdout, 'tampered');
   const changed = createEvidenceItems(commands, sources);
   assert.throws(() => applyEvidenceReview(changed, 'current', review), /verified passing logs/);

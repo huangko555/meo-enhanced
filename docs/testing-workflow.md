@@ -81,6 +81,11 @@ the candidate to another agent:
    investigation one hypothesis, a smallest discriminating action, an estimate
    and an end condition. After two attempts yield no discriminating information,
    stop that route, retain any blocker and continue independent required checks.
+   Use the [acceptance summary](release-acceptance-tools.md#resolve-failures-and-read-the-summary)
+   to queue formal failures for repair. The executor owns routine repairs and
+   focused reruns. Record a formal blocker after attempted resolution fails or
+   a specific prerequisite prevents repair. State the next action and identify
+   any step that genuinely requires the user.
 5. **Check coverage readiness.** Every known failure has an evidenced disposition,
    necessary fixes and affected regressions are complete, and remaining required
    native checks have a proven execution path. Unresolved input/data-integrity
