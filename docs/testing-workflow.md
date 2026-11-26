@@ -110,6 +110,30 @@ the candidate to another agent:
    choosing the next invocation within the task's existing scope. A whole-gate
    rerun needs an explicit coverage or invalidation reason. Conservative resume
    still rejects changed inputs and recorded failures.
+7. **Report the release decision.** At completion or a blocked handoff, use the
+   [release acceptance handoff](#release-acceptance-handoff) in the final reply
+   and at the top of the acceptance report.
+
+### Release acceptance handoff
+
+Lead with an explicit verdict and the candidate version and commit. Use
+**达到发布标准（本地验收通过）。** when every required acceptance gate has
+applicable passing evidence or a disposition within the documented known-defect
+scope. Use **未达到发布标准。** when any required gate lacks that evidence or
+disposition. Bind the verdict to the exact candidate and verified VSIX.
+
+- State the local acceptance blockers in plain language. Say **无** when there
+  are none. For each blocker, give the failed or missing check, the affected
+  behavior or risk, and the next action. Identify any action the user needs to
+  take. Preserve passed, failed, blocked, and not-run scopes in the report, with
+  the reason for each remaining required gap.
+- State any known limitations and unverified scenarios and their impact on the
+  verdict. Include the key passing evidence in the reply and link to the detailed
+  report, release notes, and verified VSIX when available. Record the artifact
+  SHA-256 and cleanup in the report.
+- State whether formal publication can proceed now. Report the required Windows
+  and Ubuntu CI result for the exact release commit and any pending publication
+  authorization separately from the local acceptance verdict.
 
 ### Continue until acceptance is complete
 
@@ -210,8 +234,6 @@ and recording the candidate rebinding. Reusing applicable passing items never
 changes a failed gate's status. Use the existing report and a short coverage table;
 do not build a cache, cross-run scheduler or evidence platform for acceptance.
 
-At handoff, report passed, failed, blocked and not-run scopes separately, including
-the reason for every remaining required gap, candidate, artifact hash and cleanup.
 Keep the latest checkpoint consistent with the actual run state. Compare total
 acceptance time and its components before claiming an improvement; a faster core
 gate or successful local repair does not establish a faster complete acceptance.
