@@ -5,7 +5,8 @@ import type { PreviewSourceLineMapper } from './previewSourceIdentity';
  * This changes neither the reading root's formatting nor its containing block. */
 export function restoreFullPreviewReadingScrollTop(document: Document, top: number): boolean {
   const scroll = document.scrollingElement, window = document.defaultView;
-  if (!scroll || !window) return false;
+  // Chromium can cancel native scroll momentum even if the assigned value is unchanged.
+  if (!scroll || !window || scroll.scrollTop === top) return false;
   scroll.scrollTop = top;
   const error = scroll.scrollTop - top;
   if (!Number.isFinite(error) || Math.abs(error) > 1 || Math.abs(error) < 0.001

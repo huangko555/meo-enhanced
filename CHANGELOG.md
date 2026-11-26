@@ -10,7 +10,7 @@ Optimized project. New MEO Enhanced releases start from version 0.1.0.
 - Gave duplicate headings distinct anchors, kept frontmatter out of heading suggestions, and limited alert styling to the quote that owns the directive.
 - Preserved footnotes and surrounding block boundaries during export. Kept protocol-relative images and CSS image URLs on the network in Preview and exports.
 - Improved Live HTML interactions and rendering. A plain click on a rendered HTML link opens its source, dragging selects text, and Ctrl/Cmd-click follows the link. Quoted attribute values containing `>` remain intact, and supported empty styled blocks retain their visual appearance.
-- Fixed clipped Mermaid labels in flowcharts and entity-relationship diagrams. Live, Preview, and exports keep identifiers intact when space allows and preserve explicit node widths and manual line breaks. (#57)
+- Fixed clipped Mermaid labels in flowcharts and entity-relationship diagrams. Live, Preview, and exports keep identifiers intact when space allows and preserve explicit node widths and manual line breaks. Kept Preview scrolling uninterrupted as cold diagrams become visible. (#57)
 
 ## 0.4.5
 - Kept the document and line numbers steady when typing, pasting, or inserting blocks at the end. Split preview follows new content. Live and Source honor the VS Code setting for scrolling beyond the last line. (#40)

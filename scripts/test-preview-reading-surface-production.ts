@@ -946,6 +946,18 @@ async function main(): Promise<void> {
         };
         const block = document.querySelector('pre')!;
         window.scrollTo(0, 300);
+        const scroll = document.scrollingElement!;
+        const scrollTop = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
+        let unchangedWrites = 0;
+        Object.defineProperty(scroll, 'scrollTop', { configurable: true,
+          get() { return scrollTop.get!.call(this); },
+          set(value) { unchangedWrites++; scrollTop.set!.call(this, value); }
+        });
+        try {
+          api.restoreFullPreviewReadingScrollTop(document, scroll.scrollTop);
+        } finally {
+          Reflect.deleteProperty(scroll, 'scrollTop');
+        }
         const top = block.getBoundingClientRect().top;
         const capture = () => api.capturePreviewReadingAnchor(document,
           value => { api.restoreFullPreviewReadingScrollTop(document, value); }, 1 / 3);
@@ -959,9 +971,11 @@ async function main(): Promise<void> {
         (block as HTMLElement).style.width = '';
         const detached = capture();
         block.remove();
-        return { restored, drift, rejectsReflow, rejectsDetached: detached?.() === false };
+        return { unchangedWrites, restored, drift, rejectsReflow, rejectsDetached: detached?.() === false };
       });
-      assert.deepEqual(result, { restored: true, drift: 0, rejectsReflow: true, rejectsDetached: true },
+      assert.equal(result.unchangedWrites, 0, 'Restoring the current offset must leave native scrolling untouched');
+      const { unchangedWrites, ...geometry } = result;
+      assert.deepEqual(geometry, { restored: true, drift: 0, rejectsReflow: true, rejectsDetached: true },
         'Blank space inside an unchanged reading block must retain its physical position');
       const endText = await anchorPage.evaluate(() => {
         const api = window as any;
