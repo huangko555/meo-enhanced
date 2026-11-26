@@ -177,6 +177,17 @@ const { showPasteOptions, ...olderInput } = defaults.input;
 assert.equal(showPasteOptions, true, 'paste options are shown by default');
 assert.equal(normalizeEditingPreferences({ input: olderInput }).input.showPasteOptions, true);
 assert.equal(normalizeEditingPreferences({ input: { ...olderInput, showPasteOptions: false } }).input.showPasteOptions, false);
+const { renumberOrderedLists, ...beforeListNumbering } = defaults.input;
+assert.equal(renumberOrderedLists, true);
+assert.equal(normalizeEditingPreferences({ input: beforeListNumbering }).input.renumberOrderedLists, true);
+for (const value of [true, false]) {
+  const change = { type: 'input' as const, key: 'renumberOrderedLists' as const, value };
+  assert.ok(decodeWebviewToHostMessage({ type: 'updateEditingPreferences', requestId: 'list-numbering', change }));
+  const { input } = changeEditingPreferences(defaults, change, 'other');
+  assert.equal(input.renumberOrderedLists, value);
+  assert.equal(input.lists, defaults.input.lists);
+  assert.equal(normalizeEditingPreferences({ input }).input.renumberOrderedLists, value);
+}
 const { math: _math, ...beforeMath } = defaultInputAssistance;
 assert.equal(normalizeEditingPreferences({ input: beforeMath }).input.math, true, 'older preferences enable math completion');
 assert.equal(normalizeEditingPreferences({ input: { math: false } }).input.math, false);
@@ -411,6 +422,7 @@ assert.deepEqual(new Set(schema.properties.shortcuts.propertyNames.enum), new Se
 assert.deepEqual(schema.default, defaults);
 assert.equal(schema.properties.input.properties.pasteHtml.default, true);
 assert.equal(schema.properties.input.properties.showPasteOptions.default, true);
+assert.equal(schema.properties.input.properties.renumberOrderedLists.default, true);
 
 let savedGlobal: Partial<EditingPreferences> | undefined;
 let savedWorkspace: Partial<EditingPreferences> | undefined;

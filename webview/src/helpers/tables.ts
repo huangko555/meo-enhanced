@@ -1339,6 +1339,7 @@ function editTableCellMarkup(
     selection: { anchor: doc.line(index + 1).from + Math.min(column, line.text.length) },
     extensions: [
       markdownLanguage, tableCellListRenumbering,
+      inputAssistanceFacet.of(documentState.facet(inputAssistanceFacet)),
       EditorState.tabSize.of(documentState.tabSize), indentUnit.of(documentState.facet(indentUnit))
     ]
   });
@@ -1418,7 +1419,7 @@ function renumberTableCellOrderedLists(input: HTMLTextAreaElement) {
   if (changes.length) applyTableCellEditorChanges(input, changes);
 }
 
-function adjustTableCellListIndent(input: HTMLTextAreaElement, direction: 'indent' | 'outdent') {
+function adjustTableCellListIndent(input: HTMLTextAreaElement, direction: 'indent' | 'outdent', renumber: boolean) {
   const value = input.value;
   const selectionStart = input.selectionStart ?? 0;
   const selectionEnd = input.selectionEnd ?? selectionStart;
@@ -1446,7 +1447,7 @@ function adjustTableCellListIndent(input: HTMLTextAreaElement, direction: 'inden
 
   if (!changes.length) return false;
   applyTableCellEditorChanges(input, changes);
-  renumberTableCellOrderedLists(input);
+  if (renumber) renumberTableCellOrderedLists(input);
   return true;
 }
 
@@ -6491,7 +6492,8 @@ class HtmlTableController extends UiLanguageSensitiveWidget {
         return;
       }
       if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && (event.key === ']' || event.key === '[')) {
-        if (adjustTableCellListIndent(input, event.key === ']' ? 'indent' : 'outdent')) {
+        const preferences = this.view?.state.facet(inputAssistanceFacet) ?? defaultInputAssistance;
+        if (adjustTableCellListIndent(input, event.key === ']' ? 'indent' : 'outdent', preferences.renumberOrderedLists)) {
           event.preventDefault();
           event.stopPropagation();
         }

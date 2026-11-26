@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchTestBrowser } from './browser-test-helpers';
+import { defaultInputAssistance } from '../src/foundation/editingPreferences';
 
 const repoRoot = path.resolve(import.meta.dir, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meo-list-editing-transaction-'));
@@ -562,6 +563,30 @@ async function main(): Promise<void> {
         assert.equal(await page.evaluate(() => (window as any).__codeListEditor.undo()), true);
         assert.equal(await read(), source + suffix, 'one undo restores the code or list');
       }
+      const continuation = nestedList.replace('9. Second', '6. Second');
+      const setListNumbering = (enabled: boolean) => page.evaluate(preferences => {
+        (window as any).__codeListEditor.setInputAssistance(preferences);
+      }, { ...defaultInputAssistance, renumberOrderedLists: enabled });
+      await open(continuation, continuation.indexOf('First') + 'First'.length);
+      for (const enabled of [false, true]) {
+        await setListNumbering(enabled);
+        assert.equal(await read(), continuation + suffix, 'changing the preference never rewrites the open document');
+        await page.keyboard.press('Enter');
+        const expected = continuation.replace('    6. Second', '    6. \n    ' + (enabled ? '7.' : '6.') + ' Second') + suffix;
+        assert.equal(await read(), expected, `${mode}/${large}/renumber=${enabled}: Enter still continues the list`);
+        assert.equal(await page.evaluate(() => (window as any).__codeListEditor.undo()), true);
+        assert.equal(await read(), continuation + suffix, 'one undo reverts both the new marker and renumbering');
+        assert.equal(await page.evaluate(() => (window as any).__codeListEditor.redo()), true);
+        assert.equal(await read(), expected, 'redo restores the exact numbered source');
+        assert.equal(await page.evaluate(() => (window as any).__codeListEditor.undo()), true);
+      }
+      await open('1. First\n9. Second', '1. First'.length);
+      await setListNumbering(false);
+      await page.keyboard.type('x');
+      assert.equal(await read(), '1. Firstx\n9. Second' + suffix);
+      await setListNumbering(true);
+      await page.keyboard.type('y');
+      assert.equal(await read(), '1. Firstxy\n2. Second' + suffix);
       await open('', 0);
       await page.evaluate(text => {
         const data = new DataTransfer();

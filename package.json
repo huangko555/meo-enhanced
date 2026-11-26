@@ -252,6 +252,7 @@
               "skipMode": "smart",
               "deleteMode": "smart",
               "lists": true,
+              "renumberOrderedLists": true,
               "showPasteOptions": true,
               "convertTables": true,
               "pasteUrl": true,
@@ -361,6 +362,10 @@
                   "default": "smart"
                 },
                 "lists": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "renumberOrderedLists": {
                   "type": "boolean",
                   "default": true
                 },

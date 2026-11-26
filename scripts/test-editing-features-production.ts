@@ -365,6 +365,23 @@ try {
     await prepare('live', table, 0, 0, { lists }); await openCell(); await page.keyboard.type('- item'); await command('cellBreak');
     assert.equal(await cell(), lists ? '- item<br>\n- ' : '- item<br>\n');
   }
+  for (const renumberOrderedLists of [true, false]) {
+    const input = { renumberOrderedLists };
+    await prepare('live', table.replace('|  | x |', '| 1. first<br>2. second | x |'), 0, 0, input);
+    await openCell();
+    await page.evaluate(() => (document.activeElement as HTMLTextAreaElement).setSelectionRange(8, 8));
+    await command('cellBreak');
+    assert.equal(await cell(), '1. first<br>\n2. <br>\n' + (renumberOrderedLists ? '3.' : '2.') + ' second');
+
+    await prepare('live', table.replace('|  | x |', '| 1. first<br>  9. second | x |'), 0, 0, input);
+    await openCell();
+    await page.evaluate(() => {
+      const input = document.activeElement as HTMLTextAreaElement;
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+    await page.keyboard.down('Alt'); await page.keyboard.press('['); await page.keyboard.up('Alt');
+    assert.equal(await cell(), '1. first<br>\n' + (renumberOrderedLists ? '2.' : '9.') + ' second');
+  }
   await prepare('live', table, 0); await openCell(); await page.keyboard.type('('); await page.evaluate(() => (window as any).editor.getTextForSave());
   await page.keyboard.press('Backspace'); await page.evaluate(() => (window as any).editor.getTextForSave());
   await page.evaluate(() => (window as any).editor.undo()); await page.waitForFunction(() => (window as any).editor.getText().includes('()'));

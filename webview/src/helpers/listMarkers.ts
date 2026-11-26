@@ -25,7 +25,8 @@ import { getUiStrings } from '../application/uiLanguage';
 import { UiLanguageSensitiveWidget, uiLanguageFacet } from '../editor/uiLanguage';
 import { parseFrontmatter, isInsideFrontmatterContent } from './frontmatter';
 import { resolvedSyntaxTreeAt } from './markdownSyntax';
-import { isBackgroundMarkdownPreparationPending } from '../editor/backgroundMarkdownStructure';
+import { completedBackgroundMarkdownStructure, isBackgroundMarkdownPreparationPending } from '../editor/backgroundMarkdownStructure';
+import { inputAssistanceFacet } from '../editor/typingAssistance';
 
 interface ListMarkerData extends MarkdownListPrefix {
   indentLevel: number;
@@ -1040,9 +1041,12 @@ function touchesPossibleCode(doc: Text, from: number, to: number): boolean {
     || /`{3}|~{3}|(?:^|\n)(?:[ \t]*>)*[ \t]?(?: {4}| {0,3}\t)/.test(doc.sliceString(first.from, next.to));
 }
 
-function editsExistingListBody(transaction: Transaction, oldFrom: number, oldTo: number, from: number, to: number): boolean {
-  const line = transaction.startState.doc.lineAt(oldFrom);
-  if (oldTo > line.to || to > transaction.newDoc.lineAt(from).to) return false;
+function preservesListCodeOwnership(transaction: Transaction, oldFrom: number, oldTo: number, from: number, to: number): boolean {
+  const state = transaction.startState;
+  const line = state.doc.lineAt(oldFrom);
+  if (oldTo > line.to) return false;
+  const singleLine = to <= transaction.newDoc.lineAt(from).to;
+  if (!singleLine && (oldFrom !== line.to || !transaction.isUserEvent('input.list.enter'))) return false;
   const offset = oldFrom - line.from;
   if (offset > LIST_CODE_PARSE_LIMIT) return false;
   const beforeEdit = line.text.slice(0, offset);
@@ -1050,7 +1054,19 @@ function editsExistingListBody(transaction: Transaction, oldFrom: number, oldTo:
   if (prefix?.kind !== 'list') return false;
   const firstBodyCharacter = beforeEdit[prefix.to];
   // Text before this edit already rules out introducing a fence or HTML opener.
-  return !!firstBodyCharacter && !'<~`'.includes(firstBodyCharacter);
+  if (!firstBodyCharacter || '<~`'.includes(firstBodyCharacter)) return false;
+  if (singleLine) return true;
+
+  // Enter at the end of a confirmed item inserts an empty sibling. If the
+  // following line is already its sibling, neither body's code ownership moves.
+  if (line.number === state.doc.lines || prefix.marker.orderedNumber === undefined) return false;
+  const following = state.doc.line(line.number + 1);
+  const tree = completedBackgroundMarkdownStructure(state) ?? syntaxTree(state);
+  const marker = tree.resolveInner(line.from + prefix.marker.fromOffset, 1);
+  const item = marker.parent;
+  const next = item?.nextSibling;
+  return marker.name === 'ListMark' && item?.name === 'ListItem' && item.parent?.name === 'OrderedList'
+    && next?.name === 'ListItem' && next.from >= following.from && next.from < following.to;
 }
 
 /** Existing code ownership can be reused for ordinary typing. When a fence or
@@ -1063,7 +1079,7 @@ function excludeCodeBlockChanges(transaction: Transaction, changes: readonly Lis
   if (isBackgroundMarkdownPreparationPending(startState)) return [];
   let mayChangeCode = false;
   transaction.changes.iterChangedRanges((oldFrom, oldTo, from, to) => {
-    if (mayChangeCode || editsExistingListBody(transaction, oldFrom, oldTo, from, to)) return;
+    if (mayChangeCode || preservesListCodeOwnership(transaction, oldFrom, oldTo, from, to)) return;
     mayChangeCode = touchesPossibleCode(startState.doc, oldFrom, oldTo) || touchesPossibleCode(newDoc, from, to);
   });
   if (mayChangeCode) {
@@ -1089,6 +1105,7 @@ export function orderedListRenumberTransactionFilter(
     if (
       !transaction.docChanged ||
       !shouldNormalize() ||
+      !transaction.startState.facet(inputAssistanceFacet).renumberOrderedLists ||
       transaction.annotation(Transaction.addToHistory) === false ||
       transaction.isUserEvent('undo') ||
       transaction.isUserEvent('redo')

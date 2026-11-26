@@ -181,6 +181,49 @@ try {
       window.dispatchEvent(new MessageEvent('message', { data: global.__initMessage }));
     }, { text, mode, outline, legacyStrongColoring, largeDocumentOptimizationEnabled });
   };
+  if (process.argv.includes('--list-numbering-only') || process.argv.length === 2) {
+    const source = '1. First\n9. Second';
+    await openFixture(source);
+    await page.waitForFunction(() => !document.querySelector<HTMLElement>('.editor-host')?.inert
+      && !!document.querySelector('.editor-host > .cm-editor .cm-content'));
+    await page.locator('.more-tools-wrapper > .format-button').click();
+    await page.locator('.more-tools-settings-button').click();
+    const switchSelector = '[data-setting="renumberOrderedLists"] [role="switch"]';
+    for (const [language, theme, query, title] of [
+      ['zh-CN', 'dark', '重新编号', '自动整理有序列表编号'],
+      ['en', 'light', 'renumbering', 'Renumber ordered lists automatically']
+    ]) {
+      await page.locator('[data-tab="general"]').click();
+      await page.locator(`[data-setting="language"] [data-value="${language}"]`).click();
+      await page.locator('[data-tab="appearance"]').click();
+      await page.locator(`[data-appearance-mode="${theme}"]`).click();
+      await page.locator('[data-tab="typing"]').click();
+      await page.locator('.settings-search').fill(query);
+      assert.equal(await page.$eval(switchSelector, button => button.getAttribute('aria-label')), title);
+      assert.equal(await page.$eval(switchSelector, button => button.getAttribute('aria-checked')), 'true');
+      assert.ok(await page.$eval(switchSelector, button => {
+        const row = button.closest('.settings-item')!;
+        const text = row.querySelector('.settings-item-text')!.getBoundingClientRect();
+        const control = button.getBoundingClientRect();
+        return control.width > 0 && control.left >= text.right && row.scrollWidth <= row.clientWidth;
+      }), 'the bilingual setting fits beside its switch');
+      for (const enabled of [false, true]) {
+        await page.locator(switchSelector).click();
+        await page.waitForFunction(({ selector, enabled }) =>
+          document.querySelector(selector)?.getAttribute('aria-checked') === String(enabled)
+          && (window as any).__preferences.input.renumberOrderedLists === enabled,
+        {}, { selector: switchSelector, enabled });
+        assert.equal(await page.evaluate(() => (window as any).__preferences.input.lists), true);
+      }
+      await page.locator('.settings-search-clear').click();
+    }
+    await page.locator('.settings-close').click();
+    assert.equal(await page.evaluate(() => (window as any).EditingSettingsHarness.EditorView
+      .findFromDOM(document.querySelector('.editor-host > .cm-editor')).state.doc.toString()), source);
+    assert.deepEqual(errors, []);
+    console.log('List numbering setting: bilingual search, layout, defaults and independent off/on passed');
+    if (process.argv.includes('--list-numbering-only')) { await closeTestBrowser(browser); process.exit(0); }
+  }
   if (process.argv.includes('--windows-shortcuts-only') || process.argv.length === 2) {
     const editorSnapshot = () => page.evaluate(() => {
       const scope = window as any;
